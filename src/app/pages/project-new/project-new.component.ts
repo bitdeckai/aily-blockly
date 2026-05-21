@@ -129,8 +129,9 @@ export class ProjectNewComponent implements OnDestroy {
 
     await this.configService.init();
 
-    // 先处理开发板列表数据
-    let processedBoardList = this.process(this.configService.boardList);
+    // 先处理开发板列表数据，并追加本地开发板（如果存在）
+    const boardListWithLocal = this.withLocalBoards(this.configService.boardList || []);
+    let processedBoardList = this.process(boardListWithLocal);
 
     // 按使用次数排序
     this._boardList = this.configService.sortBoardsByUsage(processedBoardList);
@@ -143,6 +144,60 @@ export class ProjectNewComponent implements OnDestroy {
     }
     this.newProjectData.name = this.projectService.generateUniqueProjectName(this.newProjectData.path, 'project_');
     this.checkPathInvalidChars();
+  }
+
+  private withLocalBoards(boardList: any[]): any[] {
+    const nextList = JSON.parse(JSON.stringify(Array.isArray(boardList) ? boardList : []));
+    const localCrazyflie = this.buildLocalCrazyflieBoard();
+    if (!localCrazyflie) {
+      return nextList;
+    }
+
+    const existingIndex = nextList.findIndex((item: any) => item?.name === localCrazyflie.name);
+    if (existingIndex >= 0) {
+      nextList[existingIndex] = { ...nextList[existingIndex], ...localCrazyflie };
+      return nextList;
+    }
+
+    return [localCrazyflie, ...nextList];
+  }
+
+  private buildLocalCrazyflieBoard(): BoardInfo | null {
+    try {
+      const childPath = window['path']?.getAilyChildPath?.();
+      if (!childPath) {
+        return null;
+      }
+
+      const sourcePath = window['path'].join(childPath, 'boards', 'board-crazyflie');
+      const packageJsonPath = window['path'].join(sourcePath, 'package.json');
+      const templatePath = window['path'].join(sourcePath, 'template');
+      const localImagePath = window['path'].join(sourcePath, 'crazyflie2.1.png');
+      if (!window['path'].isExists(packageJsonPath) || !window['path'].isExists(templatePath)) {
+        return null;
+      }
+
+      const pkg = JSON.parse(window['fs'].readFileSync(packageJsonPath, 'utf8'));
+      const boardName = pkg?.name || '@aily-project/board-crazyflie';
+      const boardVersion = pkg?.version || '0.0.1';
+
+      return {
+        name: boardName,
+        nickname: 'Crazyflie',
+        version: boardVersion,
+        img: '',
+        description: 'Local Crazyflie board for Crazyradio PA/2.0 control blocks.',
+        url: 'https://github.com/bitcraze/crazyflie-lib-python',
+        brand: 'bitcraze',
+        type: 'crazyflie',
+        mode: ['arduino'],
+        sourcePath,
+        imgLocalPath: window['path'].isExists(localImagePath) ? localImagePath : undefined,
+      };
+    } catch (error) {
+      console.warn('加载本地 Crazyflie 开发板失败:', error);
+      return null;
+    }
   }
 
   process(array) {
@@ -215,6 +270,7 @@ export class ProjectNewComponent implements OnDestroy {
     this.newProjectData.board.name = boardInfo.name;
     this.newProjectData.board.nickname = boardInfo._nickname || boardInfo.nickname;
     this.newProjectData.board.version = boardInfo.version;
+    this.newProjectData.board.sourcePath = boardInfo.sourcePath;
     this.newProjectData.devmode = boardInfo.mode ? this.currentBoard.mode[0] : 'arduino';
     this.devmodes = boardInfo.mode;
     this.checkHasExamples(boardInfo.name);
@@ -266,7 +322,15 @@ export class ProjectNewComponent implements OnDestroy {
   async nextStep() {
     this.boardVersionList = [this.newProjectData.board.version];
     this.currentStep = this.currentStep + 1;
-    this.boardVersionList = (await this.npmService.getPackageVersionList(this.newProjectData.board.name)).reverse();
+    if (this.newProjectData.board.sourcePath) {
+      return;
+    }
+    try {
+      this.boardVersionList = (await this.npmService.getPackageVersionList(this.newProjectData.board.name)).reverse();
+    } catch (error) {
+      console.warn('获取开发板版本列表失败，使用当前版本:', error);
+      this.boardVersionList = [this.newProjectData.board.version];
+    }
   }
 
   async selectFolder() {
@@ -544,6 +608,21 @@ export class ProjectNewComponent implements OnDestroy {
     }
     return list;
   }
+
+  getBoardImageSrc(board: any): string {
+    const localPath = board?.imgLocalPath;
+    if (typeof localPath === 'string' && localPath.length > 0 && window['path'].isExists(localPath)) {
+      const normalized = localPath.replace(/\\/g, '/');
+      return `file:///${normalized}`;
+    }
+
+    const img = String(board?.img || '');
+    if (/^(https?:|data:|file:\/\/)/i.test(img)) {
+      return img;
+    }
+
+    return `${this.resourceUrl}/imgs/boards/${img}`;
+  }
 }
 
 
@@ -556,7 +635,9 @@ export interface BoardInfo {
   "url": string,
   "brand": string,
   "type"?: string, // 开发板类型/核心架构 (如 esp32:esp32, arduino:avr, etc)
-  "mode"?: string[]
+  "mode"?: string[],
+  "sourcePath"?: string,
+  "imgLocalPath"?: string
 }
 
 export interface NewProjectData {
@@ -565,7 +646,8 @@ export interface NewProjectData {
   board: {
     name: string,
     nickname: string,
-    version: string
+    version: string,
+    sourcePath?: string
   },
   devmode?: string
 }

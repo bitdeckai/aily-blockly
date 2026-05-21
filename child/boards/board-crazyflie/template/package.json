@@ -1,0 +1,11 @@
+{
+  "name": "crazyflie-project",
+  "nickname": "Crazyflie Project",
+  "version": "0.0.1",
+  "private": true,
+  "devmode": "arduino",
+  "dependencies": {
+    "@aily-project/board-crazyflie": "0.0.1",
+    "@aily-project/lib-crazyflie-motion": "0.0.1"
+  }
+}

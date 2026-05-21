@@ -1,0 +1,9 @@
+{
+  "name": "Crazyflie",
+  "compilerParam": "",
+  "uploadParam": "",
+  "linkUploadParam": "",
+  "mode": [
+    "arduino"
+  ]
+}

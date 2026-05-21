@@ -1,0 +1,6 @@
+{
+  "name": "@aily-project/board-crazyflie",
+  "version": "0.0.1",
+  "description": "Local Crazyflie board package",
+  "boardDependencies": {}
+}

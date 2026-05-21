@@ -208,16 +208,24 @@ export class ProjectService {
       const appDataPath = window['path'].getAppDataPath();
       const projectPath = this.buildProjectPath(newProjectData);
       const boardPackage = newProjectData.board.name + '@' + newProjectData.board.version;
+      const localBoardSourcePath = newProjectData.board.sourcePath;
+      const useLocalBoardSource = !!localBoardSourcePath && window['path'].isExists(localBoardSourcePath);
 
       this.uiService.updateFooterState({ state: 'doing', text: this.translate.instant('PROJECT.CREATING_PROJECT') });
-      const npmInstallResult = await this.appDataResourceLock.runExclusive(`project:new:install-board:${boardPackage}`, () =>
-        this.cmdService.runAsync(`npm install ${boardPackage} --prefix "${appDataPath}"`)
-      );
-      if (npmInstallResult.code !== 0) {
-        throw new Error(npmInstallResult.stderr || npmInstallResult.stdout || `npm install failed with exit code ${npmInstallResult.code}`);
+      let templatePath = '';
+      if (useLocalBoardSource) {
+        templatePath = window['path'].join(localBoardSourcePath, 'template');
+      } else {
+        const npmInstallResult = await this.appDataResourceLock.runExclusive(`project:new:install-board:${boardPackage}`, () =>
+          this.cmdService.runAsync(`npm install ${boardPackage} --prefix "${appDataPath}"`)
+        );
+        if (npmInstallResult.code !== 0) {
+          throw new Error(npmInstallResult.stderr || npmInstallResult.stdout || `npm install failed with exit code ${npmInstallResult.code}`);
+        }
+        // const templatePath = `${appDataPath}${separator}node_modules${separator}${newProjectData.board.name}${separator}template`;
+        templatePath = window['path'].join(appDataPath, 'node_modules', newProjectData.board.name, 'template');
       }
-      // const templatePath = `${appDataPath}${separator}node_modules${separator}${newProjectData.board.name}${separator}template`;
-      const templatePath = window['path'].join(appDataPath, 'node_modules', newProjectData.board.name, 'template');
+
       if (!window['fs'].existsSync(templatePath)) {
         throw new Error(`板卡模板目录不存在，可能是板卡包安装失败或模板缺失: ${templatePath}`);
       }

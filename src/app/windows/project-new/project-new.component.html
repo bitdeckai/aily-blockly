@@ -43,7 +43,7 @@
             <div class="board ccenter btn" [ngClass]="{ selected: currentBoard == board, disabled: board.disabled }"
               (click)="selectBoard(board)">
               <div class="img-box">
-                <img [src]="resourceUrl+board.img" />
+                <img [src]="getBoardImageSrc(board)" />
               </div>
               <div class="name">{{ board.nickname }}
                 @if(board.state){
