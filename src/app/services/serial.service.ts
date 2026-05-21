@@ -80,6 +80,28 @@ export class SerialService {
         //
       }
       
+      try {
+        const crazyflieApi = window['crazyflie'];
+        if (crazyflieApi && typeof crazyflieApi.listRadios === 'function') {
+          const radioResult = await crazyflieApi.listRadios();
+          const radios = Array.isArray(radioResult?.radios) ? radioResult.radios : [];
+          if (radios.length > 0) {
+            serialList.push({ sep: true, type: 'separator' });
+            radios.forEach((radio, index) => {
+              serialList.push({
+                name: `crazyradio:${radio.instanceId || index}`,
+                text: `${radio.name}${radio.status ? ` (${radio.status})` : ''}`,
+                type: 'crazyradio',
+                icon: 'fa-light fa-tower-broadcast',
+                extra: radio,
+              });
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('获取 Crazyradio 设备列表失败:', error);
+      }
+
       return serialList;
     } else {
       const port = await navigator['serial'].requestPort();

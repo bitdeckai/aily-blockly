@@ -611,6 +611,7 @@ const { registerToolsHandlers } = require("./tools");
 const { registerNotificationHandlers } = require("./notification");
 const { registerProbeRsHandlers } = require("./probe-rs");
 const { registerBleHandlers, registerWebBluetoothChooser } = require("./ble");
+const { registerCrazyflieHandlers } = require("./crazyflie");
 
 let mainWindow;
 let userConf;
@@ -1437,6 +1438,7 @@ function createWindow() {
   registerToolsHandlers(mainWindow);
   registerNotificationHandlers(mainWindow);
   registerProbeRsHandlers(mainWindow);
+  registerCrazyflieHandlers();
   registerBleHandlers();
 
   // 检查是否有待处理的OAuth回调

@@ -151,6 +151,58 @@ export class _UploaderService {
     this._builderService.isUploading = false;
   }
 
+  private async uploadCrazyflieFlow(crazyflieCode: string): Promise<ActionState> {
+    const title = 'Crazyflie 链路测试';
+    this.noticeService.update({
+      title,
+      text: '正在检测 Crazyradio / Crazyflie 链路...',
+      state: 'doing',
+      setTimeout: 0,
+      stop: () => { this.cancel(); }
+    });
+
+    const api = window['crazyflie'];
+    if (!api || typeof api.testLink !== 'function') {
+      this.noticeService.update({
+        title,
+        text: '未找到 Crazyflie 测试接口，请重启应用后重试',
+        state: 'error',
+        setTimeout: 120000
+      });
+      return { state: 'error', text: '未找到 Crazyflie 测试接口' };
+    }
+
+    const hasFlightCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_move\s*\(/.test(crazyflieCode || '');
+    const result = hasFlightCmd
+      ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000 })
+      : await api.testLink({ timeoutMs: 5000 });
+    if (result?.success) {
+      const links: string[] = Array.isArray(result?.links) ? result.links : [];
+      const executed: string[] = Array.isArray(result?.executed) ? result.executed : [];
+      const summary = hasFlightCmd
+        ? (result?.message || `飞行流程执行完成 (${executed.length} 步)`)
+        : (links.length > 0 ? `检测到 ${links.length} 个链接` : (result?.message || '链接成功'));
+      this.noticeService.update({
+        title,
+        text: summary,
+        detail: hasFlightCmd ? executed.join('\n') : links.join('\n'),
+        state: 'done',
+        setTimeout: 15000
+      });
+      return { state: 'done', text: summary };
+    }
+
+    const detail = result?.detail ? JSON.stringify(result.detail, null, 2) : '';
+    this.noticeService.update({
+      title,
+      text: result?.message || 'Crazyflie 链路测试失败',
+      detail,
+      state: 'error',
+      setTimeout: 180000
+    });
+    return { state: 'error', text: result?.message || 'Crazyflie 链路测试失败' };
+  }
+
   async upload(): Promise<ActionState> {
     this.isErrored = false;
     this.cancelled = false;
@@ -175,6 +227,23 @@ export class _UploaderService {
         if (this.workflowService.currentState === ProcessState.BUILDING) {
           this.message.warning('当前正在编译中，请稍后再试');
           reject({ state: 'warn', text: '当前正在编译中，请稍后再试' });
+          return;
+        }
+
+        const currentBoardModule = await this.projectService.getBoardModule().catch(() => '');
+        const selectedPortType = this.serialService.currentPortInfo?.type;
+        if (currentBoardModule === '@aily-project/board-crazyflie' || selectedPortType === 'crazyradio') {
+          const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
+          const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
+          const result = await this.uploadCrazyflieFlow(crazyflieCode);
+          this.uploadInProgress = false;
+          this._builderService.isUploading = false;
+          this.uploadPromiseReject = null;
+          if (result.state === 'error') {
+            reject(result);
+          } else {
+            resolve(result);
+          }
           return;
         }
 

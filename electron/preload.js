@@ -704,6 +704,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
      */
     download: (options) => ipcRenderer.invoke("probe-rs-download", options),
   },
+  crazyflie: {
+    /**
+     * 测试 Crazyradio/Crazyflie 链路
+     * @param {Object} options
+     * @param {number} [options.timeoutMs] - 测试超时时间
+     * @returns {Promise<{success: boolean, message: string, radioStatus?: string, links?: string[]}>}
+     */
+    testLink: (options) => ipcRenderer.invoke("crazyflie-test-link", options || {}),
+    /**
+     * 执行 Crazyflie 飞行流程（由 Blockly 代码生成）
+     * @param {Object} options
+     * @param {string} options.code - 生成代码
+     * @param {string} [options.uri] - radio URI
+     * @param {number} [options.timeoutMs] - 超时
+     */
+    runFlow: (options) => ipcRenderer.invoke("crazyflie-run-flow", options || {}),
+    /**
+     * 列出系统中的 Crazyradio USB 设备（Windows 通过 PnP 检测）
+     */
+    listRadios: () => ipcRenderer.invoke("crazyflie-list-radios"),
+  },
   // 日志 API - 将渲染进程的日志发送到主进程记录
   log: {
     error: (message, error) => {

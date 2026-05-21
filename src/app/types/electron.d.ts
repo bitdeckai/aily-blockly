@@ -29,6 +29,7 @@ declare global {
       npm: any;
       cmd: any;
       probeRs: any;
+      crazyflie: any;
       updater: any;
       mcp: any;
       versions: () => any;

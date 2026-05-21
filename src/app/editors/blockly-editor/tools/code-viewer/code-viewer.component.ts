@@ -49,6 +49,23 @@ export class CodeViewerComponent implements OnDestroy {
   private currentSelectedBlockId: string | null = null;
   private ipcStateCleanup: (() => void) | null = null;
 
+  private detectLanguageFromCode(code: string): string {
+    const text = String(code || '').trim();
+    if (!text) {
+      return this.options.language || 'cpp';
+    }
+
+    if (text.includes('#include <Arduino.h>') || /\bvoid\s+setup\s*\(/.test(text)) {
+      return 'cpp';
+    }
+
+    if (/^\s*(import\s+\w+|from\s+\w+\s+import\s+)/m.test(text) || /\bcf_(test_link|takeoff|land|move)\s*\(/.test(text)) {
+      return 'python';
+    }
+
+    return this.options.language || 'cpp';
+  }
+
   constructor(
     private blocklyService: BlocklyService,
     private uiService: UiService,
@@ -95,6 +112,10 @@ export class CodeViewerComponent implements OnDestroy {
       .subscribe((code) => {
         setTimeout(() => {
           this.code = code;
+          const nextLanguage = this.detectLanguageFromCode(code);
+          if (nextLanguage !== this.options.language) {
+            this.options = { ...this.options, language: nextLanguage };
+          }
           this.cdr.markForCheck();
         }, 100);
       });
@@ -124,6 +145,10 @@ export class CodeViewerComponent implements OnDestroy {
   private applyIpcState(state: CodeViewerIpcState): void {
     if (typeof state.code === 'string') {
       this.code = state.code;
+      const nextLanguage = this.detectLanguageFromCode(state.code);
+      if (nextLanguage !== this.options.language) {
+        this.options = { ...this.options, language: nextLanguage };
+      }
     }
 
     if (state.blockCodeMap) {

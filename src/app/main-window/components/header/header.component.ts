@@ -614,8 +614,9 @@ export class HeaderComponent implements OnDestroy {
         })
         break;
       case 'upload':
-        // 确认是否选择串口
-        if (!this.serialService.currentPort) {
+        // Crazyflie 使用 Crazyradio（USB/libusb）链路，不依赖 COM 串口。
+        const isCrazyflieBoard = String(this.projectService.currentBoardConfig?.name || this.currentBoard || '').toLowerCase().includes('crazyflie');
+        if (!this.serialService.currentPort && !isCrazyflieBoard) {
           this.message.warning(this.translate.instant('SERIAL.SELECT_PORT_FIRST'));
           this.openPortList(event);
           return;

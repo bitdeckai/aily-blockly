@@ -174,6 +174,17 @@ export class BlocklyEditorComponent implements OnInit, AfterViewInit, OnDestroy 
     );
     // 加载项目开发框架
     this.devmode = packageJson.devmode || 'arduino'; // 可选项: 'arduino', 'micropython'
+    const deps = packageJson?.dependencies || {};
+    const isCrazyflieProject = !!deps['@aily-project/board-crazyflie'];
+    if (isCrazyflieProject && this.devmode !== 'micropython') {
+      this.devmode = 'micropython';
+      packageJson.devmode = 'micropython';
+      try {
+        this.electronService.writeFile(`${projectPath}/package.json`, JSON.stringify(packageJson, null, 2));
+      } catch (error) {
+        console.warn('更新Crazyflie项目devmode失败:', error);
+      }
+    }
 
     this.electronService.setTitle(`aily blockly - ${packageJson.nickname || packageJson.name}`);
     // 添加到最近打开的项目
