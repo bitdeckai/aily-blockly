@@ -21,9 +21,17 @@ MOVE_DISTANCE = {
 
 
 def _candidate_lib_paths(explicit_path: str | None):
+    def append_repo_variants(base: Path, result: list[Path]):
+        result.append(base)
+        name = base.name.lower()
+        if name == "crazyflie-lib-python":
+            result.append(base.with_name("crazyflie-lib-python-master"))
+        elif name == "crazyflie-lib-python-master":
+            result.append(base.with_name("crazyflie-lib-python"))
+
     candidates = []
     if explicit_path:
-        candidates.append(Path(explicit_path))
+        append_repo_variants(Path(explicit_path), candidates)
 
     env_path = os.environ.get("CRAZYFLIE_LIB_PATH")
     if env_path:
@@ -32,10 +40,10 @@ def _candidate_lib_paths(explicit_path: str | None):
     script_path = Path(__file__).resolve()
     workspace_root = script_path.parents[3] if len(script_path.parents) >= 4 else None
     if workspace_root:
-        candidates.append(workspace_root / "crazyflie" / "crazyflie-lib-python-master")
+        append_repo_variants(workspace_root / "crazyflie" / "crazyflie-lib-python", candidates)
 
     cwd = Path.cwd()
-    candidates.append(cwd.parent / "crazyflie" / "crazyflie-lib-python-master")
+    append_repo_variants(cwd.parent / "crazyflie" / "crazyflie-lib-python", candidates)
 
     unique = []
     seen = set()
@@ -49,6 +57,13 @@ def _candidate_lib_paths(explicit_path: str | None):
 
 
 def _append_cflib_path(explicit_path: str | None):
+    # Prefer cflib already installed in the active Python environment.
+    try:
+        import cflib  # noqa: F401
+        return "site-packages"
+    except Exception:
+        pass
+
     for lib_path in _candidate_lib_paths(explicit_path):
         cflib_dir = lib_path / "cflib"
         if cflib_dir.exists():
@@ -85,8 +100,24 @@ def parse_commands(code: str):
         m = re.match(r"^cf_delay\s*\(\s*([0-9]*\.?[0-9]+)\s*\)\s*;?$", line)
         if m:
             commands.append(("delay", float(m.group(1))))
+            continue
+
+        m = re.match(r"^cf_print\s*\(\s*(.*?)\s*\)\s*;?$", line)
+        if m:
+            commands.append(("print", m.group(1)))
+            continue
 
     return commands
+
+
+def _normalize_print_value(raw):
+    text = str(raw).strip()
+    if len(text) >= 2 and ((text[0] == "'" and text[-1] == "'") or (text[0] == '"' and text[-1] == '"')):
+        try:
+            return bytes(text[1:-1], "utf-8").decode("unicode_escape")
+        except Exception:
+            return text[1:-1]
+    return text
 
 
 def test_link(cflib_module, radio_driver_cls):
@@ -119,18 +150,30 @@ def run_flow(uri: str, commands):
     radio_status, links, scan_error = test_link(cflib, RadioDriver)
 
     has_motion_cmd = any(cmd in ("takeoff", "move", "land") for cmd, _ in commands)
+    executed = []
     if not has_motion_cmd:
+        for cmd, arg in commands:
+            if cmd == "test_link":
+                executed.append("test_link")
+            elif cmd == "delay":
+                wait_sec = max(0.0, float(arg))
+                executed.append(f"delay:{wait_sec}")
+                time.sleep(wait_sec)
+            elif cmd == "print":
+                msg = _normalize_print_value(arg)
+                executed.append(f"print:{msg}")
+                print(msg, flush=True)
+
         ok = len(links) > 0
         return {
-            "success": ok,
-            "message": "Link OK" if ok else "No Crazyflie link discovered",
+            "success": ok or any(cmd in ("print", "delay") for cmd, _ in commands),
+            "message": "Flow executed" if any(cmd in ("print", "delay") for cmd, _ in commands) else ("Link OK" if ok else "No Crazyflie link discovered"),
             "radioStatus": radio_status,
             "links": links,
             "scanError": scan_error,
-            "executed": [],
+            "executed": executed,
         }
 
-    executed = []
     with SyncCrazyflie(uri) as scf:
         scf.cf.platform.send_arming_request(True)
         time.sleep(1.0)
@@ -170,6 +213,10 @@ def run_flow(uri: str, commands):
                     wait_sec = max(0.0, float(arg))
                     executed.append(f"delay:{wait_sec}")
                     time.sleep(wait_sec)
+                elif cmd == "print":
+                    msg = _normalize_print_value(arg)
+                    executed.append(f"print:{msg}")
+                    print(msg, flush=True)
                 elif cmd == "land":
                     executed.append("land")
                     break

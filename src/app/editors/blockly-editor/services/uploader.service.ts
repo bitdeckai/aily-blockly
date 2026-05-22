@@ -172,13 +172,43 @@ export class _UploaderService {
       return { state: 'error', text: '未找到 Crazyflie 测试接口' };
     }
 
-    const hasFlightCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_move\s*\(/.test(crazyflieCode || '');
-    const result = hasFlightCmd
-      ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000 })
-      : await api.testLink({ timeoutMs: 5000 });
+    const hasFlightCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(/.test(crazyflieCode || '');
+    let receivedRealtimeLog = false;
+    let disposeFlowLog: (() => void) | null = null;
+    if (hasFlightCmd && typeof api.onFlowLog === 'function') {
+      disposeFlowLog = api.onFlowLog((payload: any) => {
+        const line = String(payload?.line || '').trim();
+        if (!line) {
+          return;
+        }
+        receivedRealtimeLog = true;
+        const detail = payload?.source === 'stderr' ? `[Crazyflie][err] ${line}` : line;
+        this.logService.update({ detail });
+      });
+    }
+
+    let result: any;
+    try {
+      result = hasFlightCmd
+        ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000 })
+        : await api.testLink({ timeoutMs: 5000 });
+    } finally {
+      if (disposeFlowLog) {
+        disposeFlowLog();
+      }
+    }
     if (result?.success) {
       const links: string[] = Array.isArray(result?.links) ? result.links : [];
       const executed: string[] = Array.isArray(result?.executed) ? result.executed : [];
+      if (!receivedRealtimeLog) {
+        executed.forEach((line) => {
+          if (typeof line !== 'string' || !line.trim()) {
+            return;
+          }
+          const detail = line.startsWith('print:') ? line.slice('print:'.length) : `[Crazyflie] ${line}`;
+          this.logService.update({ detail });
+        });
+      }
       const summary = hasFlightCmd
         ? (result?.message || `飞行流程执行完成 (${executed.length} 步)`)
         : (links.length > 0 ? `检测到 ${links.length} 个链接` : (result?.message || '链接成功'));

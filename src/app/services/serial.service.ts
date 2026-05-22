@@ -84,7 +84,18 @@ export class SerialService {
         const crazyflieApi = window['crazyflie'];
         if (crazyflieApi && typeof crazyflieApi.listRadios === 'function') {
           const radioResult = await crazyflieApi.listRadios();
-          const radios = Array.isArray(radioResult?.radios) ? radioResult.radios : [];
+          const radiosRaw = Array.isArray(radioResult?.radios) ? radioResult.radios : [];
+          const seenRadioKeys = new Set<string>();
+          const radios = radiosRaw.filter((radio) => {
+            const displayName = String(radio?.name || '').trim().toLowerCase();
+            const status = String(radio?.status || '').trim().toLowerCase();
+            const key = `${displayName}|${status}`;
+            if (!displayName || seenRadioKeys.has(key)) {
+              return false;
+            }
+            seenRadioKeys.add(key);
+            return true;
+          });
           if (radios.length > 0) {
             serialList.push({ sep: true, type: 'separator' });
             radios.forEach((radio, index) => {

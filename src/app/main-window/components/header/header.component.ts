@@ -1134,6 +1134,7 @@ export class HeaderComponent implements OnDestroy {
   async openBoardSelectorDialog() {
     // 获取开发板列表
     let boardList = await this.configService.loadBoardList();
+    boardList = this.withLocalBoards(boardList);
     console.log(boardList);
 
     // 显示开发板选择对话框
@@ -1158,6 +1159,59 @@ export class HeaderComponent implements OnDestroy {
     //     this.cd.detectChanges();
     //   }
     // });
+  }
+
+  private withLocalBoards(boardList: any[]): any[] {
+    const nextList = JSON.parse(JSON.stringify(Array.isArray(boardList) ? boardList : []));
+    const localCrazyflie = this.buildLocalCrazyflieBoard();
+    if (!localCrazyflie) {
+      return nextList;
+    }
+
+    const existingIndex = nextList.findIndex((item: any) => item?.name === localCrazyflie.name);
+    if (existingIndex >= 0) {
+      nextList[existingIndex] = { ...nextList[existingIndex], ...localCrazyflie };
+      return nextList;
+    }
+
+    return [localCrazyflie, ...nextList];
+  }
+
+  private buildLocalCrazyflieBoard(): any | null {
+    try {
+      const childPath = window['path']?.getAilyChildPath?.();
+      if (!childPath) {
+        return null;
+      }
+
+      const sourcePath = window['path'].join(childPath, 'boards', 'board-crazyflie');
+      const packageJsonPath = window['path'].join(sourcePath, 'package.json');
+      const templatePath = window['path'].join(sourcePath, 'template');
+      const localImagePath = window['path'].join(sourcePath, 'crazyflie2.1.png');
+      if (!window['path'].isExists(packageJsonPath) || !window['path'].isExists(templatePath)) {
+        return null;
+      }
+
+      const pkg = JSON.parse(window['fs'].readFileSync(packageJsonPath, 'utf8'));
+      const boardName = pkg?.name || '@aily-project/board-crazyflie';
+      const boardVersion = pkg?.version || '0.0.1';
+
+      return {
+        name: boardName,
+        nickname: 'Crazyflie',
+        version: boardVersion,
+        img: '',
+        description: 'Local Crazyflie board for Crazyradio PA/2.0 control blocks.',
+        url: 'https://github.com/bitcraze/crazyflie-lib-python',
+        brand: 'bitcraze',
+        type: 'crazyflie',
+        sourcePath,
+        imgLocalPath: window['path'].isExists(localImagePath) ? localImagePath : undefined,
+      };
+    } catch (error) {
+      console.warn('加载本地 Crazyflie 开发板失败:', error);
+      return null;
+    }
   }
 
   appStoreBtn = {

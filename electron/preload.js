@@ -721,6 +721,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
      */
     runFlow: (options) => ipcRenderer.invoke("crazyflie-run-flow", options || {}),
     /**
+     * 订阅 Crazyflie 流程实时日志
+     * @param {(payload: {source: 'stdout' | 'stderr', line: string}) => void} callback
+     * @returns {() => void} 取消订阅函数
+     */
+    onFlowLog: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("crazyflie-flow-log", listener);
+      return () => ipcRenderer.removeListener("crazyflie-flow-log", listener);
+    },
+    /**
      * 列出系统中的 Crazyradio USB 设备（Windows 通过 PnP 检测）
      */
     listRadios: () => ipcRenderer.invoke("crazyflie-list-radios"),

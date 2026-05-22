@@ -8,22 +8,30 @@ from pathlib import Path
 
 
 def _candidate_lib_paths(explicit_path: str | None):
+    def append_repo_variants(base: Path, result: list[Path]):
+        result.append(base)
+        name = base.name.lower()
+        if name == "crazyflie-lib-python":
+            result.append(base.with_name("crazyflie-lib-python-master"))
+        elif name == "crazyflie-lib-python-master":
+            result.append(base.with_name("crazyflie-lib-python"))
+
     candidates = []
     if explicit_path:
-        candidates.append(Path(explicit_path))
+        append_repo_variants(Path(explicit_path), candidates)
 
     env_path = os.environ.get("CRAZYFLIE_LIB_PATH")
     if env_path:
         candidates.append(Path(env_path))
 
-    # Workspace layout: <root>/aily-blockly/child/scripts/this.py and <root>/crazyflie/crazyflie-lib-python-master
+    # Workspace layout: <root>/aily-blockly/child/scripts/this.py and <root>/crazyflie/crazyflie-lib-python
     script_path = Path(__file__).resolve()
     workspace_root = script_path.parents[3] if len(script_path.parents) >= 4 else None
     if workspace_root:
-        candidates.append(workspace_root / "crazyflie" / "crazyflie-lib-python-master")
+        append_repo_variants(workspace_root / "crazyflie" / "crazyflie-lib-python", candidates)
 
     cwd = Path.cwd()
-    candidates.append(cwd.parent / "crazyflie" / "crazyflie-lib-python-master")
+    append_repo_variants(cwd.parent / "crazyflie" / "crazyflie-lib-python", candidates)
 
     # De-dup while preserving order
     unique = []
@@ -38,6 +46,13 @@ def _candidate_lib_paths(explicit_path: str | None):
 
 
 def _append_cflib_path(explicit_path: str | None):
+    # Prefer cflib already installed in the active Python environment.
+    try:
+        import cflib  # noqa: F401
+        return "site-packages"
+    except Exception:
+        pass
+
     for lib_path in _candidate_lib_paths(explicit_path):
         cflib_dir = lib_path / "cflib"
         if cflib_dir.exists():
