@@ -19,6 +19,9 @@ MOVE_DISTANCE = {
     "down": 0.2,
 }
 
+DEFAULT_URI = "radio://0/80/2M"
+DEFAULT_ADDRESS_HEX = "E7E7E7E7E7"
+
 
 def _candidate_lib_paths(explicit_path: str | None):
     def append_repo_variants(base: Path, result: list[Path]):
@@ -81,7 +84,7 @@ def parse_commands(code: str):
         if line.startswith("//") or line.startswith("#"):
             continue
 
-        if re.match(r"^cf_test_link\s*\(\s*\)\s*;?$", line):
+        if re.match(r"^cf_test_link\s*\(\s*(?:['\"].*?['\"]\s*(?:,\s*['\"].*?['\"]\s*)?)?\)\s*;?$", line):
             commands.append(("test_link", None))
             continue
         if re.match(r"^cf_takeoff\s*\(\s*\)\s*;?$", line):
@@ -144,10 +147,26 @@ def _emit_step(step_index: int, total_steps: int, label: str):
     print(f"__STEP__:{step_index}/{total_steps}:{label}", flush=True)
 
 
-def test_link(cflib_module, radio_driver_cls):
+def _normalize_address_hex(value: str | None):
+    text = str(value or "").strip()
+    if text.lower().startswith("0x"):
+        text = text[2:]
+    normalized = "".join(ch for ch in text if ch.lower() in "0123456789abcdef").upper()
+    if len(normalized) != 10:
+        return DEFAULT_ADDRESS_HEX
+    return normalized
+
+
+def _parse_scan_address(value: str | None):
+    normalized = _normalize_address_hex(value)
+    return int(normalized, 16), normalized
+
+
+def test_link(cflib_module, radio_driver_cls, address_hex: str | None):
     radio_status = "unknown"
     links = []
     scan_error = None
+    scan_address, normalized_address = _parse_scan_address(address_hex)
 
     try:
         radio_status = radio_driver_cls().get_status()
@@ -155,15 +174,18 @@ def test_link(cflib_module, radio_driver_cls):
         radio_status = f"error: {exc}"
 
     try:
-        scanned = cflib_module.crtp.scan_interfaces()
+        try:
+            scanned = cflib_module.crtp.scan_interfaces(address=scan_address)
+        except TypeError:
+            scanned = cflib_module.crtp.scan_interfaces()
         links = [item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item) for item in scanned]
     except Exception as exc:
         scan_error = str(exc)
 
-    return radio_status, links, scan_error
+    return radio_status, links, scan_error, normalized_address
 
 
-def run_flow(uri: str, commands):
+def run_flow(uri: str, commands, address_hex: str | None):
     import cflib.crtp
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
     from cflib.positioning.motion_commander import MotionCommander
@@ -171,7 +193,7 @@ def run_flow(uri: str, commands):
 
     cflib.crtp.init_drivers(enable_debug_driver=False)
 
-    radio_status, links, scan_error = test_link(cflib, RadioDriver)
+    radio_status, links, scan_error, normalized_address = test_link(cflib, RadioDriver, address_hex)
 
     has_motion_cmd = any(cmd in ("takeoff", "move", "land") for cmd, _ in commands)
     flow_commands = [(cmd, arg) for cmd, arg in commands if cmd != "test_link"]
@@ -200,6 +222,8 @@ def run_flow(uri: str, commands):
             "success": ok or any(cmd in ("print", "delay") for cmd, _ in commands),
             "message": "Flow executed" if any(cmd in ("print", "delay") for cmd, _ in commands) else ("Link OK" if ok else "No Crazyflie link discovered"),
             "radioStatus": radio_status,
+            "uri": uri,
+            "addressHex": normalized_address,
             "links": links,
             "scanError": scan_error,
             "executed": executed,
@@ -266,6 +290,8 @@ def run_flow(uri: str, commands):
         "success": True,
         "message": "Flow executed",
         "radioStatus": radio_status,
+        "uri": uri,
+        "addressHex": normalized_address,
         "links": links,
         "scanError": scan_error,
         "executed": executed,
@@ -275,7 +301,8 @@ def run_flow(uri: str, commands):
 def main():
     parser = argparse.ArgumentParser(description="Run Crazyflie flow from generated Blockly code")
     parser.add_argument("--code-base64", required=True)
-    parser.add_argument("--uri", default="radio://0/80/2M")
+    parser.add_argument("--uri", default=DEFAULT_URI)
+    parser.add_argument("--address-hex", default=DEFAULT_ADDRESS_HEX)
     parser.add_argument("--lib-path", default=None)
     args = parser.parse_args()
 
@@ -301,7 +328,7 @@ def main():
             }, ensure_ascii=False))
             return 2
 
-        result = run_flow(args.uri, commands)
+        result = run_flow(args.uri, commands, args.address_hex)
         result["loadedFrom"] = loaded_from
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("success") else 2

@@ -6,6 +6,9 @@ import os
 import sys
 from pathlib import Path
 
+DEFAULT_URI = "radio://0/80/2M"
+DEFAULT_ADDRESS_HEX = "E7E7E7E7E7"
+
 
 def _candidate_lib_paths(explicit_path: str | None):
     def append_repo_variants(base: Path, result: list[Path]):
@@ -61,10 +64,27 @@ def _append_cflib_path(explicit_path: str | None):
     return None
 
 
+def _normalize_address_hex(value: str | None):
+    text = str(value or "").strip()
+    if text.lower().startswith("0x"):
+        text = text[2:]
+    normalized = "".join(ch for ch in text if ch.lower() in "0123456789abcdef").upper()
+    if len(normalized) != 10:
+        return DEFAULT_ADDRESS_HEX
+    return normalized
+
+
+def _parse_scan_address(value: str | None):
+    normalized = _normalize_address_hex(value)
+    return int(normalized, 16), normalized
+
+
 def main():
     parser = argparse.ArgumentParser(description="Crazyradio/Crazyflie link test")
     parser.add_argument("--lib-path", default=None, help="Path to crazyflie-lib-python root")
     parser.add_argument("--timeout-ms", default=4000, type=int, help="Reserved for future use")
+    parser.add_argument("--uri", default=DEFAULT_URI, help="Crazyflie radio URI")
+    parser.add_argument("--address-hex", default=DEFAULT_ADDRESS_HEX, help="Crazyradio address hex, e.g. E7E7E7E7E7")
     args = parser.parse_args()
 
     loaded_from = _append_cflib_path(args.lib_path)
@@ -83,6 +103,7 @@ def main():
         from cflib.crtp.radiodriver import RadioDriver
 
         cflib.crtp.init_drivers()
+        scan_address, normalized_address = _parse_scan_address(args.address_hex)
 
         radio_status = "unknown"
         links = []
@@ -94,7 +115,10 @@ def main():
             radio_status = f"error: {e}"
 
         try:
-            scanned = cflib.crtp.scan_interfaces()
+            try:
+                scanned = cflib.crtp.scan_interfaces(address=scan_address)
+            except TypeError:
+                scanned = cflib.crtp.scan_interfaces()
             links = [item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item) for item in scanned]
         except Exception as e:
             scan_error = str(e)
@@ -116,6 +140,8 @@ def main():
             "message": message,
             "loadedFrom": loaded_from,
             "radioStatus": radio_status,
+            "uri": args.uri,
+            "addressHex": normalized_address,
             "links": links,
             "scanError": scan_error,
         }, ensure_ascii=False))

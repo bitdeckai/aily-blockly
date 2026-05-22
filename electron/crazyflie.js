@@ -3,6 +3,9 @@ const { execFile, spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
+const DEFAULT_CRAZYFLIE_URI = "radio://0/80/2M";
+const DEFAULT_CRAZYFLIE_ADDRESS_HEX = "E7E7E7E7E7";
+
 function resolveChildPath(...parts) {
   const childPath = process.env.AILY_CHILD_PATH || path.join(__dirname, "..", "child");
   return path.join(childPath, ...parts);
@@ -126,15 +129,40 @@ function parseJsonOutput(output) {
   }
 }
 
+function normalizeUri(input) {
+  const text = String(input || "").trim();
+  return text || DEFAULT_CRAZYFLIE_URI;
+}
+
+function normalizeAddressHex(input) {
+  const normalized = String(input || "")
+    .trim()
+    .replace(/^0x/i, "")
+    .replace(/[^0-9a-fA-F]/g, "")
+    .toUpperCase();
+  return normalized.length === 10 ? normalized : DEFAULT_CRAZYFLIE_ADDRESS_HEX;
+}
+
+function buildConnectionArgs(options = {}) {
+  const uri = normalizeUri(options.uri);
+  const addressHex = normalizeAddressHex(options.addressHex);
+  return {
+    uri,
+    addressHex,
+    args: ["--uri", uri, "--address-hex", addressHex],
+  };
+}
+
 async function testLink(options = {}) {
   const timeoutMs = Number(options.timeoutMs || 4000);
   const scriptPath = resolveChildPath("scripts", "crazyflie_link_test.py");
   const libPathHint = getCrazyflieLibPathHint();
+  const connection = buildConnectionArgs(options);
 
   const errors = [];
   for (const pythonCmd of getPythonCandidates()) {
     try {
-      const { stdout, stderr } = await runScript(pythonCmd, scriptPath, timeoutMs, libPathHint);
+      const { stdout, stderr } = await runScript(pythonCmd, scriptPath, timeoutMs, libPathHint, connection.args, true);
       const parsed = parseLastJsonLine(stdout) || parseLastJsonLine(stderr);
       if (parsed) {
         return {
@@ -179,7 +207,8 @@ async function runFlow(options = {}) {
   const timeoutMs = Number(options.timeoutMs || 45000);
   const scriptPath = resolveChildPath("scripts", "crazyflie_run_flow.py");
   const libPathHint = getCrazyflieLibPathHint();
-  const uri = typeof options.uri === "string" && options.uri.trim() ? options.uri.trim() : "radio://0/80/2M";
+  const connection = buildConnectionArgs(options);
+  const uri = connection.uri;
   const code = typeof options.code === "string" ? options.code : "";
   const codeBase64 = Buffer.from(code, "utf-8").toString("base64");
 
@@ -191,7 +220,7 @@ async function runFlow(options = {}) {
         scriptPath,
         timeoutMs,
         libPathHint,
-        ["--uri", uri, "--code-base64", codeBase64],
+        [...connection.args, "--code-base64", codeBase64],
         false
       );
       const parsed = parseLastJsonLine(stdout) || parseLastJsonLine(stderr);
@@ -342,7 +371,8 @@ async function runFlowStream(event, options = {}) {
   const timeoutMs = Number(options.timeoutMs || 45000);
   const scriptPath = resolveChildPath("scripts", "crazyflie_run_flow.py");
   const libPathHint = getCrazyflieLibPathHint();
-  const uri = typeof options.uri === "string" && options.uri.trim() ? options.uri.trim() : "radio://0/80/2M";
+  const connection = buildConnectionArgs(options);
+  const uri = connection.uri;
   const code = typeof options.code === "string" ? options.code : "";
   const codeBase64 = Buffer.from(code, "utf-8").toString("base64");
 
@@ -362,7 +392,7 @@ async function runFlowStream(event, options = {}) {
         scriptPath,
         timeoutMs,
         libPathHint,
-        ["--uri", uri, "--code-base64", codeBase64],
+        [...connection.args, "--code-base64", codeBase64],
         false,
         ({ source, line }) => {
           const parsed = parseJsonOutput(line);

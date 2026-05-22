@@ -173,6 +173,7 @@ export class _UploaderService {
     }
 
     const hasFlightCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(/.test(crazyflieCode || '');
+    const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
     const executionBlocks = hasFlightCmd ? this.getCrazyflieExecutionBlocksInOrder() : [];
     let receivedRealtimeLog = false;
     let disposeFlowLog: (() => void) | null = null;
@@ -214,8 +215,8 @@ export class _UploaderService {
     let result: any;
     try {
       result = hasFlightCmd
-        ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000 })
-        : await api.testLink({ timeoutMs: 5000 });
+        ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex })
+        : await api.testLink({ timeoutMs: 5000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex });
     } finally {
       this.clearBlocklySelection();
       if (disposeFlowLog) {
@@ -326,6 +327,46 @@ export class _UploaderService {
   }
 
   private crazyflieHighlightedSvgGroup: any | null = null;
+
+  private resolveCrazyflieConnectionOptions(crazyflieCode: string): { uri: string; addressHex: string } {
+    const defaultUri = 'radio://0/80/2M';
+    const defaultAddressHex = 'E7E7E7E7E7';
+    const code = String(crazyflieCode || '');
+
+    let uri: string | null = null;
+    let addressHex: string | null = null;
+
+    const setLinkMatch = /cf_set_link\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/.exec(code);
+    if (setLinkMatch) {
+      uri = setLinkMatch[2] || null;
+      addressHex = setLinkMatch[4] || null;
+    } else {
+      const testLinkMatch = /cf_test_link\s*\(\s*(['"])(.*?)\1(?:\s*,\s*(['"])(.*?)\3)?\s*\)/.exec(code);
+      if (testLinkMatch) {
+        uri = testLinkMatch[2] || null;
+        addressHex = testLinkMatch[4] || null;
+      }
+    }
+
+    return {
+      uri: this.normalizeCrazyflieUri(uri, defaultUri),
+      addressHex: this.normalizeCrazyflieAddressHex(addressHex, defaultAddressHex),
+    };
+  }
+
+  private normalizeCrazyflieUri(input: any, fallback: string): string {
+    const text = String(input ?? '').trim();
+    return text || fallback;
+  }
+
+  private normalizeCrazyflieAddressHex(input: any, fallback: string): string {
+    const normalized = String(input ?? '')
+      .trim()
+      .replace(/^0x/i, '')
+      .replace(/[^0-9a-fA-F]/g, '')
+      .toUpperCase();
+    return normalized.length === 10 ? normalized : fallback;
+  }
   async upload(): Promise<ActionState> {
     this.isErrored = false;
     this.cancelled = false;
