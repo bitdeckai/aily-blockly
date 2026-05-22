@@ -173,6 +173,7 @@ export class _UploaderService {
     }
 
     const hasFlightCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(/.test(crazyflieCode || '');
+    const executionBlocks = hasFlightCmd ? this.getCrazyflieExecutionBlocksInOrder() : [];
     let receivedRealtimeLog = false;
     let disposeFlowLog: (() => void) | null = null;
     if (hasFlightCmd && typeof api.onFlowLog === 'function') {
@@ -181,6 +182,29 @@ export class _UploaderService {
         if (!line) {
           return;
         }
+
+        const stepMatch = /^__STEP__:(\d+)\/(\d+):(.+)$/.exec(line);
+        if (stepMatch) {
+          const current = Number(stepMatch[1] || 0);
+          const total = Number(stepMatch[2] || 0);
+          const label = (stepMatch[3] || '').trim();
+          const stepText = total > 0
+            ? `正在执行步骤 ${current}/${total}: ${label}`
+            : `正在执行步骤: ${label}`;
+          this.noticeService.update({
+            title,
+            text: stepText,
+            state: 'doing',
+            setTimeout: 0,
+            stop: () => { this.cancel(); }
+          });
+          this.logService.update({ detail: `[STEP ${current}/${total}] ${label}`, state: 'warn' });
+          const currentBlock = executionBlocks[current - 1];
+          this.highlightCrazyflieBlock(currentBlock);
+          receivedRealtimeLog = true;
+          return;
+        }
+
         receivedRealtimeLog = true;
         const detail = payload?.source === 'stderr' ? `[Crazyflie][err] ${line}` : line;
         this.logService.update({ detail });
@@ -193,6 +217,7 @@ export class _UploaderService {
         ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000 })
         : await api.testLink({ timeoutMs: 5000 });
     } finally {
+      this.clearBlocklySelection();
       if (disposeFlowLog) {
         disposeFlowLog();
       }
@@ -233,6 +258,74 @@ export class _UploaderService {
     return { state: 'error', text: result?.message || 'Crazyflie 链路测试失败' };
   }
 
+  private getCrazyflieExecutionBlocksInOrder(): any[] {
+    const workspace: any = this.blocklyService.workspace;
+    if (!workspace || typeof workspace.getTopBlocks !== 'function') {
+      return [];
+    }
+
+    const executableTypes = new Set([
+      'cf_takeoff',
+      'cf_land',
+      'cf_delay',
+      'cf_print',
+      'cf_print_text',
+      'cf_move_forward',
+      'cf_move_back',
+      'cf_move_left',
+      'cf_move_right',
+      'cf_move_up',
+      'cf_move_down',
+    ]);
+
+    const ordered: any[] = [];
+    const topBlocks: any[] = workspace.getTopBlocks(true) || [];
+    topBlocks.forEach((top) => {
+      let current = top;
+      while (current) {
+        if (!current.isShadow?.() && executableTypes.has(String(current.type || ''))) {
+          ordered.push(current);
+        }
+        current = typeof current.getNextBlock === 'function' ? current.getNextBlock() : null;
+      }
+    });
+
+    return ordered;
+  }
+
+  private clearBlocklySelection(): void {
+    const workspace: any = this.blocklyService.workspace;
+    if (this.crazyflieHighlightedSvgGroup && this.crazyflieHighlightedSvgGroup.classList) {
+      this.crazyflieHighlightedSvgGroup.classList.remove('cf-step-outline-highlight');
+      this.crazyflieHighlightedSvgGroup = null;
+    }
+    if (workspace && typeof workspace.getSelected === 'function') {
+      const selected = workspace.getSelected();
+      if (selected && typeof selected.unselect === 'function') {
+        selected.unselect();
+      }
+    }
+  }
+
+  private highlightCrazyflieBlock(block: any): void {
+    const workspace: any = this.blocklyService.workspace;
+    if (!workspace || !block) {
+      return;
+    }
+
+    if (this.crazyflieHighlightedSvgGroup && this.crazyflieHighlightedSvgGroup.classList) {
+      this.crazyflieHighlightedSvgGroup.classList.remove('cf-step-outline-highlight');
+      this.crazyflieHighlightedSvgGroup = null;
+    }
+
+    const svgGroup = typeof block.getSvgRoot === 'function' ? block.getSvgRoot() : null;
+    if (svgGroup && svgGroup.classList) {
+      svgGroup.classList.add('cf-step-outline-highlight');
+      this.crazyflieHighlightedSvgGroup = svgGroup;
+    }
+  }
+
+  private crazyflieHighlightedSvgGroup: any | null = null;
   async upload(): Promise<ActionState> {
     this.isErrored = false;
     this.cancelled = false;

@@ -58,6 +58,13 @@
     stroke-width: 0 !important;
 }
 
+:host ::ng-deep g.cf-step-outline-highlight > path.blocklyPath {
+    stroke: #7cff6b !important;
+    stroke-width: 3px !important;
+    stroke-opacity: 1 !important;
+    filter: drop-shadow(0 0 3px rgb(124 255 107 / 85%));
+}
+
 :host ::ng-deep .blocklyToolboxDiv {
     position: absolute !important;
     left: -10000px !important;

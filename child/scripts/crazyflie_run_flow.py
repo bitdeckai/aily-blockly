@@ -120,6 +120,30 @@ def _normalize_print_value(raw):
     return text
 
 
+def _step_label(cmd, arg):
+    if cmd == "takeoff":
+        return "takeoff"
+    if cmd == "land":
+        return "land"
+    if cmd == "delay":
+        return f"delay:{max(0.0, float(arg))}"
+    if cmd == "print":
+        return f"print:{_normalize_print_value(arg)}"
+    if cmd == "move":
+        direction = arg.get("dir") if isinstance(arg, dict) else None
+        fallback_dist = MOVE_DISTANCE.get(direction, 0.2)
+        dist = arg.get("distance") if isinstance(arg, dict) else None
+        if dist is None:
+            dist = fallback_dist
+        dist = max(0.01, float(dist))
+        return f"move:{direction}:{dist}"
+    return cmd
+
+
+def _emit_step(step_index: int, total_steps: int, label: str):
+    print(f"__STEP__:{step_index}/{total_steps}:{label}", flush=True)
+
+
 def test_link(cflib_module, radio_driver_cls):
     radio_status = "unknown"
     links = []
@@ -150,16 +174,23 @@ def run_flow(uri: str, commands):
     radio_status, links, scan_error = test_link(cflib, RadioDriver)
 
     has_motion_cmd = any(cmd in ("takeoff", "move", "land") for cmd, _ in commands)
+    flow_commands = [(cmd, arg) for cmd, arg in commands if cmd != "test_link"]
+    total_steps = len(flow_commands)
+    step_index = 0
     executed = []
     if not has_motion_cmd:
         for cmd, arg in commands:
             if cmd == "test_link":
                 executed.append("test_link")
             elif cmd == "delay":
+                step_index += 1
+                _emit_step(step_index, total_steps, _step_label(cmd, arg))
                 wait_sec = max(0.0, float(arg))
                 executed.append(f"delay:{wait_sec}")
                 time.sleep(wait_sec)
             elif cmd == "print":
+                step_index += 1
+                _emit_step(step_index, total_steps, _step_label(cmd, arg))
                 msg = _normalize_print_value(arg)
                 executed.append(f"print:{msg}")
                 print(msg, flush=True)
@@ -185,9 +216,13 @@ def run_flow(uri: str, commands):
                 if cmd == "test_link":
                     executed.append("test_link")
                 elif cmd == "takeoff":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     executed.append("takeoff")
                     time.sleep(0.5)
                 elif cmd == "move":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     direction = arg.get("dir") if isinstance(arg, dict) else None
                     fallback_dist = MOVE_DISTANCE.get(direction, 0.2)
                     dist = arg.get("distance") if isinstance(arg, dict) else None
@@ -210,14 +245,20 @@ def run_flow(uri: str, commands):
                     executed.append(f"move:{direction}:{dist}")
                     time.sleep(0.6)
                 elif cmd == "delay":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     wait_sec = max(0.0, float(arg))
                     executed.append(f"delay:{wait_sec}")
                     time.sleep(wait_sec)
                 elif cmd == "print":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     msg = _normalize_print_value(arg)
                     executed.append(f"print:{msg}")
                     print(msg, flush=True)
                 elif cmd == "land":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     executed.append("land")
                     break
 
