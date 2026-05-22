@@ -39,6 +39,21 @@ export class BoardSelectorDialogComponent implements OnInit {
     return this.configService.getCurrentResourceUrl() + '/imgs/boards/';
   }
 
+  getBoardImageSrc(board: any): string {
+    const localPath = board?.imgLocalPath;
+    if (typeof localPath === 'string' && localPath.length > 0 && window['path']?.isExists?.(localPath)) {
+      const normalized = localPath.replace(/\\/g, '/');
+      return `file:///${normalized}`;
+    }
+
+    const img = String(board?.img || '');
+    if (/^(https?:|data:|file:\/\/)/i.test(img)) {
+      return img;
+    }
+
+    return this.resourceUrl + img;
+  }
+
   constructor(
     private configService: ConfigService,
     private projectService: ProjectService,

@@ -24,7 +24,7 @@
     <div class="board-item" [class.selected]="selectedBoard?.name === board.name" [class.disabled]="isLoading"
       (click)="!isLoading && selectBoard(board)">
       <div class="board-img ccenter">
-        <img [src]="resourceUrl+board.img" />
+        <img [src]="getBoardImageSrc(board)" />
       </div>
       <div class="board-info">
         <div class="board-name">{{ board.nickname }}

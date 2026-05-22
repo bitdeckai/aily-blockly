@@ -714,7 +714,7 @@ export class BlocklyService {
 
       if (blockFileIsExist) {
         // 加载blocks
-        let blocks = JSON.parse(this.electronService.readFile(this.electronService.pathJoin(libPackagePath, 'block.json')));
+        let blocks = this.parseLibraryJson(this.electronService.readFile(this.electronService.pathJoin(libPackagePath, 'block.json')), this.electronService.pathJoin(libPackagePath, 'block.json'));
         loadedBlockTypes = blocks
           .map((block: any) => block?.type)
           .filter((type: any): type is string => typeof type === 'string' && type.length > 0);
@@ -722,13 +722,13 @@ export class BlocklyService {
         let libVersion = '';
         const libPkgJsonPath = this.electronService.pathJoin(libPackagePath, 'package.json');
         if (this.electronService.exists(libPkgJsonPath)) {
-          try { libVersion = JSON.parse(this.electronService.readFile(libPkgJsonPath)).version || ''; } catch (e) { }
+          try { libVersion = this.parseLibraryJson(this.electronService.readFile(libPkgJsonPath), libPkgJsonPath).version || ''; } catch (e) { }
         }
         let i18nData = null;
         // 检查多语言文件是否存在（先于 generator.js 加载，确保动态扩展能读取到 i18n 数据）
         const i18nFilePath = this.electronService.pathJoin(libPackagePath, 'i18n', this.translateService.currentLang + '.json');
         if (this.electronService.exists(i18nFilePath)) {
-          i18nData = JSON.parse(this.electronService.readFile(i18nFilePath));
+          i18nData = this.parseLibraryJson(this.electronService.readFile(i18nFilePath), i18nFilePath);
           // 将 i18n 数据按库名存储到全局，供动态扩展使用
           (window as any).__BLOCKLY_LIB_I18N__ = (window as any).__BLOCKLY_LIB_I18N__ || {};
           (window as any).__BLOCKLY_LIB_I18N__[libPackageName] = i18nData;
@@ -747,7 +747,7 @@ export class BlocklyService {
         try {
           const projPkgJsonPath = this.electronService.pathJoin(projectPath, 'package.json');
           if (this.electronService.exists(projPkgJsonPath)) {
-            const projPkgJson = JSON.parse(this.electronService.readFile(projPkgJsonPath));
+            const projPkgJson = this.parseLibraryJson(this.electronService.readFile(projPkgJsonPath), projPkgJsonPath);
             const depVersion = projPkgJson?.dependencies?.[libPackageName] || '';
             if (typeof depVersion === 'string' && depVersion.startsWith('file:')) {
               const relativePath = depVersion.substring(5); // 去掉 "file:" 前缀
@@ -761,7 +761,7 @@ export class BlocklyService {
         // 加载toolbox
         const toolboxFileIsExist = this.electronService.exists(this.electronService.pathJoin(libPackagePath, 'toolbox.json'));
         if (toolboxFileIsExist) {
-          let toolbox = JSON.parse(this.electronService.readFile(this.electronService.pathJoin(libPackagePath, 'toolbox.json')));
+          let toolbox = this.parseLibraryJson(this.electronService.readFile(this.electronService.pathJoin(libPackagePath, 'toolbox.json')), this.electronService.pathJoin(libPackagePath, 'toolbox.json'));
           // 处理 toolbox 多语言（包括 name 和 labels）
           if (i18nData) {
             toolbox = processToolboxI18n(toolbox, i18nData);
@@ -822,9 +822,30 @@ export class BlocklyService {
     }
 
     try {
-      JSON.parse(this.electronService.readFile(filePath));
+      this.parseLibraryJson(this.electronService.readFile(filePath), filePath);
     } catch (error) {
       errors.push(`${fileName} 不合规: JSON 格式错误 (${filePath})，${this.formatLibraryIntegrityError(error)}`);
+    }
+  }
+
+  private parseLibraryJson(content: any, filePath = ''): any {
+    const text = String(content ?? '');
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      // Some third-party libraries contain non-standard JSON such as "options": undefined.
+      const normalized = text.replace(/:\s*undefined(?=\s*[,}\]])/g, ': null');
+      if (normalized !== text) {
+        try {
+          return JSON.parse(normalized);
+        } catch (_ignored) {
+          // fall through and throw original parse error below
+        }
+      }
+      if (filePath) {
+        console.warn(`[parseLibraryJson] JSON 解析失败: ${filePath}`);
+      }
+      throw error;
     }
   }
 

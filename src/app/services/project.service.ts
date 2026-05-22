@@ -1800,11 +1800,14 @@ export class ProjectService {
       }
       // 2. npm install 安装boardInfo.name@boardInfo.version 到 appDataPath（与 projectNew 一致）
       const appDataPath = window['path'].getAppDataPath();
-      const newBoardPackage = `${boardInfo.name}@${boardInfo.version}`;
-      console.log('安装新开发板模块:', newBoardPackage);
+      const sourcePath = typeof (boardInfo as any)?.sourcePath === 'string' ? (boardInfo as any).sourcePath.trim() : '';
+      const hasLocalSourcePath = !!sourcePath && !!window['path']?.isExists?.(sourcePath);
+      const newBoardPackage = hasLocalSourcePath ? `"${sourcePath}"` : `${boardInfo.name}@${boardInfo.version}`;
+      const lockKeySuffix = hasLocalSourcePath ? `${boardInfo.name}:local` : `${boardInfo.name}@${boardInfo.version}`;
+      console.log('安装新开发板模块:', hasLocalSourcePath ? `${boardInfo.name} (local)` : newBoardPackage);
       this.uiService.updateFooterState({ state: 'doing', text: this.translate.instant('PROJECT.INSTALLING_NEW_BOARD') });
       await this.cmdService.runAsyncChecked(`npm install ${newBoardPackage}`, this.currentProjectPath);
-      await this.appDataResourceLock.runExclusive(`project:switch-board:install-appdata:${newBoardPackage}`, () =>
+      await this.appDataResourceLock.runExclusive(`project:switch-board:install-appdata:${lockKeySuffix}`, () =>
         this.cmdService.runAsyncChecked(`npm install ${newBoardPackage} --prefix "${appDataPath}"`)
       );
 
