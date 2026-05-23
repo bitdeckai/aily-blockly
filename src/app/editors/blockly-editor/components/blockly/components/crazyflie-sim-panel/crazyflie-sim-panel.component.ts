@@ -4,6 +4,8 @@ import {
   AmbientLight,
   BufferGeometry,
   BoxGeometry,
+  CanvasTexture,
+  CatmullRomCurve3,
   Color,
   CylinderGeometry,
   DirectionalLight,
@@ -19,14 +21,13 @@ import {
   MeshStandardMaterial,
   PerspectiveCamera,
   PlaneGeometry,
-  Points,
-  PointsMaterial,
   RepeatWrapping,
   Scene,
   SphereGeometry,
   SRGBColorSpace,
   TextureLoader,
   TorusGeometry,
+  TubeGeometry,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -71,7 +72,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private gridHelper: GridHelper | null = null;
   private trailHistoryLine: Line | null = null;
   private trailLine: Line | null = null;
-  private trailPointsCloud: Points | null = null;
+  private trailTubeMesh: Mesh | null = null;
   private trailEndpoint: Mesh | null = null;
   private trailPoints: Vector3[] = [];
   private lastTrailPoint: Vector3 | null = null;
@@ -85,6 +86,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private readonly trailMinDistance = 0.035;
   private readonly trailMaxPoints = 800;
   private readonly trailRecentPoints = 40;
+  private readonly trailTubeRadius = 0.02;
   private readonly trailHistoryColor = '#0068d6';
   private readonly trailPrimaryColor = '#00a7ff';
   private readonly trailEndpointColor = '#ff2d55';
@@ -197,8 +199,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     if (this.trailLine) {
       this.trailLine.visible = this.flightPathVisible;
     }
-    if (this.trailPointsCloud) {
-      this.trailPointsCloud.visible = this.flightPathVisible;
+    if (this.trailTubeMesh) {
+      this.trailTubeMesh.visible = this.flightPathVisible && this.trailPoints.length > 1;
     }
     if (this.trailEndpoint) {
       this.trailEndpoint.visible = this.flightPathVisible && this.trailPoints.length > 0;
@@ -304,6 +306,23 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     deck.position.y = 0.057;
     group.add(deck);
 
+    const iconTexture = typeof document !== 'undefined' ? this.createDroneIconTexture() : null;
+    if (iconTexture) {
+      const iconPlane = new Mesh(
+        new PlaneGeometry(0.205, 0.205),
+        new MeshStandardMaterial({
+          map: iconTexture,
+          transparent: true,
+          alphaTest: 0.08,
+          roughness: 0.42,
+          metalness: 0.06,
+        }),
+      );
+      iconPlane.rotation.x = -Math.PI / 2;
+      iconPlane.position.y = 0.068;
+      group.add(iconPlane);
+    }
+
     const body = new Mesh(new BoxGeometry(0.22, 0.042, 0.22), frameMaterial);
     body.position.y = 0.03;
     group.add(body);
@@ -386,6 +405,73 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     group.position.set(0, 0.06, 0);
     return group;
+  }
+
+  private createDroneIconTexture(): CanvasTexture {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      const fallback = new CanvasTexture(canvas);
+      fallback.colorSpace = SRGBColorSpace;
+      return fallback;
+    }
+
+    ctx.clearRect(0, 0, size, size);
+    const ink = '#1e2230';
+
+    const drawProp = (cx: number, cy: number, radius: number, angle: number) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = ink;
+      ctx.beginPath();
+      ctx.ellipse(-radius * 0.38, 0, radius * 0.32, radius * 0.12, -0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(radius * 0.38, 0, radius * 0.32, radius * 0.12, -0.25, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    drawProp(size * 0.28, size * 0.28, size * 0.17, -0.7);
+    drawProp(size * 0.72, size * 0.28, size * 0.17, 0.7);
+    drawProp(size * 0.28, size * 0.72, size * 0.17, 0.7);
+    drawProp(size * 0.72, size * 0.72, size * 0.17, -0.7);
+
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    for (let i = 0; i < 8; i += 1) {
+      const a = (i / 8) * Math.PI * 2 - Math.PI / 8;
+      const r = i % 2 === 0 ? size * 0.12 : size * 0.1;
+      const x = size * 0.5 + Math.cos(a) * r;
+      const y = size * 0.5 + Math.sin(a) * r;
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.needsUpdate = true;
+    return texture;
   }
 
   private updatePropellerAnimation(deltaSec: number): void {
@@ -597,17 +683,24 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.trailLine.visible = this.flightPathVisible;
     this.scene.add(this.trailLine);
 
-    const dotsGeometry = new BufferGeometry().setFromPoints([]);
-    const dotsMaterial = new PointsMaterial({
-      color: this.trailPrimaryColor,
-      size: 0.045,
-      sizeAttenuation: true,
-      transparent: true,
-      opacity: 0.9,
-    });
-    this.trailPointsCloud = new Points(dotsGeometry, dotsMaterial);
-    this.trailPointsCloud.visible = this.flightPathVisible;
-    this.scene.add(this.trailPointsCloud);
+    const initialTubeCurve = new CatmullRomCurve3([
+      new Vector3(0, 0.02, 0),
+      new Vector3(0.001, 0.02, 0),
+    ]);
+    this.trailTubeMesh = new Mesh(
+      new TubeGeometry(initialTubeCurve, 8, this.trailTubeRadius, 10, false),
+      new MeshStandardMaterial({
+        color: this.trailPrimaryColor,
+        emissive: '#005ca8',
+        emissiveIntensity: 0.35,
+        roughness: 0.38,
+        metalness: 0.08,
+        transparent: true,
+        opacity: 0.98,
+      }),
+    );
+    this.trailTubeMesh.visible = false;
+    this.scene.add(this.trailTubeMesh);
 
     this.trailEndpoint = new Mesh(
       new SphereGeometry(0.03, 14, 14),
@@ -634,9 +727,14 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.trailLine.geometry.dispose();
       this.trailLine.geometry = new BufferGeometry().setFromPoints([]);
     }
-    if (this.trailPointsCloud) {
-      this.trailPointsCloud.geometry.dispose();
-      this.trailPointsCloud.geometry = new BufferGeometry().setFromPoints([]);
+    if (this.trailTubeMesh) {
+      this.trailTubeMesh.geometry.dispose();
+      const resetCurve = new CatmullRomCurve3([
+        new Vector3(0, 0.02, 0),
+        new Vector3(0.001, 0.02, 0),
+      ]);
+      this.trailTubeMesh.geometry = new TubeGeometry(resetCurve, 8, this.trailTubeRadius, 10, false);
+      this.trailTubeMesh.visible = false;
     }
     if (this.trailEndpoint) {
       this.trailEndpoint.visible = false;
@@ -644,7 +742,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   private updateFlightPath(currentPosition: Vector3): void {
-    if (!this.trailLine || !this.running) {
+    if (!this.trailLine || !this.trailTubeMesh || !this.running) {
       return;
     }
 
@@ -662,9 +760,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       const recentPoints = this.trailPoints.slice(-this.trailRecentPoints);
       this.trailLine.geometry.dispose();
       this.trailLine.geometry = new BufferGeometry().setFromPoints(recentPoints);
-      if (this.trailPointsCloud) {
-        this.trailPointsCloud.geometry.dispose();
-        this.trailPointsCloud.geometry = new BufferGeometry().setFromPoints(recentPoints);
+      if (recentPoints.length > 1) {
+        const curve = new CatmullRomCurve3(recentPoints, false, 'catmullrom', 0.2);
+        const segments = Math.max(16, recentPoints.length * 6);
+        this.trailTubeMesh.geometry.dispose();
+        this.trailTubeMesh.geometry = new TubeGeometry(curve, segments, this.trailTubeRadius, 10, false);
+        this.trailTubeMesh.visible = this.flightPathVisible;
       }
       if (this.trailEndpoint) {
         this.trailEndpoint.position.copy(p);

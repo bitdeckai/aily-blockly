@@ -29,7 +29,15 @@
         <i class="fa-light fa-gamepad-modern"></i>
       </div>
       <div class="btn ccenter" nz-tooltip nzTooltipTitle="实飞（只操作实物）" (click)="runCrazyflieRealFlight()">
-        <i class="fa-light fa-helicopter"></i>
+        <svg class="quad-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="6" cy="6" r="3.6" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+          <circle cx="18" cy="6" r="3.6" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+          <circle cx="6" cy="18" r="3.6" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+          <circle cx="18" cy="18" r="3.6" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+          <path d="M7.8 7.8 L10.5 10.5 M16.2 7.8 L13.5 10.5 M7.8 16.2 L10.5 13.5 M16.2 16.2 L13.5 13.5"
+            fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+          <path d="M12 9.7 L14.3 12 L12 14.3 L9.7 12 Z" fill="currentColor"></path>
+        </svg>
       </div>
       <div class="btn ccenter" nz-tooltip nzTooltipTitle="模拟+实飞（同时执行）" (click)="runCrazyflieSimAndReal()">
         <i class="fa-light fa-paper-plane-top"></i>
