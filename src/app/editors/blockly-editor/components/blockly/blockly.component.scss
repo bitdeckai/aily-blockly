@@ -12,13 +12,20 @@
 }
 
 .toolbox-pane,
-.workspace-pane {
+.workspace-pane,
+.simulator-pane {
     min-width: 0;
     min-height: 0;
 }
 
 .toolbox-pane {
     position: relative;
+}
+
+.simulator-pane {
+    position: relative;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--aily-bg-primary) 94%, #11161d);
 }
 
 .toolbox-pane__resize-handle {

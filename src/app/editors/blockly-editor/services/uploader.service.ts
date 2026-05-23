@@ -17,6 +17,7 @@ import { BlocklyService } from "./blockly.service";
 import { WorkflowService, ProcessState } from '../../../services/workflow.service';
 import { BleOtaProgress, UploaderBleService } from '../../../services/uploader-ble.service';
 import { AppDataResourceLockService } from '../../../services/appdata-resource-lock.service';
+import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
 
 @Injectable()
 export class _UploaderService {
@@ -37,7 +38,8 @@ export class _UploaderService {
     private blocklyService: BlocklyService,
     private workflowService: WorkflowService,
     private uploaderBleService: UploaderBleService,
-    private appDataResourceLock: AppDataResourceLockService
+    private appDataResourceLock: AppDataResourceLockService,
+    private crazyflieSimService: CrazyflieSimService
   ) { }
 
   uploadInProgress = false;
@@ -94,6 +96,33 @@ export class _UploaderService {
     this.actionService.listen('upload-cancel', (action) => {
       this.cancel();
     }, 'uploader-upload-cancel');
+
+    this.actionService.listen('simulate-crazyflie-begin', async () => {
+      try {
+        const result = await this.simulateCrazyflie();
+        return { success: true, result };
+      } catch (msg) {
+        return { success: false, result: msg };
+      }
+    }, 'uploader-simulate-crazyflie-begin');
+
+    this.actionService.listen('fly-crazyflie-real-begin', async () => {
+      try {
+        const result = await this.runCrazyflieRealOnly();
+        return { success: true, result };
+      } catch (msg) {
+        return { success: false, result: msg };
+      }
+    }, 'uploader-fly-crazyflie-real-begin');
+
+    this.actionService.listen('fly-crazyflie-sim-real-begin', async () => {
+      try {
+        const result = await this.runCrazyflieSimAndReal();
+        return { success: true, result };
+      } catch (msg) {
+        return { success: false, result: msg };
+      }
+    }, 'uploader-fly-crazyflie-sim-real-begin');
     
     // 监听 softdevice 烧录请求
     this.actionService.listen('flash-softdevice', async (action) => {
@@ -111,6 +140,9 @@ export class _UploaderService {
     console.log("_UploaderService destroy");
     this.actionService.unlisten('uploader-upload-begin');
     this.actionService.unlisten('uploader-upload-cancel');
+    this.actionService.unlisten('uploader-simulate-crazyflie-begin');
+    this.actionService.unlisten('uploader-fly-crazyflie-real-begin');
+    this.actionService.unlisten('uploader-fly-crazyflie-sim-real-begin');
     this.actionService.unlisten('uploader-flash-softdevice');
     this.initialized = false; // 重置初始化状态
   }
@@ -367,6 +399,124 @@ export class _UploaderService {
       .toUpperCase();
     return normalized.length === 10 ? normalized : fallback;
   }
+
+  async simulateCrazyflie(): Promise<ActionState> {
+    const title = 'Crazyflie 三维模拟';
+    const currentBoardModule = await this.projectService.getBoardModule().catch(() => '');
+    const selectedPortType = this.serialService.currentPortInfo?.type;
+    if (!(currentBoardModule === '@aily-project/board-crazyflie' || selectedPortType === 'crazyradio')) {
+      return { state: 'warn', text: '当前项目不是 Crazyflie，无法进行模拟' };
+    }
+
+    const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
+    const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
+    const executionBlocks = this.getCrazyflieExecutionBlocksInOrder();
+
+    this.noticeService.update({
+      title,
+      text: '正在模拟 Crazyflie 飞行流程...',
+      state: 'doing',
+      setTimeout: 0,
+      stop: () => {
+        this.crazyflieSimService.cancelRun();
+      }
+    });
+
+    const stepSubscription = this.crazyflieSimService.step$.subscribe((step) => {
+      if (!step) {
+        return;
+      }
+      const block = executionBlocks[step.current - 1];
+      this.highlightCrazyflieBlock(block);
+      this.noticeService.update({
+        title,
+        text: `模拟步骤 ${step.current}/${step.total}: ${step.label}`,
+        state: 'doing',
+        setTimeout: 0,
+        stop: () => {
+          this.crazyflieSimService.cancelRun();
+        }
+      });
+    });
+
+    try {
+      const result = await this.crazyflieSimService.runCode(crazyflieCode);
+      this.clearBlocklySelection();
+      if (!result.success) {
+        const warnState = /取消/.test(result.message || '') ? 'warn' : 'error';
+        this.noticeService.update({
+          title,
+          text: result.message || '模拟执行失败',
+          detail: (result.executed || []).join('\n'),
+          state: warnState,
+          setTimeout: 20000
+        });
+        return { state: warnState as ActionState['state'], text: result.message || '模拟执行失败' };
+      }
+
+      this.noticeService.update({
+        title,
+        text: result.message || '模拟执行完成',
+        detail: (result.executed || []).join('\n'),
+        state: 'done',
+        setTimeout: 12000
+      });
+      return { state: 'done', text: result.message || '模拟执行完成' };
+    } catch (error: any) {
+      this.clearBlocklySelection();
+      const message = error?.message || '模拟执行异常';
+      this.noticeService.update({
+        title,
+        text: message,
+        state: 'error',
+        setTimeout: 20000
+      });
+      return { state: 'error', text: message };
+    } finally {
+      stepSubscription.unsubscribe();
+    }
+  }
+
+  private async runCrazyflieRealOnly(): Promise<ActionState> {
+    const currentBoardModule = await this.projectService.getBoardModule().catch(() => '');
+    const selectedPortType = this.serialService.currentPortInfo?.type;
+    if (!(currentBoardModule === '@aily-project/board-crazyflie' || selectedPortType === 'crazyradio')) {
+      return { state: 'warn', text: '当前项目不是 Crazyflie，无法进行实飞' };
+    }
+    const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
+    const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
+    return await this.uploadCrazyflieFlow(crazyflieCode);
+  }
+
+  private async runCrazyflieSimAndReal(): Promise<ActionState> {
+    const currentBoardModule = await this.projectService.getBoardModule().catch(() => '');
+    const selectedPortType = this.serialService.currentPortInfo?.type;
+    if (!(currentBoardModule === '@aily-project/board-crazyflie' || selectedPortType === 'crazyradio')) {
+      return { state: 'warn', text: '当前项目不是 Crazyflie，无法执行模拟+实飞' };
+    }
+
+    const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
+    const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
+
+    const [simRun, realRun] = await Promise.allSettled([
+      this.simulateCrazyflie(),
+      this.uploadCrazyflieFlow(crazyflieCode),
+    ]);
+
+    const realResult: ActionState = realRun.status === 'fulfilled'
+      ? realRun.value
+      : (realRun.reason || { state: 'error', text: 'Crazyflie 实飞执行失败' });
+
+    if (simRun.status === 'rejected') {
+      const simErrorText = simRun.reason?.text || simRun.reason?.message || '模拟执行失败';
+      this.logService.update({ detail: `[Crazyflie][sim] ${simErrorText}`, state: 'warn' });
+    } else if (simRun.value?.state !== 'done') {
+      this.logService.update({ detail: `[Crazyflie][sim] ${simRun.value?.text || '模拟未完成'}`, state: 'warn' });
+    }
+
+    return realResult;
+  }
+
   async upload(): Promise<ActionState> {
     this.isErrored = false;
     this.cancelled = false;
@@ -397,16 +547,16 @@ export class _UploaderService {
         const currentBoardModule = await this.projectService.getBoardModule().catch(() => '');
         const selectedPortType = this.serialService.currentPortInfo?.type;
         if (currentBoardModule === '@aily-project/board-crazyflie' || selectedPortType === 'crazyradio') {
-          const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
-          const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
-          const result = await this.uploadCrazyflieFlow(crazyflieCode);
+          const realResult = await this.runCrazyflieRealOnly();
+
           this.uploadInProgress = false;
           this._builderService.isUploading = false;
           this.uploadPromiseReject = null;
-          if (result.state === 'error') {
-            reject(result);
+
+          if (realResult.state === 'error') {
+            reject(realResult);
           } else {
-            resolve(result);
+            resolve(realResult);
           }
           return;
         }

@@ -1,0 +1,49 @@
+<div class="sim-panel">
+  <div class="sim-panel__toolbar">
+    <div class="sim-panel__title">3D Simulator</div>
+    <div class="sim-panel__status" [class.running]="running" [class.loading]="!sceneReady && !running">
+      {{ running ? 'running' : (sceneReady ? 'ready' : 'loading') }}
+    </div>
+  </div>
+
+  <div class="sim-panel__controls">
+    <button class="sim-btn" (click)="setPreset('classroom')">教室</button>
+    <button class="sim-btn" (click)="setPreset('home')">家庭</button>
+    <button class="sim-btn" (click)="openFloorPlanFilePicker()">导入平面图</button>
+    <button class="sim-btn" (click)="openSceneModelFilePicker()">导入3D模型</button>
+    <button class="sim-btn" (click)="clearFloorPlan()">清除贴图</button>
+    <button class="sim-btn" (click)="clearSceneModel()">清除3D模型</button>
+    <button class="sim-btn" (click)="resetDronePose()">复位飞行器</button>
+    <button class="sim-btn" (click)="resetCameraView()">重置视角</button>
+    <button class="sim-btn" (click)="togglePause()" [disabled]="!running">{{ paused ? '继续' : '暂停' }}</button>
+    <button class="sim-btn" (click)="stepOnce()" [disabled]="!running">单步</button>
+    <label class="speed-control">
+      速度
+      <input type="range" min="0.2" max="3" step="0.1" [value]="speed" (input)="onSpeedChanged($any($event.target).value)">
+      <span>{{ speed | number:'1.1-1' }}x</span>
+    </label>
+    <input #floorPlanInput type="file" accept="image/*" (change)="onFloorPlanSelected($event)" hidden>
+    <input #sceneModelInput type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" (change)="onSceneModelSelected($event)" hidden>
+  </div>
+
+  <div class="sim-panel__canvas-wrap">
+    <div class="sim-hud">
+      X: {{ telemetry.xCm }} cm,&nbsp; Y: {{ telemetry.yCm }} cm,&nbsp; Altitude: {{ telemetry.altitudeCm }} cm
+    </div>
+    <div #canvasHost class="sim-panel__canvas"></div>
+    <div class="sim-quick-actions">
+      <button class="sim-quick-btn" (click)="toggleGrid()">{{ gridVisible ? 'Grid On' : 'Grid Off' }}</button>
+      <button class="sim-quick-btn" (click)="toggleFlightPath()">{{ flightPathVisible ? 'Path On' : 'Path Off' }}</button>
+      <button class="sim-quick-btn" (click)="resetCameraView()">Reset</button>
+    </div>
+  </div>
+
+  <div class="sim-panel__footer">
+    <div class="sim-panel__step">{{ stepText }}</div>
+    <div class="sim-panel__logs">
+      @for (log of logs; track $index) {
+        <div class="sim-log-line">{{ log }}</div>
+      }
+    </div>
+  </div>
+</div>

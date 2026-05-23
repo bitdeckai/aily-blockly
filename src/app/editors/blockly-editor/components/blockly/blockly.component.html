@@ -1,4 +1,4 @@
-<div #layoutElement class="blockly-layout" [style.grid-template-columns]="toolboxWidth + 'px minmax(0, 1fr)'">
+<div #layoutElement class="blockly-layout" [style.grid-template-columns]="layoutColumns">
      <div
           #toolboxPane
           class="toolbox-pane"
@@ -28,4 +28,10 @@
                (pageClosed)="onPageClosed($event)"
                (pageReopened)="onPageReopened($event)"></app-blockly-workspace-pages>
      </div>
+
+     @if (showSimPanel) {
+     <div class="simulator-pane">
+          <app-crazyflie-sim-panel></app-crazyflie-sim-panel>
+     </div>
+     }
 </div>

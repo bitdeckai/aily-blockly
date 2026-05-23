@@ -95,6 +95,8 @@ import { applyWindowsBlocklyScrollbarThickness } from '../../utils/apply-windows
 import { BlocklyToolboxPaneComponent } from './components/blockly-toolbox-pane/blockly-toolbox-pane.component';
 import { BlocklyWorkspacePagesComponent } from './components/blockly-workspace-pages/blockly-workspace-pages.component';
 import { CodeViewerIpcService } from '../../services/code-viewer-ipc.service';
+import { CrazyflieSimService } from '../../../../services/crazyflie-sim.service';
+import { CrazyflieSimPanelComponent } from './components/crazyflie-sim-panel/crazyflie-sim-panel.component';
 
 // 全局关闭 Blockly 文本输入字段的拼写检查，避免 block 内 input 出现红色波浪线
 (Blockly.FieldTextInput.prototype as unknown as { spellcheck_: boolean }).spellcheck_ = false;
@@ -225,6 +227,7 @@ class ExternalToolboxDeleteArea extends Blockly.DeleteArea {
     CommonModule,
     BlocklyToolboxPaneComponent,
     BlocklyWorkspacePagesComponent,
+    CrazyflieSimPanelComponent,
   ],
   templateUrl: './blockly.component.html',
   styleUrl: './blockly.component.scss',
@@ -242,6 +245,7 @@ export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
   private toolboxResizeAnimationFrame: number | null = null;
   private workspaceResizeAnimationFrame: number | null = null;
   private isToolboxResizing = false;
+  showSimPanel = true;
 
   @Input() devmode;
   generator;
@@ -360,6 +364,12 @@ export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.configService.data;
   }
 
+  get layoutColumns(): string {
+    return this.showSimPanel
+      ? `${this.toolboxWidth}px minmax(0, 1fr) minmax(320px, 42%)`
+      : `${this.toolboxWidth}px minmax(0, 1fr)`;
+  }
+
   constructor(
     private blocklyService: BlocklyService,
     private modal: NzModalService,
@@ -375,6 +385,7 @@ export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
     private themeService: ThemeService,
     private platformService: PlatformService,
     private codeViewerIpcService: CodeViewerIpcService,
+    private crazyflieSimService: CrazyflieSimService,
   ) {
     // Initialize GlobalServiceManager with BitmapUploadService
     const globalServiceManager = GlobalServiceManager.getInstance();
@@ -402,6 +413,16 @@ export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       this.applyMinimapTheme(mode);
     });
+
+    this.crazyflieSimService.panelVisible$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((visible) => {
+        this.showSimPanel = visible;
+        if (this.workspace) {
+          setTimeout(() => this.workspace?.resize(), 0);
+        }
+        this.cdr.markForCheck();
+      });
   }
 
   ngOnInit(): void {

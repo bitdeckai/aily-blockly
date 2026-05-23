@@ -20,8 +20,23 @@
   <div class="project-box ccenter">{{ projectData?.nickname || projectData?.name}}</div>
   <div class="toolbox">
     <div class="zone ccenter">
+      @if (canShowSimulatorControls()) {
+      <div class="btn ccenter" nz-tooltip nzTooltipTitle="显示/隐藏三维模拟区" (click)="toggleSimulatorPanel()"
+        [ngClass]="{ selected: simulatorPanelVisible }">
+        <i class="fa-light fa-cube"></i>
+      </div>
+      <div class="btn ccenter" nz-tooltip nzTooltipTitle="模拟（不操作实物）" (click)="runCrazyflieSimulation()">
+        <i class="fa-light fa-gamepad-modern"></i>
+      </div>
+      <div class="btn ccenter" nz-tooltip nzTooltipTitle="实飞（只操作实物）" (click)="runCrazyflieRealFlight()">
+        <i class="fa-light fa-helicopter"></i>
+      </div>
+      <div class="btn ccenter" nz-tooltip nzTooltipTitle="模拟+实飞（同时执行）" (click)="runCrazyflieSimAndReal()">
+        <i class="fa-light fa-paper-plane-top"></i>
+      </div>
+      }
       @for (btn of headerBtns; track $index) {
-      @if(showInRouter(btn)){
+      @if(showInRouter(btn) && shouldShowHeaderButton(btn)){
       <app-act-btn [icon]="btn.icon" [color]="btn.color" [(state)]="btn.state" nz-tooltip
         nzTooltipTitle="{{ btn.name | translate}}({{btn.text}})" (click)="onClick(btn,$event)" [attr.data-action]="btn.action">
       </app-act-btn>

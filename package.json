@@ -145,6 +145,7 @@
     "build": "ng build --base-href ./ && electron-builder build",
     "build:cn": "node ./scripts/build-electron.js --flavor cn",
     "build:global": "node ./scripts/build-electron.js --flavor global",
+    "sdf:to-glb": "node ./scripts/sdf-to-glb.js",
     "build:mac": "ng build --base-href ./ && electron-builder --mac --arm64 --x64",
     "build:mac:universal": "ng build --base-href ./ && electron-builder --mac --universal"
   },
@@ -206,6 +207,7 @@
     "simplebar-angular": "^3.3.0",
     "sortablejs": "^1.15.6",
     "spark-md5": "^3.0.2",
+    "three": "^0.179.1",
     "tslib": "^2.3.0",
     "ua-parser-js": "^2.0.5",
     "uuid": "^11.1.0",

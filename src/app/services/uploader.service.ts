@@ -61,6 +61,48 @@ export class UploaderService {
     }
   }
 
+  async simulateCrazyflie() {
+    const feedback = await this.actionService.dispatchWithFeedback('simulate-crazyflie-begin', {}, 600000).toPromise();
+    const result = feedback?.data?.result;
+    const ok = feedback?.success !== false && feedback?.data?.success !== false && !!result;
+    if (!ok) {
+      const error: any = new Error(result?.text || feedback?.error || '模拟执行失败');
+      error.state = result?.state || 'error';
+      error.text = result?.text || feedback?.error || '模拟执行失败';
+      error.result = result;
+      throw error;
+    }
+    return result;
+  }
+
+  async flyCrazyflieRealOnly() {
+    const feedback = await this.actionService.dispatchWithFeedback('fly-crazyflie-real-begin', {}, 600000).toPromise();
+    const result = feedback?.data?.result;
+    const ok = feedback?.success !== false && feedback?.data?.success !== false && !!result;
+    if (!ok) {
+      const error: any = new Error(result?.text || feedback?.error || '实飞执行失败');
+      error.state = result?.state || 'error';
+      error.text = result?.text || feedback?.error || '实飞执行失败';
+      error.result = result;
+      throw error;
+    }
+    return result;
+  }
+
+  async flyCrazyflieSimAndReal() {
+    const feedback = await this.actionService.dispatchWithFeedback('fly-crazyflie-sim-real-begin', {}, 600000).toPromise();
+    const result = feedback?.data?.result;
+    const ok = feedback?.success !== false && feedback?.data?.success !== false && !!result;
+    if (!ok) {
+      const error: any = new Error(result?.text || feedback?.error || '模拟+实飞执行失败');
+      error.state = result?.state || 'error';
+      error.text = result?.text || feedback?.error || '模拟+实飞执行失败';
+      error.result = result;
+      throw error;
+    }
+    return result;
+  }
+
   /**
   * 取消当前编译过程
   */

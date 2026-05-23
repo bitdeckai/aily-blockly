@@ -29,6 +29,7 @@ import { AppItem } from '../../../tools/app-store/app-store.config';
 import { APP_LIST } from '../../../configs/tool.config';
 import { Subscription } from 'rxjs';
 import { BleOtaDeviceItem, UploaderBleService } from '../../../services/uploader-ble.service';
+import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
 
 @Component({
   selector: 'app-header',
@@ -124,8 +125,68 @@ export class HeaderComponent implements OnDestroy {
     private probeRsService: ProbeRsService,
     private uploaderBleService: UploaderBleService,
     private ngZone: NgZone,
+    private crazyflieSimService: CrazyflieSimService,
     // private appStoreService: AppStoreService
   ) { }
+
+  get simulatorPanelVisible() {
+    return this.crazyflieSimService.panelVisible$.value;
+  }
+
+  canShowSimulatorControls(): boolean {
+    const inEditor = this.router.url.indexOf('/main/blockly-editor') > -1 || this.router.url.indexOf('/main/code-editor') > -1;
+    const boardName = String(this.projectService.currentBoardConfig?.name || this.currentBoard || '').toLowerCase();
+    return inEditor && boardName.includes('crazyflie');
+  }
+
+  toggleSimulatorPanel(): void {
+    this.crazyflieSimService.togglePanel();
+  }
+
+  async runCrazyflieSimulation(): Promise<void> {
+    if (!this.canShowSimulatorControls()) {
+      this.message.warning('请先切换到 Crazyflie 项目后再进行模拟');
+      return;
+    }
+
+    this.crazyflieSimService.setPanelVisible(true);
+    const result = await this.uploaderService.simulateCrazyflie();
+    if (result.state === 'error') {
+      this.message.error(result.text || '模拟执行失败');
+    } else if (result.state === 'warn') {
+      this.message.warning(result.text || '模拟已取消');
+    }
+  }
+
+  async runCrazyflieRealFlight(): Promise<void> {
+    if (!this.canShowSimulatorControls()) {
+      this.message.warning('请先切换到 Crazyflie 项目后再进行实飞');
+      return;
+    }
+
+    this.crazyflieSimService.setPanelVisible(true);
+    const result = await this.uploaderService.flyCrazyflieRealOnly();
+    if (result.state === 'error') {
+      this.message.error(result.text || '实飞执行失败');
+    } else if (result.state === 'warn') {
+      this.message.warning(result.text || '实飞已取消');
+    }
+  }
+
+  async runCrazyflieSimAndReal(): Promise<void> {
+    if (!this.canShowSimulatorControls()) {
+      this.message.warning('请先切换到 Crazyflie 项目后再进行执行');
+      return;
+    }
+
+    this.crazyflieSimService.setPanelVisible(true);
+    const result = await this.uploaderService.flyCrazyflieSimAndReal();
+    if (result.state === 'error') {
+      this.message.error(result.text || '模拟+实飞执行失败');
+    } else if (result.state === 'warn') {
+      this.message.warning(result.text || '模拟+实飞已取消');
+    }
+  }
 
   async ngAfterViewInit() {
     this.bleDevicesSubscription = this.uploaderBleService.scanStateChanged.subscribe((state) => {
@@ -630,6 +691,12 @@ export class HeaderComponent implements OnDestroy {
           item.state = this.resolveActionErrorState(err, ['result']);
         });
         break;
+      case 'simulate-crazyflie':
+        await this.runCrazyflieSimulation();
+        break;
+      case 'toggle-crazyflie-sim':
+        this.toggleSimulatorPanel();
+        break;
       case 'settings-open':
         this.uiService.openWindow(item.data);
         break;
@@ -959,6 +1026,10 @@ export class HeaderComponent implements OnDestroy {
         }
       }
     }
+  }
+
+  shouldShowHeaderButton(btn: IMenuItem): boolean {
+    return true;
   }
 
   // 判断路由是否为 ['/main/blockly-editor', '/main/code-editor']中的一个，如果是返回true
