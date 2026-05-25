@@ -12,8 +12,53 @@
     </div>
   </div>
 
+  <div class="deck-crazyflie" *ngIf="crazyflieRootItem as cf">
+    <div class="toolbox-node" [attr.data-toolbox-key]="cf.key" [attr.data-toolbox-sort-key]="cf.sortKey">
+      <div class="toolbox-row" [class.selected]="selectedKey === cf.key" (contextmenu)="onToolboxItemContextMenu(cf, $event)">
+        <button type="button" class="toolbox-item" [style.padding-left.px]="5 + cf.level * 16" (click)="onCategoryClick(cf)">
+          <span class="toolbox-item__icon">
+            <i [class]="cf.iconClass"></i>
+          </span>
+          <span class="toolbox-item__label">{{ cf.name }}</span>
+        </button>
+        @if (cf.isCollapsible) {
+          <button type="button" class="toolbox-item__toggle" [attr.aria-expanded]="cf.expanded"
+            (click)="onToggleClick(cf, $event)">
+            <i class="fa-light fa-chevron-right" [class.expanded]="cf.expanded"></i>
+          </button>
+        }
+      </div>
+    </div>
+  </div>
+
+  <div class="deck-panel" *ngIf="showDeckPanel">
+    <div class="deck-panel__title">Crazyflie Decks</div>
+    <div class="deck-panel__list">
+      <div class="deck-row" *ngFor="let deck of deckGroups; trackBy: trackDeck" [class.expanded]="deck.expanded">
+        <button type="button" class="deck-row__header" (click)="onDeckRowClick(deck.key)">
+          <span class="deck-row__icon"><i [class]="deck.iconClass"></i></span>
+          <span class="deck-row__name">{{ deck.name }}</span>
+          <span class="deck-row__chevron"><i class="fa-light fa-chevron-right" [class.expanded]="deck.expanded"></i></span>
+        </button>
+        <div class="deck-row__content" *ngIf="deck.expanded">
+          <button type="button" class="deck-bound-item" *ngFor="let boundItem of deck.boundItems; trackBy: trackDeckBoundItem"
+            (click)="onDeckBoundItemClick(boundItem.key)">
+            {{ boundItem.label }}
+          </button>
+          <button type="button" class="deck-starter-block" *ngFor="let block of deck.starterBlocks"
+            (click)="onDeckStarterBlockClick(block.search)">
+            {{ block.label }}
+          </button>
+          <button type="button" class="deck-shortcut" *ngFor="let shortcut of deck.shortcuts" (click)="onDeckShortcutClick(shortcut.search)">
+            {{ shortcut.label }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toolbox-list" data-toolbox-sortable-container="true">
-    <ng-container *ngFor="let item of items; trackBy: trackItem">
+    <ng-container *ngFor="let item of toolboxVisibleItems; trackBy: trackItem">
       <ng-container *ngTemplateOutlet="toolboxNode; context: { $implicit: item }"></ng-container>
     </ng-container>
   </div>

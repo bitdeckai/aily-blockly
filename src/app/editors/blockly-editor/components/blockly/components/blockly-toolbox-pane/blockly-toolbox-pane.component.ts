@@ -25,6 +25,33 @@ interface ToolboxContextMenuAction {
   disabled?: (item: BlocklyToolboxFacadeItem) => boolean;
 }
 
+interface DeckShortcut {
+  label: string;
+  search: string;
+}
+
+interface DeckBoundItem {
+  key: string;
+  label: string;
+}
+
+interface DeckStarterBlock {
+  label: string;
+  search: string;
+}
+
+interface DeckGroup {
+  key: string;
+  name: string;
+  iconClass: string;
+  expanded: boolean;
+  boundItems: DeckBoundItem[];
+  starterBlocks: DeckStarterBlock[];
+  shortcuts: DeckShortcut[];
+  allTargetKey?: string | null;
+  allSearchQuery?: string;
+}
+
 @Component({
   selector: 'app-blockly-toolbox-pane',
   imports: [CommonModule, TranslateModule, MenuComponent],
@@ -42,6 +69,82 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   showContextMenu = false;
   dragVisualActive = false;
   hoverSuppressed = false;
+  deckGroups: DeckGroup[] = [
+    {
+      key: 'flow-v2',
+      name: 'Flow deck v2',
+      iconClass: 'fa-light fa-arrows-up-down-left-right',
+      expanded: false,
+      boundItems: [],
+      starterBlocks: [
+        { label: '起飞', search: 'takeoff' },
+        { label: '降落', search: 'land' },
+        { label: '向前飞', search: 'move forward' },
+        { label: '向上飞', search: 'move up' },
+        { label: '探测Flow v2', search: 'cf_detect_flow_v2 bcFlow2 flow deck detect' },
+      ],
+      shortcuts: [
+        { label: '起飞/降落', search: 'takeoff land' },
+        { label: '前后左右移动', search: 'move forward back left right' },
+        { label: '上下移动', search: 'move up down' },
+        { label: '等待', search: 'delay wait' },
+      ],
+    },
+    {
+      key: 'multiranger',
+      name: 'Multiranger deck',
+      iconClass: 'fa-light fa-radar',
+      expanded: false,
+      boundItems: [],
+      starterBlocks: [
+        { label: '探测Multiranger', search: 'cf_detect_multiranger' },
+        { label: '前后左右上距离', search: 'cf_mr_get_distance cf_mr_log_all_distances' },
+        { label: '有障碍物？', search: 'cf_mr_has_obstacle' },
+        { label: '单向距离打印', search: 'cf_mr_log_distance' },
+      ],
+      shortcuts: [
+        { label: '前后左右上距离', search: 'range front back left right up' },
+        { label: '是否有障碍物', search: 'obstacle if' },
+        { label: '避障逻辑', search: 'avoid obstacle' },
+      ],
+    },
+    {
+      key: 'led-ring',
+      name: 'LED-ring deck',
+      iconClass: 'fa-light fa-circle-dot',
+      expanded: false,
+      boundItems: [],
+      starterBlocks: [
+        { label: '探测LED-ring', search: 'cf_detect_led_ring deck bcColorLedTop bcColorLedBot' },
+        { label: '设置颜色', search: 'cf_led_ring_set_color ring.solidRed ring.solidGreen ring.solidBlue' },
+        { label: '设置灯效', search: 'cf_led_ring_set_effect ring.effect' },
+        { label: '关闭灯环', search: 'cf_led_ring_off ring.effect 0' },
+      ],
+      shortcuts: [
+        { label: '设置颜色', search: 'led color' },
+        { label: '闪烁/呼吸', search: 'led blink breathe' },
+        { label: '灯效模式', search: 'led effect ring' },
+      ],
+    },
+    {
+      key: 'buzzer',
+      name: 'Buzzer deck',
+      iconClass: 'fa-light fa-volume',
+      expanded: false,
+      boundItems: [],
+      starterBlocks: [
+        { label: '探测Buzzer', search: 'cf_detect_buzzer deck bcBuzzer' },
+        { label: '蜂鸣', search: 'cf_buzzer_beep sound.effect' },
+        { label: '提示音', search: 'cf_buzzer_beep duration times' },
+        { label: '旋律', search: 'buzzer melody note (planned)' },
+      ],
+      shortcuts: [
+        { label: '蜂鸣', search: 'buzzer beep tone' },
+        { label: '提示音', search: 'sound alert' },
+        { label: '旋律', search: 'melody note' },
+      ],
+    },
+  ];
   contextMenuPosition = { x: 0, y: 0 };
   contextMenuItems: IMenuItem[] = [];
   contextMenuTarget: BlocklyToolboxFacadeItem | null = null;
@@ -111,6 +214,7 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
       .subscribe(([items, selectedKey, searchQuery]) => {
         this.ngZone.run(() => {
           this.items = items;
+          this.refreshDeckBindings(items);
           this.selectedKey = selectedKey;
           this.searchQuery = searchQuery;
           if (this.contextMenuTarget && !this.findItemByKey(this.contextMenuTarget.key, items)) {
@@ -137,6 +241,14 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   }
 
   trackItem(_index: number, item: BlocklyToolboxFacadeItem): string {
+    return item.key;
+  }
+
+  trackDeck(_index: number, deck: DeckGroup): string {
+    return deck.key;
+  }
+
+  trackDeckBoundItem(_index: number, item: DeckBoundItem): string {
     return item.key;
   }
 
@@ -205,6 +317,176 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
 
   onLibraryManagerClick() {
     this.libraryManagerRequested.emit();
+  }
+
+  get showDeckPanel(): boolean {
+    return this.items.some((item) => String(item.name || '').toLowerCase().includes('crazyflie'));
+  }
+
+  get crazyflieRootItem(): BlocklyToolboxFacadeItem | null {
+    return this.items.find((item) => String(item.name || '').toLowerCase().includes('crazyflie')) || null;
+  }
+
+  get toolboxVisibleItems(): BlocklyToolboxFacadeItem[] {
+    if (!this.showDeckPanel) {
+      return this.items;
+    }
+
+    return this.items.filter((item) => String(item.name || '').toLowerCase().trim() !== 'crazyflie');
+  }
+
+  onDeckRowClick(deckKey: string): void {
+    this.deckGroups = this.deckGroups.map((deck) =>
+      deck.key === deckKey ? { ...deck, expanded: !deck.expanded } : deck,
+    );
+  }
+
+  onDeckShortcutClick(search: string): void {
+    this.blocklyService.activateToolboxSearch();
+    this.blocklyService.setToolboxSearchQuery(search);
+  }
+
+  onDeckStarterBlockClick(search: string): void {
+    this.blocklyService.activateToolboxSearch();
+    this.blocklyService.setToolboxSearchQuery(search);
+  }
+
+  onDeckBoundItemClick(itemKey: string): void {
+    if (itemKey.startsWith('__deck_all__:')) {
+      const deckKey = itemKey.replace('__deck_all__:', '');
+      this.onDeckShowAll(deckKey);
+      return;
+    }
+
+    const item = this.findItemByKey(itemKey, this.items);
+    if (!item) {
+      return;
+    }
+
+    this.blocklyService.clickToolboxFacadeItem(item.key);
+  }
+
+  private onDeckShowAll(deckKey: string): void {
+    const deck = this.deckGroups.find((item) => item.key === deckKey);
+    if (!deck) {
+      return;
+    }
+
+    if (deck.allTargetKey) {
+      this.blocklyService.clearToolboxSearch();
+      this.blocklyService.clickToolboxFacadeItem(deck.allTargetKey);
+      return;
+    }
+
+    const query = String(deck.allSearchQuery || '').trim();
+    if (!query) {
+      return;
+    }
+
+    this.blocklyService.activateToolboxSearch();
+    this.blocklyService.setToolboxSearchQuery(query);
+  }
+
+  private refreshDeckBindings(items: BlocklyToolboxFacadeItem[]): void {
+    const candidates = this.flattenToolboxItems(items)
+      .filter((item) => item.selectable && item.level > 0)
+      .filter((item) => {
+        const name = String(item.name || '').toLowerCase().trim();
+        return !!name && name !== 'crazyflie';
+      });
+
+    const deckMatchers: Array<{ key: string; pattern: RegExp }> = [
+      { key: 'multiranger', pattern: /(multiranger|ranger|distance|obstacle|range|tof|距离|避障|前方|后方|左侧|右侧|上方)/i },
+      { key: 'led-ring', pattern: /(led|ring|light|color|blink|breathe|rainbow|灯|颜色|闪烁|呼吸)/i },
+      { key: 'buzzer', pattern: /(buzzer|beep|tone|sound|melody|note|蜂鸣|声音|旋律|音符)/i },
+      { key: 'flow-v2', pattern: /(flow|takeoff|land|move|hover|delay|wait|height|起飞|降落|移动|悬停|等待|高度)/i },
+    ];
+
+    const grouped = new Map<string, BlocklyToolboxFacadeItem[]>();
+    deckMatchers.forEach((deck) => grouped.set(deck.key, []));
+
+    candidates.forEach((item) => {
+      const text = `${item.name || ''} ${item.key || ''}`;
+      const deck = deckMatchers.find((entry) => entry.pattern.test(text));
+      if (!deck) {
+        return;
+      }
+
+      const list = grouped.get(deck.key);
+      if (!list || list.some((boundItem) => boundItem.key === item.key)) {
+        return;
+      }
+
+      list.push(item);
+    });
+
+    this.deckGroups = this.deckGroups.map((deck) => ({
+      ...deck,
+      boundItems: this.buildDeckBoundItems(deck.key, grouped.get(deck.key) || []),
+      allTargetKey: this.resolveDeckAllTargetKey(grouped.get(deck.key) || []),
+      allSearchQuery: this.buildDeckAllSearchQuery(deck, grouped.get(deck.key) || []),
+    }));
+  }
+
+  private buildDeckBoundItems(deckKey: string, items: BlocklyToolboxFacadeItem[]): DeckBoundItem[] {
+    const dedup = new Map<string, DeckBoundItem>();
+    items.forEach((item) => {
+      if (!dedup.has(item.key)) {
+        dedup.set(item.key, { key: item.key, label: item.name || item.key });
+      }
+    });
+
+    return [{ key: `__deck_all__:${deckKey}`, label: '所有' }, ...Array.from(dedup.values())];
+  }
+
+  private resolveDeckAllTargetKey(items: BlocklyToolboxFacadeItem[]): string | null {
+    if (!items.length) {
+      return null;
+    }
+
+    const preferred = [...items].sort((a, b) => {
+      if (a.level !== b.level) {
+        return a.level - b.level;
+      }
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+
+    return preferred[0]?.key || null;
+  }
+
+  private buildDeckAllSearchQuery(deck: DeckGroup, items: BlocklyToolboxFacadeItem[]): string {
+    const terms = new Set<string>();
+
+    terms.add(deck.name);
+    terms.add(deck.key.replace(/-/g, ' '));
+    terms.add('deck detect');
+
+    items.forEach((item) => {
+      terms.add(String(item.name || ''));
+      terms.add(String(item.key || '').replace(/_/g, ' '));
+    });
+
+    deck.starterBlocks.forEach((item) => terms.add(item.search));
+    deck.shortcuts.forEach((item) => terms.add(item.search));
+
+    return Array.from(terms)
+      .map((item) => item.trim())
+      .filter((item) => !!item)
+      .join(' ');
+  }
+
+  private flattenToolboxItems(items: BlocklyToolboxFacadeItem[]): BlocklyToolboxFacadeItem[] {
+    const result: BlocklyToolboxFacadeItem[] = [];
+    const visit = (nodes: BlocklyToolboxFacadeItem[]) => {
+      nodes.forEach((node) => {
+        result.push(node);
+        if (node.children.length) {
+          visit(node.children);
+        }
+      });
+    };
+    visit(items);
+    return result;
   }
 
   private scheduleSortableSync() {

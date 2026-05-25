@@ -204,12 +204,12 @@ export class _UploaderService {
       return { state: 'error', text: '未找到 Crazyflie 测试接口' };
     }
 
-    const hasFlightCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(/.test(crazyflieCode || '');
+    const hasRunFlowCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(/.test(crazyflieCode || '');
     const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
-    const executionBlocks = hasFlightCmd ? this.getCrazyflieExecutionBlocksInOrder() : [];
+    const executionBlocks = hasRunFlowCmd ? this.getCrazyflieExecutionBlocksInOrder() : [];
     let receivedRealtimeLog = false;
     let disposeFlowLog: (() => void) | null = null;
-    if (hasFlightCmd && typeof api.onFlowLog === 'function') {
+    if (hasRunFlowCmd && typeof api.onFlowLog === 'function') {
       disposeFlowLog = api.onFlowLog((payload: any) => {
         const line = String(payload?.line || '').trim();
         if (!line) {
@@ -246,7 +246,7 @@ export class _UploaderService {
 
     let result: any;
     try {
-      result = hasFlightCmd
+      result = hasRunFlowCmd
         ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex })
         : await api.testLink({ timeoutMs: 5000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex });
     } finally {
@@ -267,13 +267,13 @@ export class _UploaderService {
           this.logService.update({ detail });
         });
       }
-      const summary = hasFlightCmd
+      const summary = hasRunFlowCmd
         ? (result?.message || `飞行流程执行完成 (${executed.length} 步)`)
         : (links.length > 0 ? `检测到 ${links.length} 个链接` : (result?.message || '链接成功'));
       this.noticeService.update({
         title,
         text: summary,
-        detail: hasFlightCmd ? executed.join('\n') : links.join('\n'),
+        detail: hasRunFlowCmd ? executed.join('\n') : links.join('\n'),
         state: 'done',
         setTimeout: 15000
       });
@@ -300,9 +300,20 @@ export class _UploaderService {
     const executableTypes = new Set([
       'cf_takeoff',
       'cf_land',
+      'cf_motor_ramp_test',
       'cf_delay',
       'cf_print',
       'cf_print_text',
+      'cf_detect_flow_v2',
+      'cf_detect_multiranger',
+      'cf_mr_log_distance',
+      'cf_mr_log_all_distances',
+      'cf_detect_led_ring',
+      'cf_led_ring_set_color',
+      'cf_led_ring_set_effect',
+      'cf_led_ring_off',
+      'cf_detect_buzzer',
+      'cf_buzzer_beep',
       'cf_move_forward',
       'cf_move_back',
       'cf_move_left',

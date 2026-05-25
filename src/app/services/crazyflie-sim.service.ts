@@ -11,7 +11,7 @@ export interface CrazyfliePose {
 }
 
 interface CrazyflieSimCommand {
-  type: 'takeoff' | 'land' | 'delay' | 'move' | 'print' | 'test_link';
+  type: 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'test_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
   value?: any;
 }
 
@@ -182,6 +182,74 @@ export class CrazyflieSimService {
             this.appendLog('sim: test_link');
             executed.push('test_link');
             break;
+          case 'detect_flow_v2':
+            this.appendLog('sim: detect_flow_v2 => true');
+            executed.push('detect_flow_v2:1');
+            await this.waitWithControl(180, true);
+            break;
+          case 'detect_multiranger':
+            this.appendLog('sim: detect_multiranger => true');
+            executed.push('detect_multiranger:1');
+            await this.waitWithControl(180, true);
+            break;
+          case 'mr_log_distance': {
+            const dir = String(command.value?.dir || 'front');
+            const distances = this.getSimRangeDistances(pose);
+            const distance = this.formatDistanceMeters(distances[dir] ?? null);
+            this.appendLog(`sim: mr_${dir}=${distance}`);
+            executed.push(`mr_log_distance:${dir}:${distance}`);
+            await this.waitWithControl(140, true);
+            break;
+          }
+          case 'mr_log_all_distances': {
+            const distances = this.getSimRangeDistances(pose);
+            const line = ['front', 'back', 'left', 'right', 'up']
+              .map((key) => `${key}=${this.formatDistanceMeters(distances[key] ?? null)}`)
+              .join(',');
+            this.appendLog(`sim: ${line}`);
+            executed.push(`mr_log_all_distances:${line}`);
+            await this.waitWithControl(160, true);
+            break;
+          }
+          case 'detect_led_ring':
+            this.appendLog('sim: detect_led_ring => true');
+            executed.push('detect_led_ring:1');
+            await this.waitWithControl(120, true);
+            break;
+          case 'led_ring_set_color': {
+            const r = Math.max(0, Math.min(255, Number(command.value?.r ?? 255)));
+            const g = Math.max(0, Math.min(255, Number(command.value?.g ?? 0)));
+            const b = Math.max(0, Math.min(255, Number(command.value?.b ?? 0)));
+            this.appendLog(`sim: led_ring_set_color ${r},${g},${b}`);
+            executed.push(`led_ring_set_color:${r}:${g}:${b}`);
+            await this.waitWithControl(120, true);
+            break;
+          }
+          case 'led_ring_set_effect': {
+            const effect = Math.max(0, Number(command.value?.effect ?? 0));
+            this.appendLog(`sim: led_ring_set_effect ${effect}`);
+            executed.push(`led_ring_set_effect:${effect}`);
+            await this.waitWithControl(120, true);
+            break;
+          }
+          case 'led_ring_off':
+            this.appendLog('sim: led_ring_off');
+            executed.push('led_ring_off');
+            await this.waitWithControl(120, true);
+            break;
+          case 'detect_buzzer':
+            this.appendLog('sim: detect_buzzer => true');
+            executed.push('detect_buzzer:1');
+            await this.waitWithControl(120, true);
+            break;
+          case 'buzzer_beep': {
+            const duration = Math.max(20, Number(command.value?.duration ?? 120));
+            const times = Math.max(1, Number(command.value?.times ?? 1));
+            this.appendLog(`sim: buzzer_beep duration=${duration}ms times=${times}`);
+            executed.push(`buzzer_beep:${duration}:${times}:1`);
+            await this.waitWithControl(120, true);
+            break;
+          }
           case 'takeoff':
             pose.y = Math.max(0.5, pose.y);
             this.pose$.next({ ...pose });
@@ -196,6 +264,20 @@ export class CrazyflieSimService {
             executed.push('land');
             await this.waitWithControl(400, true);
             break;
+          case 'spin_motors': {
+            const start = Math.max(1000, Math.min(60000, Number(command.value?.start ?? 20000)));
+            const end = Math.max(1000, Math.min(60000, Number(command.value?.end ?? 25000)));
+            const step = Math.max(50, Math.min(5000, Number(command.value?.step ?? 500)));
+            const intervalMs = Math.max(20, Math.min(500, Number(command.value?.intervalMs ?? 100)));
+            const settleSecs = Math.max(0.2, Math.min(5, Number(command.value?.settleSecs ?? 0.8)));
+            this.appendLog(`sim: motor_ramp_test start=${start} end=${end} step=${step} interval=${intervalMs}ms settle=${settleSecs}s`);
+            executed.push(`motor_ramp_test:${start}:${end}:${step}:${intervalMs}:${settleSecs.toFixed(2)}:1`);
+            const span = Math.abs(end - start);
+            const rampCount = Math.floor(span / step) + 1;
+            const totalMs = Math.max(200, rampCount * intervalMs * 2 + settleSecs * 1000);
+            await this.waitWithControl(totalMs, false);
+            break;
+          }
           case 'delay': {
             const sec = Math.max(0, Number(command.value || 0));
             this.appendLog(`sim: delay ${sec}s`);
@@ -306,16 +388,16 @@ export class CrazyflieSimService {
   private applyMove(pose: CrazyfliePose, direction: string, distance: number): void {
     switch (direction) {
       case 'forward':
-        pose.z -= distance;
-        break;
-      case 'back':
-        pose.z += distance;
-        break;
-      case 'left':
         pose.x -= distance;
         break;
-      case 'right':
+      case 'back':
         pose.x += distance;
+        break;
+      case 'left':
+        pose.z += distance;
+        break;
+      case 'right':
+        pose.z -= distance;
         break;
       case 'up':
         pose.y += distance;
@@ -334,10 +416,32 @@ export class CrazyflieSimService {
         return 'takeoff';
       case 'land':
         return 'land';
+      case 'spin_motors':
+        return `motor_ramp_test:${Number(command.value?.start ?? 20000)}:${Number(command.value?.end ?? 25000)}:${Number(command.value?.step ?? 500)}:${Number(command.value?.intervalMs ?? 100)}:${Number(command.value?.settleSecs ?? 0.8)}`;
       case 'delay':
         return `delay:${Number(command.value || 0)}`;
       case 'print':
         return `print:${String(command.value || '')}`;
+      case 'detect_flow_v2':
+        return 'detect_flow_v2';
+      case 'detect_multiranger':
+        return 'detect_multiranger';
+      case 'mr_log_distance':
+        return `mr_log_distance:${String(command.value?.dir || 'front')}`;
+      case 'mr_log_all_distances':
+        return 'mr_log_all_distances';
+      case 'detect_led_ring':
+        return 'detect_led_ring';
+      case 'led_ring_set_color':
+        return `led_ring_set_color:${Number(command.value?.r ?? 255)}:${Number(command.value?.g ?? 0)}:${Number(command.value?.b ?? 0)}`;
+      case 'led_ring_set_effect':
+        return `led_ring_set_effect:${Number(command.value?.effect ?? 0)}`;
+      case 'led_ring_off':
+        return 'led_ring_off';
+      case 'detect_buzzer':
+        return 'detect_buzzer';
+      case 'buzzer_beep':
+        return `buzzer_beep:${Number(command.value?.duration ?? 120)}:${Number(command.value?.times ?? 1)}`;
       case 'move':
         return `move:${String(command.value?.dir || '')}:${Number(command.value?.distance || 0)}`;
       default:
@@ -357,12 +461,81 @@ export class CrazyflieSimService {
         commands.push({ type: 'test_link' });
         continue;
       }
+      if (/^cf_detect_flow_v2\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'detect_flow_v2' });
+        continue;
+      }
+      if (/^cf_detect_multiranger\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'detect_multiranger' });
+        continue;
+      }
+
+      const mrLogDistanceMatch = /^cf_mr_log_distance\s*\(\s*['\"](front|back|left|right|up)['\"]\s*\)\s*;?$/.exec(line);
+      if (mrLogDistanceMatch) {
+        commands.push({ type: 'mr_log_distance', value: { dir: mrLogDistanceMatch[1] } });
+        continue;
+      }
+
+      if (/^cf_mr_log_all_distances\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'mr_log_all_distances' });
+        continue;
+      }
+      if (/^cf_detect_led_ring\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'detect_led_ring' });
+        continue;
+      }
+
+      const ledSetColorMatch = /^cf_led_ring_set_color\s*\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*\)\s*;?$/.exec(line);
+      if (ledSetColorMatch) {
+        commands.push({
+          type: 'led_ring_set_color',
+          value: { r: Number(ledSetColorMatch[1]), g: Number(ledSetColorMatch[2]), b: Number(ledSetColorMatch[3]) },
+        });
+        continue;
+      }
+
+      const ledEffectMatch = /^cf_led_ring_set_effect\s*\(\s*([0-9]+)\s*\)\s*;?$/.exec(line);
+      if (ledEffectMatch) {
+        commands.push({ type: 'led_ring_set_effect', value: { effect: Number(ledEffectMatch[1]) } });
+        continue;
+      }
+
+      if (/^cf_led_ring_off\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'led_ring_off' });
+        continue;
+      }
+
+      if (/^cf_detect_buzzer\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'detect_buzzer' });
+        continue;
+      }
+
+      const buzzerMatch = /^cf_buzzer_beep\s*\(\s*([0-9]+)\s*,\s*([0-9]+)\s*\)\s*;?$/.exec(line);
+      if (buzzerMatch) {
+        commands.push({ type: 'buzzer_beep', value: { duration: Number(buzzerMatch[1]), times: Number(buzzerMatch[2]) } });
+        continue;
+      }
       if (/^cf_takeoff\s*\(\s*\)\s*;?$/.test(line)) {
         commands.push({ type: 'takeoff' });
         continue;
       }
       if (/^cf_land\s*\(\s*\)\s*;?$/.test(line)) {
         commands.push({ type: 'land' });
+        continue;
+      }
+
+      const motorRampMatch = /^cf_motor_ramp_test\s*\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)\s*;?$/.exec(line);
+      if (motorRampMatch) {
+        commands.push({
+          type: 'spin_motors',
+          value: {
+            start: Number(motorRampMatch[1]),
+            end: Number(motorRampMatch[2]),
+            step: Number(motorRampMatch[3]),
+            intervalMs: Number(motorRampMatch[4]),
+            settleSecs: Number(motorRampMatch[5]),
+          },
+        });
         continue;
       }
 
@@ -419,5 +592,26 @@ export class CrazyflieSimService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+  }
+
+  private getSimRangeDistances(pose: CrazyfliePose): Record<string, number> {
+    const room = this.roomSize$.value;
+    const halfW = room.width / 2;
+    const halfD = room.depth / 2;
+
+    return {
+      front: Math.max(0, pose.x + halfW),
+      back: Math.max(0, halfW - pose.x),
+      left: Math.max(0, halfD - pose.z),
+      right: Math.max(0, pose.z + halfD),
+      up: Math.max(0, room.height - pose.y),
+    };
+  }
+
+  private formatDistanceMeters(distance: number | null): string {
+    if (distance == null || !Number.isFinite(distance)) {
+      return 'none';
+    }
+    return distance.toFixed(3);
   }
 }

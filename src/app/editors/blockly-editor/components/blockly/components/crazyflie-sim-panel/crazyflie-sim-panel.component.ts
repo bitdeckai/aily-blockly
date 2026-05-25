@@ -90,6 +90,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private readonly trailHistoryColor = '#0068d6';
   private readonly trailPrimaryColor = '#00a7ff';
   private readonly trailEndpointColor = '#ff2d55';
+  private readonly defaultDroneYawOffset = Math.PI;
   private readonly defaultCameraPosition = new Vector3(5.2, 4.0, -3.2);
   private readonly defaultCameraTarget = new Vector3(0.2, 0.7, 0);
   private lastRenderTs = 0;
@@ -404,6 +405,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     });
 
     group.position.set(0, 0.06, 0);
+    // Keep model forward aligned with simulation forward axis.
+    group.rotation.y = this.defaultDroneYawOffset;
     return group;
   }
 
@@ -742,7 +745,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   private updateFlightPath(currentPosition: Vector3): void {
-    if (!this.trailLine || !this.trailTubeMesh || !this.running) {
+    if (!this.trailLine || !this.trailTubeMesh) {
       return;
     }
 
