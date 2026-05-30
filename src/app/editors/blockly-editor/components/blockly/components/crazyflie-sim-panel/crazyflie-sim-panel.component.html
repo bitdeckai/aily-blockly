@@ -34,6 +34,7 @@
     <div class="sim-quick-actions">
       <button class="sim-quick-btn" (click)="toggleGrid()">{{ gridVisible ? 'Grid On' : 'Grid Off' }}</button>
       <button class="sim-quick-btn" (click)="toggleFlightPath()">{{ flightPathVisible ? 'Path On' : 'Path Off' }}</button>
+      <button class="sim-quick-btn" (click)="cycleTrailTheme()">轨迹色: {{ trailThemeLabel }}</button>
       <button class="sim-quick-btn" (click)="resetCameraView()">Reset</button>
     </div>
   </div>

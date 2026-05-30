@@ -27,6 +27,7 @@ export interface CrazyflieStepEvent {
 export class CrazyflieSimService {
   private readonly originPose: CrazyfliePose = { x: 0, y: 0.06, z: 0, yaw: 0 };
   private readonly classroomDeskHelipadPose: CrazyfliePose = { x: 0.39, y: 0.43, z: -0.43, yaw: 0 };
+  private readonly baseMoveSpeedMps = 0.9;
 
   panelVisible$ = new BehaviorSubject<boolean>(true);
   running$ = new BehaviorSubject<boolean>(false);
@@ -258,7 +259,7 @@ export class CrazyflieSimService {
             await this.waitWithControl(400, true);
             break;
           case 'land':
-            pose.y = 0.06;
+            pose.y = this.getLandingReferenceY();
             this.pose$.next({ ...pose });
             this.appendLog('sim: land');
             executed.push('land');
@@ -296,11 +297,9 @@ export class CrazyflieSimService {
           case 'move': {
             const direction = String(command.value?.dir || 'forward');
             const distance = Math.max(0.01, Number(command.value?.distance || 0.2));
-            this.applyMove(pose, direction, distance);
-            this.pose$.next({ ...pose });
             this.appendLog(`sim: move ${direction} ${distance}m`);
             executed.push(`move:${direction}:${distance}`);
-            await this.waitWithControl(500, true);
+            await this.movePoseOverTime(pose, direction, distance);
             break;
           }
           default:
@@ -385,6 +384,10 @@ export class CrazyflieSimService {
     return { ...this.originPose };
   }
 
+  private getLandingReferenceY(): number {
+    return Math.max(0.06, this.getResetPoseForPreset(this.roomPreset$.value).y);
+  }
+
   private applyMove(pose: CrazyfliePose, direction: string, distance: number): void {
     switch (direction) {
       case 'forward':
@@ -403,11 +406,48 @@ export class CrazyflieSimService {
         pose.y += distance;
         break;
       case 'down':
-        pose.y = Math.max(0.06, pose.y - distance);
+        pose.y = Math.max(this.getLandingReferenceY(), pose.y - distance);
         break;
       default:
         break;
     }
+  }
+
+  private async movePoseOverTime(pose: CrazyfliePose, direction: string, distance: number): Promise<void> {
+    const startPose: CrazyfliePose = { ...pose };
+    const targetPose: CrazyfliePose = { ...pose };
+    this.applyMove(targetPose, direction, distance);
+
+    const speedScale = Math.max(0.2, Number(this.speed$.value || 1));
+    const velocity = this.baseMoveSpeedMps * speedScale;
+    const durationMs = Math.max(120, (Math.max(0.01, distance) / Math.max(0.05, velocity)) * 1000);
+
+    let elapsedMs = 0;
+    while (elapsedMs < durationMs) {
+      if (this.cancelRequested) {
+        return;
+      }
+
+      const canContinue = await this.waitForRunPermission();
+      if (!canContinue) {
+        return;
+      }
+
+      const sliceMs = Math.min(40, durationMs - elapsedMs);
+      await this.sleep(sliceMs);
+      elapsedMs += sliceMs;
+
+      const t = Math.max(0, Math.min(1, elapsedMs / durationMs));
+      pose.x = startPose.x + (targetPose.x - startPose.x) * t;
+      pose.y = startPose.y + (targetPose.y - startPose.y) * t;
+      pose.z = startPose.z + (targetPose.z - startPose.z) * t;
+      this.pose$.next({ ...pose });
+    }
+
+    pose.x = targetPose.x;
+    pose.y = targetPose.y;
+    pose.z = targetPose.z;
+    this.pose$.next({ ...pose });
   }
 
   private commandLabel(command: CrazyflieSimCommand): string {

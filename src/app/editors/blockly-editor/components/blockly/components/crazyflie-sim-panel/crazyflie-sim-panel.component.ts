@@ -14,6 +14,7 @@ import {
   EdgesGeometry,
   Group,
   LineBasicMaterial,
+  LineDashedMaterial,
   Line,
   LineSegments,
   MathUtils,
@@ -86,10 +87,13 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private readonly trailMinDistance = 0.035;
   private readonly trailMaxPoints = 800;
   private readonly trailRecentPoints = 40;
-  private readonly trailTubeRadius = 0.02;
-  private readonly trailHistoryColor = '#0068d6';
-  private readonly trailPrimaryColor = '#00a7ff';
-  private readonly trailEndpointColor = '#ff2d55';
+  private readonly trailTubeRadius = 0.014;
+  private readonly trailThemes = [
+    { label: '红', history: '#ff8a8a', primary: '#ff3b30', endpoint: '#ffd166', tubeEmissive: '#8d1e17' },
+    { label: '青', history: '#8edbf0', primary: '#17b7d8', endpoint: '#b5f3ff', tubeEmissive: '#0d5e6f' },
+    { label: '黄', history: '#ffe49a', primary: '#ffbe0b', endpoint: '#fff1b8', tubeEmissive: '#805d05' },
+  ];
+  private trailThemeIndex = 0;
   private readonly defaultDroneYawOffset = Math.PI;
   private readonly defaultCameraPosition = new Vector3(5.2, 4.0, -3.2);
   private readonly defaultCameraTarget = new Vector3(0.2, 0.7, 0);
@@ -219,6 +223,15 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   onSpeedChanged(value: string): void {
     const speed = Number(value || 1);
     this.simService.setSpeed(speed);
+  }
+
+  get trailThemeLabel(): string {
+    return this.trailThemes[this.trailThemeIndex]?.label || '红';
+  }
+
+  cycleTrailTheme(): void {
+    this.trailThemeIndex = (this.trailThemeIndex + 1) % this.trailThemes.length;
+    this.applyTrailTheme();
   }
 
   resetCameraView(): void {
@@ -674,14 +687,17 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       return;
     }
 
+    const theme = this.trailThemes[this.trailThemeIndex];
+
     const historyGeometry = new BufferGeometry().setFromPoints([]);
-    const historyMaterial = new LineBasicMaterial({ color: this.trailHistoryColor, transparent: true, opacity: 0.95, linewidth: 3 });
+    const historyMaterial = new LineDashedMaterial({ color: theme.history, transparent: true, opacity: 0.45, linewidth: 2, dashSize: 0.08, gapSize: 0.05 });
     this.trailHistoryLine = new Line(historyGeometry, historyMaterial);
     this.trailHistoryLine.visible = this.flightPathVisible;
+    this.trailHistoryLine.computeLineDistances();
     this.scene.add(this.trailHistoryLine);
 
     const geometry = new BufferGeometry().setFromPoints([]);
-    const material = new LineBasicMaterial({ color: this.trailPrimaryColor, transparent: true, opacity: 1, linewidth: 4 });
+    const material = new LineBasicMaterial({ color: theme.primary, transparent: true, opacity: 0.95, linewidth: 3 });
     this.trailLine = new Line(geometry, material);
     this.trailLine.visible = this.flightPathVisible;
     this.scene.add(this.trailLine);
@@ -693,8 +709,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.trailTubeMesh = new Mesh(
       new TubeGeometry(initialTubeCurve, 8, this.trailTubeRadius, 10, false),
       new MeshStandardMaterial({
-        color: this.trailPrimaryColor,
-        emissive: '#005ca8',
+        color: theme.primary,
+        emissive: theme.tubeEmissive,
         emissiveIntensity: 0.35,
         roughness: 0.38,
         metalness: 0.08,
@@ -708,8 +724,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.trailEndpoint = new Mesh(
       new SphereGeometry(0.03, 14, 14),
       new MeshStandardMaterial({
-        color: this.trailEndpointColor,
-        emissive: this.trailEndpointColor,
+        color: theme.endpoint,
+        emissive: theme.endpoint,
         emissiveIntensity: 0.9,
         roughness: 0.28,
         metalness: 0.04,
@@ -757,8 +773,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.trailPoints.splice(0, this.trailPoints.length - this.trailMaxPoints);
       }
       if (this.trailHistoryLine) {
+        const historyPoints = this.trailPoints.slice(0, Math.max(0, this.trailPoints.length - this.trailRecentPoints + 1));
         this.trailHistoryLine.geometry.dispose();
-        this.trailHistoryLine.geometry = new BufferGeometry().setFromPoints(this.trailPoints);
+        this.trailHistoryLine.geometry = new BufferGeometry().setFromPoints(historyPoints);
+        this.trailHistoryLine.computeLineDistances();
       }
       const recentPoints = this.trailPoints.slice(-this.trailRecentPoints);
       this.trailLine.geometry.dispose();
@@ -774,6 +792,36 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.trailEndpoint.position.copy(p);
         this.trailEndpoint.visible = this.flightPathVisible;
       }
+    }
+  }
+
+  private applyTrailTheme(): void {
+    const theme = this.trailThemes[this.trailThemeIndex];
+
+    if (this.trailHistoryLine) {
+      const mat = this.trailHistoryLine.material as LineDashedMaterial;
+      mat.color.set(theme.history);
+      mat.needsUpdate = true;
+    }
+
+    if (this.trailLine) {
+      const mat = this.trailLine.material as LineBasicMaterial;
+      mat.color.set(theme.primary);
+      mat.needsUpdate = true;
+    }
+
+    if (this.trailTubeMesh) {
+      const mat = this.trailTubeMesh.material as MeshStandardMaterial;
+      mat.color.set(theme.primary);
+      mat.emissive.set(theme.tubeEmissive);
+      mat.needsUpdate = true;
+    }
+
+    if (this.trailEndpoint) {
+      const mat = this.trailEndpoint.material as MeshStandardMaterial;
+      mat.color.set(theme.endpoint);
+      mat.emissive.set(theme.endpoint);
+      mat.needsUpdate = true;
     }
   }
 
