@@ -67,13 +67,78 @@ $header-inner-height: 38px;
 
   .project-box {
     position: absolute;
-    width: 20vw;
-    left: 40vw;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 26vw;
+    width: max-content;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 4;
+    pointer-events: none;
+  }
+
+  .cf-telemetry-top {
+    position: relative;
+    width: 188px;
+    margin-left: 39px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 10px;
+    line-height: 1.1;
+
+    .cf-row {
+      display: grid;
+      grid-template-columns: 34px 82px 30px 40px;
+      align-items: center;
+      gap: 4px;
+      color: var(--aily-text-secondary);
+
+      .label {
+        color: var(--aily-text-hint);
+      }
+
+      .bar {
+        height: 6px;
+        border-radius: 4px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.12);
+
+        .fill {
+          height: 100%;
+          transition: width 0.2s ease;
+
+          &.level-good {
+            background: linear-gradient(90deg, #3ac57b, #6de6a5);
+          }
+
+          &.level-warn {
+            background: linear-gradient(90deg, #e6b93f, #f3d76f);
+          }
+
+          &.level-danger {
+            background: linear-gradient(90deg, #d65a5a, #f08787);
+          }
+        }
+      }
+
+      .value {
+        text-align: right;
+        color: var(--aily-text-primary);
+      }
+
+      .volts {
+        color: var(--aily-text-hint);
+        font-size: 10px;
+      }
+    }
   }
 
   .toolbox {
     position: relative;
+    z-index: 2;
     display: flex;
     height: 100%;
     background: var(--aily-bg-primary);
@@ -167,5 +232,11 @@ $header-inner-height: 38px;
     &:hover {
       color: var(--aily-color-error);
     }
+  }
+}
+
+@media (max-width: 1360px) {
+  .header-box .cf-telemetry-top {
+    display: none;
   }
 }

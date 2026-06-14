@@ -1,6 +1,6 @@
 @if(data){
 <div class="notification-box animate__animated animate__fadeInRight animate__faster"
-    [ngClass]="{'animate__fadeOutRight': willClose}" [ngStyle]="{'width':tempWidth +'px'}">
+    [ngClass]="{'animate__fadeOutRight': willClose, 'with-telemetry': !!data?.telemetry}" [ngStyle]="{'width':tempWidth +'px'}">
     @switch (data.state) {
     @case ("doing") {
     <div class="box lloading ccenter">
@@ -42,6 +42,21 @@
     <div class="text-box">
         <div class="ellipsis">{{data.title}}</div>
         <div class="ellipsis text">{{data.text}}</div>
+        @if (data.telemetry) {
+        <div class="telemetry-box">
+            <div class="telemetry-row">
+                <span class="label">Battery</span>
+                <div class="bar"><div class="fill" [style.width.%]="telemetryPercent(data.telemetry?.batteryPercent)" [ngClass]="batteryLevelClass(data.telemetry?.batteryPercent)"></div></div>
+                <span class="value">{{ telemetryPercent(data.telemetry?.batteryPercent) }}%</span>
+                <span class="value volts">{{ formatVolts(data.telemetry?.batteryVolts) }} V</span>
+            </div>
+            <div class="telemetry-row">
+                <span class="label">Link</span>
+                <div class="bar"><div class="fill" [style.width.%]="telemetryPercent(data.telemetry?.linkQuality)" [ngClass]="linkLevelClass(data.telemetry?.linkQuality)"></div></div>
+                <span class="value">{{ telemetryPercent(data.telemetry?.linkQuality) }}%</span>
+            </div>
+        </div>
+        }
         <div class="btns">
             @if (data.state=='doing'&& data.stop) {
             <div class="btn link red" (click)="stop()">{{ 'NOTIFICATION.STOP' | translate }}</div>

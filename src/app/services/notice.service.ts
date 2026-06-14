@@ -50,4 +50,9 @@ export interface NoticeOptions {
   sendToLog?: boolean,
   closable?: boolean,
   icon?: string,
+  telemetry?: {
+    batteryPercent?: number,
+    batteryVolts?: number,
+    linkQuality?: number,
+  },
 }

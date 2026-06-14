@@ -87,6 +87,66 @@
             font-size: 12px;
         }
 
+        .telemetry-box {
+            margin-top: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+
+            .telemetry-row {
+                display: grid;
+                grid-template-columns: 44px 1fr 40px 62px;
+                align-items: center;
+                gap: 6px;
+                font-size: 11px;
+
+                .label {
+                    color: var(--aily-text-secondary);
+                }
+
+                .bar {
+                    height: 8px;
+                    border-radius: 5px;
+                    overflow: hidden;
+                    background: rgba(255, 255, 255, 0.12);
+
+                    .fill {
+                        height: 100%;
+                        transition: width 0.2s ease;
+
+                        &.level-good {
+                            background: linear-gradient(90deg, #3ac57b, #6de6a5);
+                        }
+
+                        &.level-warn {
+                            background: linear-gradient(90deg, #e6b93f, #f3d76f);
+                        }
+
+                        &.level-danger {
+                            background: linear-gradient(90deg, #d65a5a, #f08787);
+                        }
+                    }
+                }
+
+                .value {
+                    color: var(--aily-text-primary);
+                    text-align: right;
+                }
+
+                .volts {
+                    color: var(--aily-text-secondary);
+                }
+            }
+
+            .telemetry-row:last-child {
+                grid-template-columns: 44px 1fr 40px 62px;
+
+                .volts {
+                    visibility: hidden;
+                }
+            }
+        }
+
         .btns {
             margin-top: 2px;
             display: flex;
@@ -124,5 +184,9 @@
         &:hover {
             color: var(--aily-color-link-hover);
         }
+    }
+
+    &.with-telemetry {
+        height: 126px;
     }
 }

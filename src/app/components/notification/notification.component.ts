@@ -62,7 +62,8 @@ export class NotificationComponent {
           this.close();
         }, this.data.setTimeout);
       }
-      this.tempWidth = 112 + this.getTextWidth();
+      const dynamicWidth = 112 + this.getTextWidth();
+      this.tempWidth = this.data?.telemetry ? Math.max(dynamicWidth, 420) : dynamicWidth;
       this.cd.detectChanges();
     });
   }
@@ -164,6 +165,44 @@ export class NotificationComponent {
     let cleaned = this.cleanAnsi(text);
     cleaned = cleaned.replace(/^\s*\[(ERROR|INFO|WARN|WARNING|DEBUG|TRACE|FATAL)\]\s*/gim, '');
     return cleaned;
+  }
+
+  telemetryPercent(value: any): number {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, Math.round(num)));
+  }
+
+  formatVolts(value: any): string {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+      return '--';
+    }
+    return num.toFixed(3);
+  }
+
+  batteryLevelClass(value: any): string {
+    const percent = this.telemetryPercent(value);
+    if (percent <= 25) {
+      return 'level-danger';
+    }
+    if (percent <= 60) {
+      return 'level-warn';
+    }
+    return 'level-good';
+  }
+
+  linkLevelClass(value: any): string {
+    const percent = this.telemetryPercent(value);
+    if (percent <= 40) {
+      return 'level-danger';
+    }
+    if (percent <= 70) {
+      return 'level-warn';
+    }
+    return 'level-good';
   }
 
   sendAI() {

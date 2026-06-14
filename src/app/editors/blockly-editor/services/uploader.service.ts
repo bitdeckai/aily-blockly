@@ -18,6 +18,7 @@ import { WorkflowService, ProcessState } from '../../../services/workflow.servic
 import { BleOtaProgress, UploaderBleService } from '../../../services/uploader-ble.service';
 import { AppDataResourceLockService } from '../../../services/appdata-resource-lock.service';
 import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
+import { CrazyflieTelemetryService } from '../../../services/crazyflie-telemetry.service';
 
 @Injectable()
 export class _UploaderService {
@@ -39,7 +40,8 @@ export class _UploaderService {
     private workflowService: WorkflowService,
     private uploaderBleService: UploaderBleService,
     private appDataResourceLock: AppDataResourceLockService,
-    private crazyflieSimService: CrazyflieSimService
+    private crazyflieSimService: CrazyflieSimService,
+    private crazyflieTelemetryService: CrazyflieTelemetryService
   ) { }
 
   uploadInProgress = false;
@@ -185,6 +187,7 @@ export class _UploaderService {
 
   private async uploadCrazyflieFlow(crazyflieCode: string): Promise<ActionState> {
     const title = 'Crazyflie 链路测试';
+    this.crazyflieTelemetryService.clear();
     this.noticeService.update({
       title,
       text: '正在检测 Crazyradio / Crazyflie 链路...',
@@ -207,6 +210,8 @@ export class _UploaderService {
     const hasRunFlowCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
     const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
     const executionBlocks = hasRunFlowCmd ? this.getCrazyflieExecutionBlocksInOrder() : [];
+    let currentTelemetry: any = null;
+    let currentNoticeText = '正在检测 Crazyradio / Crazyflie 链路...';
     let receivedRealtimeLog = false;
     let disposeFlowLog: (() => void) | null = null;
     if (hasRunFlowCmd && typeof api.onFlowLog === 'function') {
@@ -224,17 +229,44 @@ export class _UploaderService {
           const stepText = total > 0
             ? `正在执行步骤 ${current}/${total}: ${label}`
             : `正在执行步骤: ${label}`;
+          currentNoticeText = stepText;
           this.noticeService.update({
             title,
             text: stepText,
             state: 'doing',
             setTimeout: 0,
-            stop: () => { this.cancel(); }
+            stop: () => { this.cancel(); },
+            telemetry: currentTelemetry,
           });
           this.logService.update({ detail: `[STEP ${current}/${total}] ${label}`, state: 'warn' });
           const currentBlock = executionBlocks[current - 1];
           this.highlightCrazyflieBlock(currentBlock);
           receivedRealtimeLog = true;
+          return;
+        }
+
+        const telemetryMatch = /^__TELEM__:(\{.*\})$/.exec(line);
+        if (telemetryMatch) {
+          try {
+            const parsed = JSON.parse(telemetryMatch[1]);
+            currentTelemetry = {
+              batteryPercent: Number(parsed?.batteryPercent),
+              batteryVolts: Number(parsed?.batteryVolts),
+              linkQuality: Number(parsed?.linkQuality),
+            };
+            this.crazyflieTelemetryService.setTelemetry(currentTelemetry);
+            this.noticeService.update({
+              title,
+              text: currentNoticeText,
+              state: 'doing',
+              setTimeout: 0,
+              stop: () => { this.cancel(); },
+              telemetry: currentTelemetry,
+              sendToLog: false,
+            });
+          } catch (_error) {
+            // ignore malformed telemetry payload
+          }
           return;
         }
 

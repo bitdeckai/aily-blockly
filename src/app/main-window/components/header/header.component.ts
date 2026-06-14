@@ -30,6 +30,7 @@ import { APP_LIST } from '../../../configs/tool.config';
 import { Subscription } from 'rxjs';
 import { BleOtaDeviceItem, UploaderBleService } from '../../../services/uploader-ble.service';
 import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
+import { CrazyflieTelemetryService, CrazyflieTelemetryState } from '../../../services/crazyflie-telemetry.service';
 
 @Component({
   selector: 'app-header',
@@ -63,6 +64,7 @@ export class HeaderComponent implements OnDestroy {
   private unsubscribeMaximizeChanged?: () => void;
   private unsubscribeCloseRequest?: () => void;
   private bleDevicesSubscription?: Subscription;
+  private telemetrySubscription?: Subscription;
   private blePortListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private unsaveDialogOpen = false; // 标记未保存对话框是否已打开
   private selectDebounceTimer: ReturnType<typeof setTimeout> | null = null; // 防抖计时器
@@ -93,6 +95,61 @@ export class HeaderComponent implements OnDestroy {
 
   get currentBoard() {
     return this.projectService.currentBoardConfig?.name;
+  }
+
+  telemetryState: CrazyflieTelemetryState | null = null;
+
+  get showTopTelemetry(): boolean {
+    if (!this.canShowSimulatorControls() || !this.telemetryState) {
+      return false;
+    }
+    const hasBattery = Number.isFinite(Number(this.telemetryState.batteryPercent));
+    const hasLink = Number.isFinite(Number(this.telemetryState.linkQuality));
+    return hasBattery || hasLink;
+  }
+
+  get topBatteryPercent(): number {
+    const value = Number(this.telemetryState?.batteryPercent);
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  get topLinkQuality(): number {
+    const value = Number(this.telemetryState?.linkQuality);
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  get topBatteryVolts(): string {
+    const value = Number(this.telemetryState?.batteryVolts);
+    if (!Number.isFinite(value)) {
+      return '--';
+    }
+    return value.toFixed(3);
+  }
+
+  topBatteryLevelClass(): string {
+    if (this.topBatteryPercent <= 25) {
+      return 'level-danger';
+    }
+    if (this.topBatteryPercent <= 60) {
+      return 'level-warn';
+    }
+    return 'level-good';
+  }
+
+  topLinkLevelClass(): string {
+    if (this.topLinkQuality <= 40) {
+      return 'level-danger';
+    }
+    if (this.topLinkQuality <= 70) {
+      return 'level-warn';
+    }
+    return 'level-good';
   }
 
   currentUrl = null;
@@ -126,6 +183,7 @@ export class HeaderComponent implements OnDestroy {
     private uploaderBleService: UploaderBleService,
     private ngZone: NgZone,
     private crazyflieSimService: CrazyflieSimService,
+    private crazyflieTelemetryService: CrazyflieTelemetryService,
     // private appStoreService: AppStoreService
   ) { }
 
@@ -189,6 +247,13 @@ export class HeaderComponent implements OnDestroy {
   }
 
   async ngAfterViewInit() {
+    this.telemetrySubscription = this.crazyflieTelemetryService.telemetry$.subscribe((state) => {
+      this.telemetryState = state;
+      setTimeout(() => {
+        this.cd.markForCheck();
+      }, 0);
+    });
+
     this.bleDevicesSubscription = this.uploaderBleService.scanStateChanged.subscribe((state) => {
       console.log('[BLE:header] scan state changed', state);
       this.ngZone.run(() => {
@@ -772,6 +837,9 @@ export class HeaderComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
+    if (this.telemetrySubscription) {
+      this.telemetrySubscription.unsubscribe();
+    }
     if (this.bleDevicesSubscription) {
       this.bleDevicesSubscription.unsubscribe();
     }

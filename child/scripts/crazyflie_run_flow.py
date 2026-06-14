@@ -414,6 +414,8 @@ def test_link(cflib_module, radio_driver_cls, address_hex: str | None):
 def run_flow(uri: str, commands, address_hex: str | None):
     import cflib.crtp
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
+    from cflib.crazyflie.log import LogConfig
+    from cflib.crazyflie.syncLogger import SyncLogger
     from cflib.positioning.motion_commander import MotionCommander
     from cflib.crtp.radiodriver import RadioDriver
     from cflib.utils.multiranger import Multiranger
@@ -752,6 +754,66 @@ def run_flow(uri: str, commands, address_hex: str | None):
         with SyncCrazyflie(active_uri):
             pass
 
+    def _normalize_pct(value):
+        try:
+            return max(0, min(100, int(round(float(value)))))
+        except Exception:
+            return None
+
+    def _sample_live_telemetry(existing_scf=None):
+        # Pull one fresh battery sample and the latest link quality callback value.
+        def _sample_with_scf(scf):
+            link_quality = {"value": None}
+
+            def _on_link_quality(value):
+                try:
+                    link_quality["value"] = float(value)
+                except Exception:
+                    pass
+
+            try:
+                scf.cf.link_statistics.link_quality_updated.add_callback(_on_link_quality)
+            except Exception:
+                pass
+
+            volts = None
+            try:
+                lg = LogConfig("BatteryRealtime", 100)
+                lg.add_variable("pm.vbat", "float")
+                with SyncLogger(scf, lg) as logger:
+                    for _timestamp, data, _name in logger:
+                        if isinstance(data, dict) and "pm.vbat" in data:
+                            volts = float(data["pm.vbat"])
+                        break
+            except Exception:
+                pass
+
+            if volts is not None:
+                batt_pct = _normalize_pct(((volts - 3.4) / 0.8) * 100.0)
+            else:
+                batt_pct = None
+
+            return {
+                "batteryPercent": batt_pct,
+                "batteryVolts": round(volts, 3) if volts is not None else None,
+                "linkQuality": _normalize_pct(link_quality["value"]),
+            }
+
+        try:
+            if existing_scf is not None:
+                return _sample_with_scf(existing_scf)
+            with SyncCrazyflie(active_uri) as scf_tmp:
+                return _sample_with_scf(scf_tmp)
+        except Exception:
+            return None
+
+    def emit_live_telemetry(existing_scf=None):
+        telem = _sample_live_telemetry(existing_scf)
+        if not telem:
+            return
+        # Frontend uploader listens for this marker and updates notice bars.
+        print(f"__TELEM__:{json.dumps(telem, ensure_ascii=False)}", flush=True)
+
     def require_link_gate(cmd_name: str):
         if cmd_name in {
             "test_crazyflie_link",
@@ -777,6 +839,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                 strict_crazyflie_connect_or_raise()
                 link_gate_open = True
                 executed.append("crazyflie_link")
+                emit_live_telemetry()
             elif cmd == "test_link":
                 step_index += 1
                 _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -789,6 +852,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                 _emit_step(step_index, total_steps, _step_label(cmd, arg))
                 strict_crazyflie_link_test_or_raise()
                 executed.append("test_crazyflie_link")
+                emit_live_telemetry()
             elif cmd == "delay":
                 step_index += 1
                 _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -829,6 +893,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     strict_crazyflie_connect_or_raise(scf)
                     link_gate_open = True
                     executed.append("crazyflie_link")
+                    emit_live_telemetry(scf)
                 elif cmd == "test_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -841,6 +906,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     strict_crazyflie_link_test_or_raise(scf)
                     executed.append("test_crazyflie_link")
+                    emit_live_telemetry(scf)
                 elif cmd == "spin_motors":
                     require_link_gate("spin_motors")
                     step_index += 1
@@ -894,6 +960,8 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     strict_crazyflie_connect_or_raise(scf)
                     link_gate_open = True
                     executed.append("crazyflie_link")
+                    emit_live_telemetry(scf)
+                    emit_live_telemetry(scf)
                 elif cmd == "test_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -906,6 +974,8 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     strict_crazyflie_link_test_or_raise(scf)
                     executed.append("test_crazyflie_link")
+                    emit_live_telemetry(scf)
+                    emit_live_telemetry(scf)
                 elif cmd == "detect_led_ring":
                     require_link_gate("detect_led_ring")
                     step_index += 1
@@ -1071,6 +1141,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     strict_crazyflie_connect_or_raise(scf)
                     link_gate_open = True
                     executed.append("crazyflie_link")
+                    emit_live_telemetry(scf)
                 elif cmd == "test_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1083,6 +1154,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     strict_crazyflie_link_test_or_raise(scf)
                     executed.append("test_crazyflie_link")
+                    emit_live_telemetry(scf)
                 elif cmd == "detect_multiranger":
                     require_link_gate("detect_multiranger")
                     step_index += 1
@@ -1224,6 +1296,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     strict_crazyflie_connect_or_raise(scf)
                     link_gate_open = True
                     executed.append("crazyflie_link")
+                    emit_live_telemetry(scf)
                 elif cmd == "test_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1236,6 +1309,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     strict_crazyflie_link_test_or_raise(scf)
                     executed.append("test_crazyflie_link")
+                    emit_live_telemetry(scf)
                 elif cmd == "detect_flow_v2":
                     require_link_gate("detect_flow_v2")
                     step_index += 1
@@ -1306,6 +1380,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                         strict_crazyflie_connect_or_raise(scf)
                         link_gate_open = True
                         executed.append("crazyflie_link")
+                        emit_live_telemetry(scf)
                     elif cmd == "test_link":
                         step_index += 1
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1318,6 +1393,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
                         strict_crazyflie_link_test_or_raise(scf)
                         executed.append("test_crazyflie_link")
+                        emit_live_telemetry(scf)
                     elif cmd == "takeoff":
                         require_link_gate("takeoff")
                         step_index += 1

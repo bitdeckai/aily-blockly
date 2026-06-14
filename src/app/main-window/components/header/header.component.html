@@ -16,6 +16,22 @@
     <div class="down ccenter"><i class="fa-regular fa-angle-down"></i></div>
   </div>
   }
+  @if (showTopTelemetry) {
+  <div class="cf-telemetry-top">
+    <div class="cf-row">
+      <span class="label">Battery</span>
+      <div class="bar"><div class="fill" [style.width.%]="topBatteryPercent" [ngClass]="topBatteryLevelClass()"></div></div>
+      <span class="value">{{ topBatteryPercent }}%</span>
+      <span class="value volts">{{ topBatteryVolts }} V</span>
+    </div>
+    <div class="cf-row">
+      <span class="label">Link</span>
+      <div class="bar"><div class="fill" [style.width.%]="topLinkQuality" [ngClass]="topLinkLevelClass()"></div></div>
+      <span class="value">{{ topLinkQuality }}%</span>
+      <span class="value volts"></span>
+    </div>
+  </div>
+  }
   <div class="null-box drag" (dblclick)="maximize()"></div>
   <div class="project-box ccenter">{{ projectData?.nickname || projectData?.name}}</div>
   <div class="toolbox">
