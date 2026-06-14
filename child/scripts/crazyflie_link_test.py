@@ -124,16 +124,24 @@ def main():
             scan_error = str(e)
             links = []
 
-        success = len(links) > 0
+        radio_ok = True
+        status_text = str(radio_status or "").strip().lower()
+        if not status_text or status_text.startswith("error") or "not found" in status_text:
+            radio_ok = False
+
+        success = radio_ok
         if success:
-            message = f"Link OK, found {len(links)} Crazyflie URI(s)"
+            if len(links) > 0:
+                message = f"Crazyradio detected, found {len(links)} Crazyflie URI(s)"
+            else:
+                message = "Crazyradio detected"
         else:
             if "not found" in str(radio_status).lower():
                 message = "Crazyradio not found"
             elif scan_error:
-                message = f"Scan failed: {scan_error}"
+                message = f"Crazyradio unavailable, scan failed: {scan_error}"
             else:
-                message = "Crazyradio detected, but no Crazyflie link discovered"
+                message = f"Crazyradio unavailable: {radio_status}"
 
         print(json.dumps({
             "success": success,

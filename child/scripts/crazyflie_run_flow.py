@@ -87,6 +87,16 @@ def _append_cflib_path(explicit_path: str | None):
 
 def parse_commands(code: str):
     def parse_statement(line: str):
+        m = re.match(r"^cf_set_link\s*\(\s*['\"](.*?)['\"]\s*,\s*['\"](.*?)['\"]\s*\)\s*;?$", line)
+        if m:
+            return ("set_link", {"uri": m.group(1), "address": m.group(2)})
+
+        if re.match(r"^cf_crazyflie_link\s*\(\s*\)\s*;?$", line):
+            return ("crazyflie_link", None)
+
+        if re.match(r"^cf_test_crazyflie_link\s*\(\s*\)\s*;?$", line):
+            return ("test_crazyflie_link", None)
+
         if re.match(r"^cf_test_link\s*\(\s*(?:['\"].*?['\"]\s*(?:,\s*['\"].*?['\"]\s*)?)?\)\s*;?$", line):
             return ("test_link", None)
         if re.match(r"^cf_detect_flow_v2\s*\(\s*\)\s*;?$", line):
@@ -271,6 +281,9 @@ def parse_commands(code: str):
 
     # Fallback parser: extract cf_* calls from any text layout (including mixed comments).
     fallback_patterns = [
+        r"cf_set_link\s*\(\s*['\"].*?['\"]\s*,\s*['\"].*?['\"]\s*\)",
+        r"cf_crazyflie_link\s*\(\s*\)",
+        r"cf_test_crazyflie_link\s*\(\s*\)",
         r"cf_test_link\s*\(\s*(?:['\"].*?['\"]\s*(?:,\s*['\"].*?['\"]\s*)?)?\)",
         r"cf_detect_flow_v2\s*\(\s*\)",
         r"cf_detect_multiranger\s*\(\s*\)",
@@ -320,6 +333,16 @@ def _normalize_print_value(raw):
 
 
 def _step_label(cmd, arg):
+    if cmd == "set_link":
+        uri = str((arg or {}).get("uri", ""))
+        address = str((arg or {}).get("address", ""))
+        return f"set_link:{uri}:{address}"
+    if cmd == "crazyflie_link":
+        return "crazyflie_link"
+    if cmd == "test_crazyflie_link":
+        return "crazyflie_basic_test"
+    if cmd == "test_link":
+        return "test_link"
     if cmd == "takeoff":
         return "takeoff"
     if cmd == "land":
@@ -394,6 +417,8 @@ def run_flow(uri: str, commands, address_hex: str | None):
     from cflib.positioning.motion_commander import MotionCommander
     from cflib.crtp.radiodriver import RadioDriver
     from cflib.utils.multiranger import Multiranger
+
+    TEST_LINK_STEP_DWELL_SEC = 0.12
 
     def attach_link_watchdog(scf):
         state = {"error": None}
@@ -495,8 +520,6 @@ def run_flow(uri: str, commands, address_hex: str | None):
     def estimate_total_steps(command_list):
         total = 0
         for cmd, arg in command_list:
-            if cmd == "test_link":
-                continue
             if cmd == "if_mr_obstacle":
                 then_count = estimate_total_steps((arg or {}).get("then", []))
                 else_count = estimate_total_steps((arg or {}).get("else", []))
@@ -607,7 +630,10 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     cflib.crtp.init_drivers(enable_debug_driver=False)
 
-    radio_status, links, scan_error, normalized_address = test_link(cflib, RadioDriver, address_hex)
+    normalized_address = _normalize_address_hex(address_hex)
+    radio_status = "unknown"
+    links = []
+    scan_error = None
 
     has_motion_cmd = contains_command(commands, {"takeoff", "move", "land"})
     has_flow_detect_cmd = contains_command(commands, {"detect_flow_v2"})
@@ -615,14 +641,154 @@ def run_flow(uri: str, commands, address_hex: str | None):
     has_led_cmd = contains_command(commands, {"detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off"})
     has_buzzer_cmd = contains_command(commands, {"detect_buzzer", "buzzer_beep"})
     has_motor_cmd = contains_command(commands, {"spin_motors"})
-    flow_commands = [(cmd, arg) for cmd, arg in commands if cmd != "test_link"]
-    total_steps = estimate_total_steps(flow_commands)
+    has_test_link_cmd = contains_command(commands, {"test_link"})
+    has_test_cf_link_cmd = contains_command(commands, {"test_crazyflie_link"})
+    has_crazyflie_link_cmd = contains_command(commands, {"crazyflie_link"})
+
+    requires_crazyflie_link_cmd = contains_command(commands, {
+        "test_crazyflie_link",
+        "takeoff", "move", "land",
+        "detect_flow_v2",
+        "detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle",
+        "detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off",
+        "detect_buzzer", "buzzer_beep",
+        "spin_motors",
+    })
+
+    if requires_crazyflie_link_cmd and not has_crazyflie_link_cmd:
+        return {
+            "success": False,
+            "message": "CRAZYFLIE_LINK_REQUIRED: Run 'Crazyflie link' block before Crazyflie operations",
+            "radioStatus": radio_status,
+            "uri": uri,
+            "addressHex": normalized_address,
+            "links": links,
+            "scanError": scan_error,
+            "executed": [],
+        }
+    total_steps = estimate_total_steps(commands)
     step_index = 0
     executed = []
+    active_uri = uri
+    active_address = normalized_address
+    link_gate_open = False
+
+    def set_active_link(link_args):
+        nonlocal active_uri, active_address
+        # Keep URI normalization simple: empty means keep current.
+        raw_uri = str((link_args or {}).get("uri", "")).strip()
+        if raw_uri:
+            active_uri = raw_uri
+        raw_addr = str((link_args or {}).get("address", "")).strip()
+        if raw_addr:
+            active_address = _normalize_address_hex(raw_addr)
+
+    # Pre-apply configured link so subsequent connection actions use latest URI/address.
+    for cmd0, arg0 in commands:
+        if cmd0 == "set_link":
+            set_active_link(arg0)
+
+    def radio_present(status_text):
+        text = str(status_text or "").strip().lower()
+        if not text:
+            return False
+        if text.startswith("error"):
+            return False
+        if "not found" in text:
+            return False
+        return True
+
+    def run_propeller_test_like_cfclient(scf):
+        # Match crazyflie-clients-python ConsoleTab propeller test trigger.
+        try:
+            scf.cf.param.set_value("health.startPropTest", "1")
+            time.sleep(0.05)
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+
+    def refresh_radio_status_fast():
+        nonlocal radio_status
+        try:
+            radio_status = RadioDriver().get_status()
+        except Exception as exc:
+            radio_status = f"error: {exc}"
+
+    def strict_radio_test_or_raise():
+        nonlocal scan_error
+        refresh_radio_status_fast()
+        scan_error = None
+        if not radio_present(radio_status):
+            raise RuntimeError(f"TEST_RADIO_FAILED: uri={active_uri}, address={active_address}, radioStatus={radio_status}, scanError={scan_error}")
+
+    def strict_crazyflie_link_test_or_raise(existing_scf=None):
+        nonlocal links, scan_error
+        refresh_radio_status_fast()
+        scan_error = None
+        if not radio_present(radio_status):
+            raise RuntimeError(f"TEST_RADIO_FAILED: uri={active_uri}, address={active_address}, radioStatus={radio_status}, scanError={scan_error}")
+
+        if existing_scf is not None:
+            ok, err = run_propeller_test_like_cfclient(existing_scf)
+            links = [active_uri]
+        else:
+            try:
+                with SyncCrazyflie(active_uri) as scf_tmp:
+                    ok, err = run_propeller_test_like_cfclient(scf_tmp)
+                links = [active_uri]
+            except Exception as exc:
+                ok, err = False, str(exc)
+                links = []
+
+        if not ok:
+            raise RuntimeError(f"TEST_CRAZYFLIE_FAILED: uri={active_uri}, address={active_address}, error={err}")
+
+    def strict_crazyflie_connect_or_raise(existing_scf=None):
+        refresh_radio_status_fast()
+        if not radio_present(radio_status):
+            raise RuntimeError(f"CRAZYFLIE_LINK_FAILED: uri={active_uri}, address={active_address}, radioStatus={radio_status}")
+        if existing_scf is not None:
+            return
+        with SyncCrazyflie(active_uri):
+            pass
+
+    def require_link_gate(cmd_name: str):
+        if cmd_name in {
+            "test_crazyflie_link",
+            "takeoff", "move", "land",
+            "detect_flow_v2",
+            "detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle",
+            "detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off",
+            "detect_buzzer", "buzzer_beep",
+            "spin_motors",
+        } and not link_gate_open:
+            raise RuntimeError(f"CRAZYFLIE_LINK_REQUIRED: Run 'Crazyflie link' block before {cmd_name}")
+
     if not has_motion_cmd and not has_flow_detect_cmd and not has_mr_cmd and not has_led_cmd and not has_buzzer_cmd and not has_motor_cmd:
         for cmd, arg in commands:
-            if cmd == "test_link":
+            if cmd == "set_link":
+                step_index += 1
+                _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                set_active_link(arg)
+                executed.append(f"set_link:{active_uri}:{active_address}")
+            elif cmd == "crazyflie_link":
+                step_index += 1
+                _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                strict_crazyflie_connect_or_raise()
+                link_gate_open = True
+                executed.append("crazyflie_link")
+            elif cmd == "test_link":
+                step_index += 1
+                _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                strict_radio_test_or_raise()
                 executed.append("test_link")
+                time.sleep(TEST_LINK_STEP_DWELL_SEC)
+            elif cmd == "test_crazyflie_link":
+                require_link_gate("test_crazyflie_link")
+                step_index += 1
+                _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                strict_crazyflie_link_test_or_raise()
+                executed.append("test_crazyflie_link")
             elif cmd == "delay":
                 step_index += 1
                 _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -638,8 +804,8 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
         ok = len(links) > 0
         return {
-            "success": ok or any(cmd in ("print", "delay") for cmd, _ in commands),
-            "message": "Flow executed" if any(cmd in ("print", "delay") for cmd, _ in commands) else ("Link OK" if ok else "No Crazyflie link discovered"),
+            "success": ((ok and radio_present(radio_status)) if has_test_cf_link_cmd else ((radio_present(radio_status)) if has_test_link_cmd else (ok or any(cmd in ("print", "delay") for cmd, _ in commands)))),
+            "message": "Flow executed" if (not has_test_link_cmd and any(cmd in ("print", "delay") for cmd, _ in commands)) else ("Link OK" if ok else "No Crazyflie link discovered"),
             "radioStatus": radio_status,
             "uri": uri,
             "addressHex": normalized_address,
@@ -650,11 +816,33 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and has_motor_cmd and not has_flow_detect_cmd and not has_mr_cmd and not has_led_cmd and not has_buzzer_cmd:
         overall_success = True
-        with SyncCrazyflie(uri) as scf:
+        with SyncCrazyflie(active_uri) as scf:
             for cmd, arg in commands:
-                if cmd == "test_link":
+                if cmd == "set_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    set_active_link(arg)
+                    executed.append(f"set_link:{active_uri}:{active_address}")
+                elif cmd == "crazyflie_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_connect_or_raise(scf)
+                    link_gate_open = True
+                    executed.append("crazyflie_link")
+                elif cmd == "test_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_radio_test_or_raise()
                     executed.append("test_link")
+                    time.sleep(TEST_LINK_STEP_DWELL_SEC)
+                elif cmd == "test_crazyflie_link":
+                    require_link_gate("test_crazyflie_link")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_link_test_or_raise(scf)
+                    executed.append("test_crazyflie_link")
                 elif cmd == "spin_motors":
+                    require_link_gate("spin_motors")
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     m1 = int((arg or {}).get("m1", 0))
@@ -693,11 +881,33 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and (has_led_cmd or has_buzzer_cmd):
         overall_success = True
-        with SyncCrazyflie(uri) as scf:
+        with SyncCrazyflie(active_uri) as scf:
             for cmd, arg in commands:
-                if cmd == "test_link":
+                if cmd == "set_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    set_active_link(arg)
+                    executed.append(f"set_link:{active_uri}:{active_address}")
+                elif cmd == "crazyflie_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_connect_or_raise(scf)
+                    link_gate_open = True
+                    executed.append("crazyflie_link")
+                elif cmd == "test_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_radio_test_or_raise()
                     executed.append("test_link")
+                    time.sleep(TEST_LINK_STEP_DWELL_SEC)
+                elif cmd == "test_crazyflie_link":
+                    require_link_gate("test_crazyflie_link")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_link_test_or_raise(scf)
+                    executed.append("test_crazyflie_link")
                 elif cmd == "detect_led_ring":
+                    require_link_gate("detect_led_ring")
                     step_index += 1
                     _emit_step(step_index, total_steps, "detect_led_ring")
                     ok, raw = detect_led_ring_deck(scf)
@@ -705,6 +915,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"detect_led_ring:{'1' if ok else '0'}")
                     print(f"led_ring_detected={ok}, raw={raw}", flush=True)
                 elif cmd == "led_ring_set_color":
+                    require_link_gate("led_ring_set_color")
                     step_index += 1
                     _emit_step(step_index, total_steps, "led_ring_set_color")
                     r = int((arg or {}).get("r", 255))
@@ -713,17 +924,20 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     set_led_ring_color(scf, r, g, b)
                     executed.append(f"led_ring_set_color:{r}:{g}:{b}")
                 elif cmd == "led_ring_set_effect":
+                    require_link_gate("led_ring_set_effect")
                     step_index += 1
                     _emit_step(step_index, total_steps, "led_ring_set_effect")
                     effect = int(arg or 0)
                     set_led_ring_effect(scf, effect)
                     executed.append(f"led_ring_set_effect:{effect}")
                 elif cmd == "led_ring_off":
+                    require_link_gate("led_ring_off")
                     step_index += 1
                     _emit_step(step_index, total_steps, "led_ring_off")
                     set_led_ring_effect(scf, 0)
                     executed.append("led_ring_off")
                 elif cmd == "detect_buzzer":
+                    require_link_gate("detect_buzzer")
                     step_index += 1
                     _emit_step(step_index, total_steps, "detect_buzzer")
                     ok, raw = detect_buzzer_deck(scf)
@@ -731,6 +945,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"detect_buzzer:{'1' if ok else '0'}")
                     print(f"buzzer_detected={ok}, raw={raw}", flush=True)
                 elif cmd == "buzzer_beep":
+                    require_link_gate("buzzer_beep")
                     step_index += 1
                     _emit_step(step_index, total_steps, "buzzer_beep")
                     duration = int((arg or {}).get("duration", 120))
@@ -739,6 +954,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"buzzer_beep:{duration}:{times}:{'1' if ok else '0'}")
                     print(f"buzzer_beep_ok={ok}", flush=True)
                 elif cmd == "spin_motors":
+                    require_link_gate("spin_motors")
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     m1 = int((arg or {}).get("m1", 0))
@@ -764,6 +980,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"print:{msg}")
                     print(msg, flush=True)
                 elif cmd == "if_mr_obstacle":
+                    require_link_gate("if_mr_obstacle")
                     direction = (arg or {}).get("dir", "front")
                     threshold = float((arg or {}).get("threshold", 0.3))
                     step_index += 1
@@ -841,11 +1058,33 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and has_mr_cmd:
         detected_all = True
-        with SyncCrazyflie(uri) as scf:
+        with SyncCrazyflie(active_uri) as scf:
             for cmd, arg in commands:
-                if cmd == "test_link":
+                if cmd == "set_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    set_active_link(arg)
+                    executed.append(f"set_link:{active_uri}:{active_address}")
+                elif cmd == "crazyflie_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_connect_or_raise(scf)
+                    link_gate_open = True
+                    executed.append("crazyflie_link")
+                elif cmd == "test_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_radio_test_or_raise()
                     executed.append("test_link")
+                    time.sleep(TEST_LINK_STEP_DWELL_SEC)
+                elif cmd == "test_crazyflie_link":
+                    require_link_gate("test_crazyflie_link")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_link_test_or_raise(scf)
+                    executed.append("test_crazyflie_link")
                 elif cmd == "detect_multiranger":
+                    require_link_gate("detect_multiranger")
                     step_index += 1
                     _emit_step(step_index, total_steps, "detect_multiranger")
                     ok, raw = detect_multiranger_deck(scf)
@@ -853,6 +1092,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"detect_multiranger:{'1' if ok else '0'}")
                     print(f"multiranger_detected={ok}, raw={raw}", flush=True)
                 elif cmd == "mr_log_distance":
+                    require_link_gate("mr_log_distance")
                     direction = (arg or {}).get("dir", "front")
                     step_index += 1
                     _emit_step(step_index, total_steps, f"mr_log_distance:{direction}")
@@ -862,6 +1102,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"mr_log_distance:{direction}:{text}")
                     print(f"mr_{direction}={text}", flush=True)
                 elif cmd == "mr_log_all_distances":
+                    require_link_gate("mr_log_all_distances")
                     step_index += 1
                     _emit_step(step_index, total_steps, "mr_log_all_distances")
                     distances = read_multiranger_distances_once(scf)
@@ -873,6 +1114,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"mr_log_all_distances:{line}")
                     print(line, flush=True)
                 elif cmd == "spin_motors":
+                    require_link_gate("spin_motors")
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     m1 = int((arg or {}).get("m1", 0))
@@ -898,6 +1140,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"print:{msg}")
                     print(msg, flush=True)
                 elif cmd == "if_mr_obstacle":
+                    require_link_gate("if_mr_obstacle")
                     direction = (arg or {}).get("dir", "front")
                     threshold = float((arg or {}).get("threshold", 0.3))
                     step_index += 1
@@ -968,11 +1211,33 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and has_flow_detect_cmd:
         detected_all = True
-        with SyncCrazyflie(uri) as scf:
+        with SyncCrazyflie(active_uri) as scf:
             for cmd, arg in commands:
-                if cmd == "test_link":
+                if cmd == "set_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    set_active_link(arg)
+                    executed.append(f"set_link:{active_uri}:{active_address}")
+                elif cmd == "crazyflie_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_connect_or_raise(scf)
+                    link_gate_open = True
+                    executed.append("crazyflie_link")
+                elif cmd == "test_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_radio_test_or_raise()
                     executed.append("test_link")
+                    time.sleep(TEST_LINK_STEP_DWELL_SEC)
+                elif cmd == "test_crazyflie_link":
+                    require_link_gate("test_crazyflie_link")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_link_test_or_raise(scf)
+                    executed.append("test_crazyflie_link")
                 elif cmd == "detect_flow_v2":
+                    require_link_gate("detect_flow_v2")
                     step_index += 1
                     _emit_step(step_index, total_steps, "detect_flow_v2")
                     ok, raw = detect_flow_v2_deck(scf)
@@ -980,6 +1245,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append(f"detect_flow_v2:{'1' if ok else '0'}")
                     print(f"flow_v2_detected={ok}, raw={raw}", flush=True)
                 elif cmd == "spin_motors":
+                    require_link_gate("spin_motors")
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     m1 = int((arg or {}).get("m1", 0))
@@ -1017,7 +1283,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
         }
 
     try:
-        with SyncCrazyflie(uri) as scf:
+        with SyncCrazyflie(active_uri) as scf:
             ensure_link_ok = attach_link_watchdog(scf)
             ensure_link_ok()
 
@@ -1029,14 +1295,37 @@ def run_flow(uri: str, commands, address_hex: str | None):
                 interruptible_sleep(1.0, ensure_link_ok)
                 for cmd, arg in commands:
                     ensure_link_ok()
-                    if cmd == "test_link":
+                    if cmd == "set_link":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        set_active_link(arg)
+                        executed.append(f"set_link:{active_uri}:{active_address}")
+                    elif cmd == "crazyflie_link":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        strict_crazyflie_connect_or_raise(scf)
+                        link_gate_open = True
+                        executed.append("crazyflie_link")
+                    elif cmd == "test_link":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        strict_radio_test_or_raise()
                         executed.append("test_link")
+                        interruptible_sleep(TEST_LINK_STEP_DWELL_SEC, ensure_link_ok)
+                    elif cmd == "test_crazyflie_link":
+                        require_link_gate("test_crazyflie_link")
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        strict_crazyflie_link_test_or_raise(scf)
+                        executed.append("test_crazyflie_link")
                     elif cmd == "takeoff":
+                        require_link_gate("takeoff")
                         step_index += 1
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
                         executed.append("takeoff")
                         interruptible_sleep(0.5, ensure_link_ok)
                     elif cmd == "move":
+                        require_link_gate("move")
                         step_index += 1
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
                         direction = arg.get("dir") if isinstance(arg, dict) else None
@@ -1073,11 +1362,13 @@ def run_flow(uri: str, commands, address_hex: str | None):
                         executed.append(f"print:{msg}")
                         print(msg, flush=True)
                     elif cmd == "land":
+                        require_link_gate("land")
                         step_index += 1
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
                         executed.append("land")
                         break
                     elif cmd == "spin_motors":
+                        require_link_gate("spin_motors")
                         step_index += 1
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
                         m1 = int((arg or {}).get("m1", 0))
@@ -1090,6 +1381,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                         if err:
                             print(f"spin_motors_error={err}", flush=True)
                     elif cmd == "if_mr_obstacle":
+                        require_link_gate("if_mr_obstacle")
                         step_index += 1
                         direction = (arg or {}).get("dir", "front")
                         threshold = float((arg or {}).get("threshold", 0.3))
@@ -1102,6 +1394,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                         branch = (arg or {}).get("then", []) if hit else (arg or {}).get("else", [])
                         for child_cmd, child_arg in branch:
                             if child_cmd == "move":
+                                require_link_gate("move")
                                 step_index += 1
                                 _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
                                 child_direction = child_arg.get("dir") if isinstance(child_arg, dict) else None
@@ -1137,6 +1430,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
                                 executed.append(f"print:{msg}")
                                 print(msg, flush=True)
                             elif child_cmd == "spin_motors":
+                                require_link_gate("spin_motors")
                                 step_index += 1
                                 _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
                                 m1 = int((child_arg or {}).get("m1", 0))
@@ -1149,19 +1443,23 @@ def run_flow(uri: str, commands, address_hex: str | None):
                                 if err:
                                     print(f"spin_motors_error={err}", flush=True)
                     elif cmd == "led_ring_set_color":
+                        require_link_gate("led_ring_set_color")
                         r = int((arg or {}).get("r", 255))
                         g = int((arg or {}).get("g", 0))
                         b = int((arg or {}).get("b", 0))
                         set_led_ring_color(scf, r, g, b)
                         executed.append(f"led_ring_set_color:{r}:{g}:{b}")
                     elif cmd == "led_ring_set_effect":
+                        require_link_gate("led_ring_set_effect")
                         effect = int(arg or 0)
                         set_led_ring_effect(scf, effect)
                         executed.append(f"led_ring_set_effect:{effect}")
                     elif cmd == "led_ring_off":
+                        require_link_gate("led_ring_off")
                         set_led_ring_effect(scf, 0)
                         executed.append("led_ring_off")
                     elif cmd == "buzzer_beep":
+                        require_link_gate("buzzer_beep")
                         duration = int((arg or {}).get("duration", 120))
                         times = int((arg or {}).get("times", 1))
                         ok = buzzer_beep(scf, duration, times)

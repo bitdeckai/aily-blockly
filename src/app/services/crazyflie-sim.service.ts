@@ -11,7 +11,7 @@ export interface CrazyfliePose {
 }
 
 interface CrazyflieSimCommand {
-  type: 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'test_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
+  type: 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'set_link' | 'test_link' | 'crazyflie_link' | 'test_crazyflie_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
   value?: any;
 }
 
@@ -146,7 +146,7 @@ export class CrazyflieSimService {
       return { success: false, message: '未检测到可模拟的 Crazyflie 指令', executed: [] };
     }
 
-    const executable = commands.filter((item) => item.type !== 'test_link');
+    const executable = commands;
     const total = executable.length;
     const executed: string[] = [];
 
@@ -179,9 +179,25 @@ export class CrazyflieSimService {
         }
 
         switch (command.type) {
+          case 'set_link':
+            this.appendLog(`sim: set_link uri=${String(command.value?.uri || 'radio://0/80/2M')} address=${String(command.value?.address || 'E7E7E7E7E7')}`);
+            executed.push(`set_link:${String(command.value?.uri || 'radio://0/80/2M')}:${String(command.value?.address || 'E7E7E7E7E7')}`);
+            await this.waitWithControl(120, true);
+            break;
           case 'test_link':
             this.appendLog('sim: test_link');
             executed.push('test_link');
+            await this.waitWithControl(120, true);
+            break;
+          case 'crazyflie_link':
+            this.appendLog('sim: crazyflie_link');
+            executed.push('crazyflie_link');
+            await this.waitWithControl(150, true);
+            break;
+          case 'test_crazyflie_link':
+            this.appendLog('sim: test_crazyflie_link (Crazyflie Basic Test)');
+            executed.push('test_crazyflie_link');
+            await this.waitWithControl(200, true);
             break;
           case 'detect_flow_v2':
             this.appendLog('sim: detect_flow_v2 => true');
@@ -482,6 +498,14 @@ export class CrazyflieSimService {
         return 'detect_buzzer';
       case 'buzzer_beep':
         return `buzzer_beep:${Number(command.value?.duration ?? 120)}:${Number(command.value?.times ?? 1)}`;
+      case 'set_link':
+        return `set_link:${String(command.value?.uri || '')}:${String(command.value?.address || '')}`;
+      case 'test_link':
+        return 'test_link';
+      case 'crazyflie_link':
+        return 'crazyflie_link';
+      case 'test_crazyflie_link':
+        return 'test_crazyflie_link:basic';
       case 'move':
         return `move:${String(command.value?.dir || '')}:${Number(command.value?.distance || 0)}`;
       default:
@@ -497,8 +521,24 @@ export class CrazyflieSimService {
         continue;
       }
 
+      const setLinkMatch = /^cf_set_link\s*\(\s*['\"](.*?)['\"]\s*,\s*['\"](.*?)['\"]\s*\)\s*;?$/.exec(line);
+      if (setLinkMatch) {
+        commands.push({ type: 'set_link', value: { uri: setLinkMatch[1], address: setLinkMatch[2] } });
+        continue;
+      }
+
       if (/^cf_test_link\s*\(/.test(line)) {
         commands.push({ type: 'test_link' });
+        continue;
+      }
+
+      if (/^cf_crazyflie_link\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'crazyflie_link' });
+        continue;
+      }
+
+      if (/^cf_test_crazyflie_link\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'test_crazyflie_link' });
         continue;
       }
       if (/^cf_detect_flow_v2\s*\(\s*\)\s*;?$/.test(line)) {

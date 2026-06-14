@@ -204,7 +204,7 @@ export class _UploaderService {
       return { state: 'error', text: '未找到 Crazyflie 测试接口' };
     }
 
-    const hasRunFlowCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(/.test(crazyflieCode || '');
+    const hasRunFlowCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
     const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
     const executionBlocks = hasRunFlowCmd ? this.getCrazyflieExecutionBlocksInOrder() : [];
     let receivedRealtimeLog = false;
@@ -298,6 +298,10 @@ export class _UploaderService {
     }
 
     const executableTypes = new Set([
+      'cf_link_config',
+      'cf_test_link',
+      'cf_crazyflie_link',
+      'cf_test_crazyflie_link',
       'cf_takeoff',
       'cf_land',
       'cf_motor_ramp_test',
