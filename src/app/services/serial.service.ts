@@ -85,12 +85,33 @@ export class SerialService {
         if (crazyflieApi && typeof crazyflieApi.listRadios === 'function') {
           const radioResult = await crazyflieApi.listRadios();
           const radiosRaw = Array.isArray(radioResult?.radios) ? radioResult.radios : [];
+
+          const normalizeRadioInstanceId = (value: any): string => {
+            const raw = String(value || '').trim().toUpperCase();
+            if (!raw) {
+              return '';
+            }
+            // Collapse composite interfaces (e.g. ...&MI_00 / ...&MI_01) to one physical USB device id.
+            return raw.replace(/&MI_[0-9A-F]{2}/g, '');
+          };
+
+          const normalizeRadioName = (value: any): string => {
+            const raw = String(value || '').trim().toLowerCase();
+            if (!raw) {
+              return 'crazyradio';
+            }
+            if (raw.includes('crazyradio')) {
+              return 'crazyradio';
+            }
+            return raw;
+          };
+
           const seenRadioKeys = new Set<string>();
           const radios = radiosRaw.filter((radio) => {
-            const displayName = String(radio?.name || '').trim().toLowerCase();
-            const status = String(radio?.status || '').trim().toLowerCase();
-            const key = `${displayName}|${status}`;
-            if (!displayName || seenRadioKeys.has(key)) {
+            const normalizedInstance = normalizeRadioInstanceId(radio?.instanceId);
+            const normalizedName = normalizeRadioName(radio?.name);
+            const key = normalizedInstance || normalizedName;
+            if (!key || seenRadioKeys.has(key)) {
               return false;
             }
             seenRadioKeys.add(key);
@@ -99,9 +120,10 @@ export class SerialService {
           if (radios.length > 0) {
             serialList.push({ sep: true, type: 'separator' });
             radios.forEach((radio, index) => {
+              const prettyName = radios.length > 1 ? `Crazyradio ${index + 1}` : 'Crazyradio';
               serialList.push({
-                name: `crazyradio:${radio.instanceId || index}`,
-                text: `${radio.name}${radio.status ? ` (${radio.status})` : ''}`,
+                name: `crazyradio:${index + 1}`,
+                text: `${prettyName}${radio.status ? ` (${radio.status})` : ''}`,
                 type: 'crazyradio',
                 icon: 'fa-light fa-tower-broadcast',
                 extra: radio,

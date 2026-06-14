@@ -452,7 +452,7 @@ async function listRadios() {
   }
 
   const psScript = [
-    "$devices = Get-PnpDevice | Where-Object { $_.FriendlyName -like '*Crazyradio*' } | Select-Object FriendlyName, Status, Class, InstanceId",
+    "$devices = Get-PnpDevice -PresentOnly | Where-Object { $_.FriendlyName -like '*Crazyradio*' } | Select-Object FriendlyName, Status, Class, InstanceId",
     "if ($devices) { $devices | ConvertTo-Json -Compress } else { '[]' }",
   ].join("; ");
 
@@ -478,8 +478,22 @@ async function listRadios() {
 
         const parsed = parseJsonOutput(stdout) || parseJsonOutput(stderr) || [];
         const list = Array.isArray(parsed) ? parsed : [parsed];
+        const normalizeInstanceId = (value) => {
+          const raw = String(value || "").trim().toUpperCase();
+          if (!raw) return "";
+          // Collapse composite interfaces and transient suffixes to one physical key.
+          return raw.replace(/&MI_[0-9A-F]{2}/g, "");
+        };
+
+        const seen = new Set();
         const radios = list
           .filter((item) => item && item.FriendlyName)
+          .filter((item) => {
+            const key = normalizeInstanceId(item.InstanceId) || String(item.FriendlyName || "").toLowerCase();
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
           .map((item) => ({
             name: String(item.FriendlyName || "Crazyradio USB"),
             status: String(item.Status || "Unknown"),

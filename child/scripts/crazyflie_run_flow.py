@@ -152,6 +152,11 @@ def parse_commands(code: str):
             distance = float(m.group(2)) if m.group(2) is not None else None
             return ("move", {"dir": m.group(1), "distance": distance})
 
+        m = re.match(r"^cf_move_(forward|back|left|right|up|down)\s*\(\s*([0-9]*\.?[0-9]+)?\s*\)\s*;?$", line)
+        if m:
+            distance = float(m.group(2)) if m.group(2) is not None and m.group(2) != "" else None
+            return ("move", {"dir": m.group(1), "distance": distance})
+
         m = re.match(r"^cf_delay\s*\(\s*([0-9]*\.?[0-9]+)\s*\)\s*;?$", line)
         if m:
             return ("delay", float(m.group(1)))
@@ -161,6 +166,15 @@ def parse_commands(code: str):
             return ("print", m.group(1))
 
         return None
+
+    def parse_comment_statement(stripped_line: str):
+        comment = re.match(r"^(?://|#)\s*(.+)$", stripped_line)
+        if not comment:
+            return None
+        candidate = comment.group(1).strip()
+        if not candidate:
+            return None
+        return parse_statement(candidate)
 
     raw_lines = code.splitlines()
 
@@ -174,7 +188,13 @@ def parse_commands(code: str):
         while i < len(raw_lines):
             raw = raw_lines[i]
             stripped = raw.strip()
-            if not stripped or stripped.startswith("//") or stripped.startswith("#"):
+            if not stripped:
+                i += 1
+                continue
+
+            comment_cmd = parse_comment_statement(stripped)
+            if comment_cmd is not None:
+                result.append(comment_cmd)
                 i += 1
                 continue
 
@@ -246,7 +266,47 @@ def parse_commands(code: str):
         return result, i
 
     commands, _ = parse_block(0, 0)
-    return commands
+    if commands:
+        return commands
+
+    # Fallback parser: extract cf_* calls from any text layout (including mixed comments).
+    fallback_patterns = [
+        r"cf_test_link\s*\(\s*(?:['\"].*?['\"]\s*(?:,\s*['\"].*?['\"]\s*)?)?\)",
+        r"cf_detect_flow_v2\s*\(\s*\)",
+        r"cf_detect_multiranger\s*\(\s*\)",
+        r"cf_detect_led_ring\s*\(\s*\)",
+        r"cf_detect_buzzer\s*\(\s*\)",
+        r"cf_led_ring_off\s*\(\s*\)",
+        r"cf_mr_log_all_distances\s*\(\s*\)",
+        r"cf_takeoff\s*\(\s*\)",
+        r"cf_land\s*\(\s*\)",
+        r"cf_mr_log_distance\s*\(\s*['\"](?:front|back|left|right|up)['\"]\s*\)",
+        r"cf_led_ring_set_effect\s*\(\s*[0-9]+\s*\)",
+        r"cf_led_ring_set_color\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*\)",
+        r"cf_buzzer_beep\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*\)",
+        r"cf_motor_ramp_test\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]*\.?[0-9]+\s*\)",
+        r"cf_spin_motors\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]*\.?[0-9]+\s*\)",
+        r"cf_move\s*\(\s*['\"](?:forward|back|left|right|up|down)['\"]\s*(?:,\s*[0-9]*\.?[0-9]+\s*)?\)",
+        r"cf_move_(?:forward|back|left|right|up|down)\s*\(\s*(?:[0-9]*\.?[0-9]+)?\s*\)",
+        r"cf_delay\s*\(\s*[0-9]*\.?[0-9]+\s*\)",
+        r"cf_print\s*\(\s*.*?\s*\)",
+    ]
+
+    all_matches = []
+    for pattern in fallback_patterns:
+        for m in re.finditer(pattern, code, flags=re.IGNORECASE | re.DOTALL):
+            all_matches.append((m.start(), m.group(0)))
+
+    all_matches.sort(key=lambda item: item[0])
+
+    fallback_commands = []
+    for _pos, raw_call in all_matches:
+        stmt = re.sub(r"\s+", " ", raw_call).strip()
+        cmd = parse_statement(stmt)
+        if cmd is not None:
+            fallback_commands.append(cmd)
+
+    return fallback_commands
 
 
 def _normalize_print_value(raw):
@@ -334,6 +394,44 @@ def run_flow(uri: str, commands, address_hex: str | None):
     from cflib.positioning.motion_commander import MotionCommander
     from cflib.crtp.radiodriver import RadioDriver
     from cflib.utils.multiranger import Multiranger
+
+    def attach_link_watchdog(scf):
+        state = {"error": None}
+
+        def _on_link_issue(*args):
+            parts = [str(part) for part in args if part is not None and str(part).strip()]
+            text = " | ".join(parts) if parts else "unknown link error"
+            state["error"] = text
+            print(f"link_issue={text}", flush=True)
+
+        for attr_name in ("disconnected_link_error", "connection_lost", "connection_failed", "disconnected"):
+            target = getattr(scf.cf, attr_name, None)
+            add_cb = getattr(target, "add_callback", None)
+            if callable(add_cb):
+                try:
+                    add_cb(_on_link_issue)
+                except Exception:
+                    pass
+
+        def ensure_link_ok():
+            if state["error"]:
+                raise RuntimeError(f"Crazyflie link unstable: {state['error']}")
+
+        return ensure_link_ok
+
+    def interruptible_sleep(seconds: float, ensure_link_ok):
+        remain = max(0.0, float(seconds))
+        if remain <= 0:
+            ensure_link_ok()
+            return
+        end_ts = time.time() + remain
+        while True:
+            ensure_link_ok()
+            now = time.time()
+            if now >= end_ts:
+                break
+            time.sleep(min(0.05, end_ts - now))
+        ensure_link_ok()
 
     def detect_flow_v2_deck(scf, timeout_sec: float = 5.0):
         detected = Event()
@@ -918,151 +1016,171 @@ def run_flow(uri: str, commands, address_hex: str | None):
             "executed": executed,
         }
 
-    with SyncCrazyflie(uri) as scf:
-        scf.cf.platform.send_arming_request(True)
-        time.sleep(1.0)
+    try:
+        with SyncCrazyflie(uri) as scf:
+            ensure_link_ok = attach_link_watchdog(scf)
+            ensure_link_ok()
 
-        with MotionCommander(scf) as mc:
-            # MotionCommander enters hover/takeoff context automatically.
-            time.sleep(1.0)
-            for cmd, arg in commands:
-                if cmd == "test_link":
-                    executed.append("test_link")
-                elif cmd == "takeoff":
-                    step_index += 1
-                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                    executed.append("takeoff")
-                    time.sleep(0.5)
-                elif cmd == "move":
-                    step_index += 1
-                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                    direction = arg.get("dir") if isinstance(arg, dict) else None
-                    fallback_dist = MOVE_DISTANCE.get(direction, 0.2)
-                    dist = arg.get("distance") if isinstance(arg, dict) else None
-                    if dist is None:
-                        dist = fallback_dist
-                    dist = max(0.01, float(dist))
+            scf.cf.platform.send_arming_request(True)
+            interruptible_sleep(1.0, ensure_link_ok)
 
-                    if direction == "forward":
-                        mc.forward(dist)
-                    elif direction == "back":
-                        mc.back(dist)
-                    elif direction == "left":
-                        mc.left(dist)
-                    elif direction == "right":
-                        mc.right(dist)
-                    elif direction == "up":
-                        mc.up(dist)
-                    elif direction == "down":
-                        mc.down(dist)
-                    executed.append(f"move:{direction}:{dist}")
-                    time.sleep(0.6)
-                elif cmd == "delay":
-                    step_index += 1
-                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                    wait_sec = max(0.0, float(arg))
-                    executed.append(f"delay:{wait_sec}")
-                    time.sleep(wait_sec)
-                elif cmd == "print":
-                    step_index += 1
-                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                    msg = _normalize_print_value(arg)
-                    executed.append(f"print:{msg}")
-                    print(msg, flush=True)
-                elif cmd == "land":
-                    step_index += 1
-                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                    executed.append("land")
-                    break
-                elif cmd == "spin_motors":
-                    step_index += 1
-                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                    m1 = int((arg or {}).get("m1", 0))
-                    m2 = int((arg or {}).get("m2", 0))
-                    m3 = int((arg or {}).get("m3", 0))
-                    m4 = int((arg or {}).get("m4", 0))
-                    secs = float((arg or {}).get("secs", 1.0))
-                    ok, values, duration, err = spin_motors(scf, m1, m2, m3, m4, secs)
-                    executed.append(f"spin_motors:{values[0]}:{values[1]}:{values[2]}:{values[3]}:{duration:.2f}:{'1' if ok else '0'}")
-                    if err:
-                        print(f"spin_motors_error={err}", flush=True)
-                elif cmd == "if_mr_obstacle":
-                    step_index += 1
-                    direction = (arg or {}).get("dir", "front")
-                    threshold = float((arg or {}).get("threshold", 0.3))
-                    _emit_step(step_index, total_steps, f"if_mr_obstacle:{direction}:{threshold}")
-                    distances = read_multiranger_distances_once(scf)
-                    distance = handle_range_measurement(distances.get(direction))
-                    hit = float(distance) < float(threshold)
-                    executed.append(f"if_mr_obstacle:{direction}:{distance:.3f}:{threshold:.3f}:{'1' if hit else '0'}")
-                    print(f"if_mr_obstacle dir={direction} dist={distance:.3f} threshold={threshold:.3f} result={hit}", flush=True)
-                    branch = (arg or {}).get("then", []) if hit else (arg or {}).get("else", [])
-                    for child_cmd, child_arg in branch:
-                        if child_cmd == "move":
-                            step_index += 1
-                            _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
-                            child_direction = child_arg.get("dir") if isinstance(child_arg, dict) else None
-                            fallback_dist = MOVE_DISTANCE.get(child_direction, 0.2)
-                            child_dist = child_arg.get("distance") if isinstance(child_arg, dict) else None
-                            if child_dist is None:
-                                child_dist = fallback_dist
-                            child_dist = max(0.01, float(child_dist))
-                            if child_direction == "forward":
-                                mc.forward(child_dist)
-                            elif child_direction == "back":
-                                mc.back(child_dist)
-                            elif child_direction == "left":
-                                mc.left(child_dist)
-                            elif child_direction == "right":
-                                mc.right(child_dist)
-                            elif child_direction == "up":
-                                mc.up(child_dist)
-                            elif child_direction == "down":
-                                mc.down(child_dist)
-                            executed.append(f"move:{child_direction}:{child_dist}")
-                            time.sleep(0.6)
-                        elif child_cmd == "delay":
-                            step_index += 1
-                            _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
-                            wait_sec = max(0.0, float(child_arg))
-                            executed.append(f"delay:{wait_sec}")
-                            time.sleep(wait_sec)
-                        elif child_cmd == "print":
-                            step_index += 1
-                            _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
-                            msg = _normalize_print_value(child_arg)
-                            executed.append(f"print:{msg}")
-                            print(msg, flush=True)
-                        elif child_cmd == "spin_motors":
-                            step_index += 1
-                            _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
-                            m1 = int((child_arg or {}).get("m1", 0))
-                            m2 = int((child_arg or {}).get("m2", 0))
-                            m3 = int((child_arg or {}).get("m3", 0))
-                            m4 = int((child_arg or {}).get("m4", 0))
-                            secs = float((child_arg or {}).get("secs", 1.0))
-                            ok, values, duration, err = spin_motors(scf, m1, m2, m3, m4, secs)
-                            executed.append(f"spin_motors:{values[0]}:{values[1]}:{values[2]}:{values[3]}:{duration:.2f}:{'1' if ok else '0'}")
-                            if err:
-                                print(f"spin_motors_error={err}", flush=True)
-                elif cmd == "led_ring_set_color":
-                    r = int((arg or {}).get("r", 255))
-                    g = int((arg or {}).get("g", 0))
-                    b = int((arg or {}).get("b", 0))
-                    set_led_ring_color(scf, r, g, b)
-                    executed.append(f"led_ring_set_color:{r}:{g}:{b}")
-                elif cmd == "led_ring_set_effect":
-                    effect = int(arg or 0)
-                    set_led_ring_effect(scf, effect)
-                    executed.append(f"led_ring_set_effect:{effect}")
-                elif cmd == "led_ring_off":
-                    set_led_ring_effect(scf, 0)
-                    executed.append("led_ring_off")
-                elif cmd == "buzzer_beep":
-                    duration = int((arg or {}).get("duration", 120))
-                    times = int((arg or {}).get("times", 1))
-                    ok = buzzer_beep(scf, duration, times)
-                    executed.append(f"buzzer_beep:{duration}:{times}:{'1' if ok else '0'}")
+            with MotionCommander(scf) as mc:
+                # MotionCommander enters hover/takeoff context automatically.
+                interruptible_sleep(1.0, ensure_link_ok)
+                for cmd, arg in commands:
+                    ensure_link_ok()
+                    if cmd == "test_link":
+                        executed.append("test_link")
+                    elif cmd == "takeoff":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        executed.append("takeoff")
+                        interruptible_sleep(0.5, ensure_link_ok)
+                    elif cmd == "move":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        direction = arg.get("dir") if isinstance(arg, dict) else None
+                        fallback_dist = MOVE_DISTANCE.get(direction, 0.2)
+                        dist = arg.get("distance") if isinstance(arg, dict) else None
+                        if dist is None:
+                            dist = fallback_dist
+                        dist = max(0.01, float(dist))
+
+                        if direction == "forward":
+                            mc.forward(dist)
+                        elif direction == "back":
+                            mc.back(dist)
+                        elif direction == "left":
+                            mc.left(dist)
+                        elif direction == "right":
+                            mc.right(dist)
+                        elif direction == "up":
+                            mc.up(dist)
+                        elif direction == "down":
+                            mc.down(dist)
+                        executed.append(f"move:{direction}:{dist}")
+                        interruptible_sleep(0.6, ensure_link_ok)
+                    elif cmd == "delay":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        wait_sec = max(0.0, float(arg))
+                        executed.append(f"delay:{wait_sec}")
+                        interruptible_sleep(wait_sec, ensure_link_ok)
+                    elif cmd == "print":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        msg = _normalize_print_value(arg)
+                        executed.append(f"print:{msg}")
+                        print(msg, flush=True)
+                    elif cmd == "land":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        executed.append("land")
+                        break
+                    elif cmd == "spin_motors":
+                        step_index += 1
+                        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        m1 = int((arg or {}).get("m1", 0))
+                        m2 = int((arg or {}).get("m2", 0))
+                        m3 = int((arg or {}).get("m3", 0))
+                        m4 = int((arg or {}).get("m4", 0))
+                        secs = float((arg or {}).get("secs", 1.0))
+                        ok, values, duration, err = spin_motors(scf, m1, m2, m3, m4, secs)
+                        executed.append(f"spin_motors:{values[0]}:{values[1]}:{values[2]}:{values[3]}:{duration:.2f}:{'1' if ok else '0'}")
+                        if err:
+                            print(f"spin_motors_error={err}", flush=True)
+                    elif cmd == "if_mr_obstacle":
+                        step_index += 1
+                        direction = (arg or {}).get("dir", "front")
+                        threshold = float((arg or {}).get("threshold", 0.3))
+                        _emit_step(step_index, total_steps, f"if_mr_obstacle:{direction}:{threshold}")
+                        distances = read_multiranger_distances_once(scf)
+                        distance = handle_range_measurement(distances.get(direction))
+                        hit = float(distance) < float(threshold)
+                        executed.append(f"if_mr_obstacle:{direction}:{distance:.3f}:{threshold:.3f}:{'1' if hit else '0'}")
+                        print(f"if_mr_obstacle dir={direction} dist={distance:.3f} threshold={threshold:.3f} result={hit}", flush=True)
+                        branch = (arg or {}).get("then", []) if hit else (arg or {}).get("else", [])
+                        for child_cmd, child_arg in branch:
+                            if child_cmd == "move":
+                                step_index += 1
+                                _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
+                                child_direction = child_arg.get("dir") if isinstance(child_arg, dict) else None
+                                fallback_dist = MOVE_DISTANCE.get(child_direction, 0.2)
+                                child_dist = child_arg.get("distance") if isinstance(child_arg, dict) else None
+                                if child_dist is None:
+                                    child_dist = fallback_dist
+                                child_dist = max(0.01, float(child_dist))
+                                if child_direction == "forward":
+                                    mc.forward(child_dist)
+                                elif child_direction == "back":
+                                    mc.back(child_dist)
+                                elif child_direction == "left":
+                                    mc.left(child_dist)
+                                elif child_direction == "right":
+                                    mc.right(child_dist)
+                                elif child_direction == "up":
+                                    mc.up(child_dist)
+                                elif child_direction == "down":
+                                    mc.down(child_dist)
+                                executed.append(f"move:{child_direction}:{child_dist}")
+                                interruptible_sleep(0.6, ensure_link_ok)
+                            elif child_cmd == "delay":
+                                step_index += 1
+                                _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
+                                wait_sec = max(0.0, float(child_arg))
+                                executed.append(f"delay:{wait_sec}")
+                                interruptible_sleep(wait_sec, ensure_link_ok)
+                            elif child_cmd == "print":
+                                step_index += 1
+                                _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
+                                msg = _normalize_print_value(child_arg)
+                                executed.append(f"print:{msg}")
+                                print(msg, flush=True)
+                            elif child_cmd == "spin_motors":
+                                step_index += 1
+                                _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
+                                m1 = int((child_arg or {}).get("m1", 0))
+                                m2 = int((child_arg or {}).get("m2", 0))
+                                m3 = int((child_arg or {}).get("m3", 0))
+                                m4 = int((child_arg or {}).get("m4", 0))
+                                secs = float((child_arg or {}).get("secs", 1.0))
+                                ok, values, duration, err = spin_motors(scf, m1, m2, m3, m4, secs)
+                                executed.append(f"spin_motors:{values[0]}:{values[1]}:{values[2]}:{values[3]}:{duration:.2f}:{'1' if ok else '0'}")
+                                if err:
+                                    print(f"spin_motors_error={err}", flush=True)
+                    elif cmd == "led_ring_set_color":
+                        r = int((arg or {}).get("r", 255))
+                        g = int((arg or {}).get("g", 0))
+                        b = int((arg or {}).get("b", 0))
+                        set_led_ring_color(scf, r, g, b)
+                        executed.append(f"led_ring_set_color:{r}:{g}:{b}")
+                    elif cmd == "led_ring_set_effect":
+                        effect = int(arg or 0)
+                        set_led_ring_effect(scf, effect)
+                        executed.append(f"led_ring_set_effect:{effect}")
+                    elif cmd == "led_ring_off":
+                        set_led_ring_effect(scf, 0)
+                        executed.append("led_ring_off")
+                    elif cmd == "buzzer_beep":
+                        duration = int((arg or {}).get("duration", 120))
+                        times = int((arg or {}).get("times", 1))
+                        ok = buzzer_beep(scf, duration, times)
+                        executed.append(f"buzzer_beep:{duration}:{times}:{'1' if ok else '0'}")
+                        ensure_link_ok()
+    except Exception as exc:
+        message = str(exc)
+        if "Crazyflie link unstable:" in message and not message.startswith("LINK_ABORTED:"):
+            message = f"LINK_ABORTED: {message}"
+        return {
+            "success": False,
+            "message": message,
+            "radioStatus": radio_status,
+            "uri": uri,
+            "addressHex": normalized_address,
+            "links": links,
+            "scanError": scan_error,
+            "executed": executed,
+        }
 
     return {
         "success": True,
