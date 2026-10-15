@@ -7,7 +7,7 @@ export type CrazyflieRuntimePolicy = 'sim-only' | 'sim-first' | 'real-only';
   providedIn: 'root',
 })
 export class CrazyflieRuntimeService {
-  policy$ = new BehaviorSubject<CrazyflieRuntimePolicy>('sim-first');
+  policy$ = new BehaviorSubject<CrazyflieRuntimePolicy>('sim-only');
   lastSimulationPassed$ = new BehaviorSubject<boolean>(false);
 
   setPolicy(policy: CrazyflieRuntimePolicy): void {

@@ -297,41 +297,14 @@
 }
 
 .deck-row__content {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 8px 8px;
+  padding: 0 12px 10px 32px;
 }
 
-.deck-shortcut {
-  border: 1px solid color-mix(in srgb, var(--aily-border-input) 70%, transparent);
-  background: color-mix(in srgb, var(--aily-bg-tertiary) 72%, transparent);
+.deck-row__description {
+  margin: 0;
   color: var(--aily-text-secondary);
-  border-radius: 999px;
-  padding: 2px 8px;
   font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
-
-  &:hover {
-    color: var(--aily-text-primary);
-    border-color: color-mix(in srgb, var(--aily-color-link-hover) 55%, transparent);
-  }
-}
-
-.deck-bound-item {
-  border: 1px solid color-mix(in srgb, #4e91ff 58%, transparent);
-  background: color-mix(in srgb, #4e91ff 24%, var(--aily-bg-tertiary));
-  color: var(--aily-text-primary);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
-
-  &:hover {
-    background: color-mix(in srgb, #4e91ff 34%, var(--aily-bg-tertiary));
-  }
+  line-height: 1.5;
 }
 
 .deck-crazyflie {
@@ -339,17 +312,13 @@
   border-bottom: 1px solid color-mix(in srgb, var(--aily-border-input) 65%, transparent);
 }
 
-.deck-starter-block {
-  border: 1px solid color-mix(in srgb, #48b989 58%, transparent);
-  background: color-mix(in srgb, #48b989 22%, var(--aily-bg-tertiary));
-  color: var(--aily-text-primary);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
+.crazyflie-intro {
+  padding: 0 12px 10px 20px;
 
-  &:hover {
-    background: color-mix(in srgb, #48b989 32%, var(--aily-bg-tertiary));
+  p {
+    margin: 0;
+    color: var(--aily-text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
   }
 }

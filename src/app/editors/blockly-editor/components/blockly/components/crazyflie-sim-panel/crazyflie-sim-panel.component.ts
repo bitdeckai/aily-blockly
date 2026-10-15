@@ -19,23 +19,30 @@ import {
   LineSegments,
   MathUtils,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
+  Plane,
   PerspectiveCamera,
   PlaneGeometry,
   RepeatWrapping,
+  Raycaster,
   Scene,
   SphereGeometry,
   SRGBColorSpace,
   TextureLoader,
   TorusGeometry,
   TubeGeometry,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
+import * as Blockly from 'blockly';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Subscription } from 'rxjs';
 import { CrazyflieSimService } from '../../../../../../services/crazyflie-sim.service';
+import { BlocklyService } from '../../../../services/blockly.service';
+import { NzMessageService } from 'ng-zorro-antd/message';
 
 @Component({
   selector: 'app-crazyflie-sim-panel',
@@ -54,10 +61,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   speed = 1;
   stepText = 'idle';
   logs: string[] = [];
-  telemetry = { xCm: 0, yCm: 0, altitudeCm: 6 };
+  telemetry = { xCm: 0, yCm: 0, altitudeCm: 6, yawDeg: 0 };
   gridVisible = true;
   flightPathVisible = true;
   sceneReady = false;
+  measureMode = false;
+  measureStatus = '';
 
   private scene: Scene | null = null;
   private camera: PerspectiveCamera | null = null;
@@ -82,6 +91,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private presetInteriorRoot: Group | null = null;
   private currentRoomSize = { width: 8, depth: 10, height: 3 };
   private readonly gltfLoader = new GLTFLoader();
+  private readonly measureRaycaster = new Raycaster();
+  private readonly measurePointer = new Vector2();
+  private readonly measureFloor = new Plane(new Vector3(0, 1, 0), 0);
+  private measureStart: Vector3 | null = null;
+  private measureLine: Line | null = null;
+  private measureMarkers: Mesh[] = [];
 
   private targetPosition = new Vector3(0, 0.06, 0);
   private readonly trailMinDistance = 0.035;
@@ -100,7 +115,11 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private lastRenderTs = 0;
   private subscriptions: Subscription[] = [];
 
-  constructor(public simService: CrazyflieSimService) {}
+  constructor(
+    public simService: CrazyflieSimService,
+    private blocklyService: BlocklyService,
+    private message: NzMessageService,
+  ) {}
 
   ngOnInit(): void {
     this.setupSubscriptions();
@@ -139,6 +158,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.controls.dispose();
       this.controls = null;
     }
+    this.clearMeasurement();
   }
 
   setPreset(preset: 'classroom' | 'home'): void {
@@ -209,6 +229,88 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
     if (this.trailEndpoint) {
       this.trailEndpoint.visible = this.flightPathVisible && this.trailPoints.length > 0;
+    }
+  }
+
+  toggleMeasureMode(): void {
+    this.measureMode = !this.measureMode;
+    this.measureStart = null;
+    if (this.measureMode) {
+      this.clearMeasurement();
+      this.measureStatus = '测距中：点击场景中的两个位置';
+    } else if (!this.measureLine) {
+      this.clearMeasurement();
+      this.measureStatus = '';
+    }
+  }
+
+  onCanvasClick(event: MouseEvent): void {
+    if (!this.measureMode || !this.renderer || !this.camera || !this.scene) {
+      return;
+    }
+    if (event.target !== this.renderer.domElement) {
+      return;
+    }
+
+    const bounds = this.renderer.domElement.getBoundingClientRect();
+    this.measurePointer.set(
+      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+    this.measureRaycaster.setFromCamera(this.measurePointer, this.camera);
+    const point = this.measureRaycaster.ray.intersectPlane(this.measureFloor, new Vector3());
+    if (!point) {
+      return;
+    }
+    point.y = 0.018;
+
+    if (!this.measureStart) {
+      this.measureStart = point.clone();
+      this.addMeasureMarker(point);
+      this.measureStatus = '已选起点：再点击一个位置';
+      return;
+    }
+
+    this.addMeasureMarker(point);
+    this.measureLine = new Line(
+      new BufferGeometry().setFromPoints([this.measureStart, point]),
+      new LineBasicMaterial({ color: '#ffca55', depthTest: false }),
+    );
+    this.measureLine.renderOrder = 4;
+    this.scene.add(this.measureLine);
+    const distanceCm = Math.round(Math.hypot(point.x - this.measureStart.x, point.z - this.measureStart.z) * 100);
+    this.measureStatus = `水平距离：${distanceCm} cm`;
+    this.measureMode = false;
+    this.measureStart = null;
+  }
+
+  insertStarterFlow(): void {
+    const takeoffType = 'cf_takeoff';
+    const landType = 'cf_land';
+    if (!(Blockly.Blocks as any)[takeoffType] || !(Blockly.Blocks as any)[landType]) {
+      this.message.error('Crazyflie 起飞/降落积木尚未加载，请先打开 Crazyflie 工程。');
+      return;
+    }
+
+    this.blocklyService.createPage('Crazyflie 起飞降落示例');
+    const workspace: any = this.blocklyService.workspace;
+    try {
+      const takeoff = workspace.newBlock(takeoffType);
+      const land = workspace.newBlock(landType);
+      takeoff.initSvg();
+      land.initSvg();
+      if (!takeoff.nextConnection || !land.previousConnection) {
+        throw new Error('积木连接口不可用');
+      }
+      takeoff.nextConnection.connect(land.previousConnection);
+      takeoff.moveBy(80, 80);
+      takeoff.render();
+      land.render();
+      workspace.centerOnBlock?.(takeoff.id);
+      this.message.success('示例已插入新页面；默认仅模拟，不会自动起飞。');
+    } catch (error) {
+      console.error('插入 Crazyflie 示例失败:', error);
+      this.message.error('插入示例失败，请确认 Crazyflie 积木库已加载。');
     }
   }
 
@@ -554,6 +656,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           xCm: Math.round(pose.x * 100),
           yCm: Math.round(pose.z * 100),
           altitudeCm: Math.max(0, Math.round(pose.y * 100)),
+          yawDeg: Math.round(MathUtils.radToDeg(pose.yaw)),
         };
       }),
     );
@@ -583,6 +686,35 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.applySceneModel(url);
       }),
     );
+  }
+
+  private addMeasureMarker(position: Vector3): void {
+    if (!this.scene) {
+      return;
+    }
+    const marker = new Mesh(
+      new SphereGeometry(0.045, 12, 8),
+      new MeshBasicMaterial({ color: '#ffca55', depthTest: false }),
+    );
+    marker.position.copy(position);
+    marker.renderOrder = 5;
+    this.scene.add(marker);
+    this.measureMarkers.push(marker);
+  }
+
+  private clearMeasurement(): void {
+    if (this.measureLine) {
+      this.scene?.remove(this.measureLine);
+      this.measureLine.geometry.dispose();
+      (this.measureLine.material as LineBasicMaterial).dispose();
+      this.measureLine = null;
+    }
+    this.measureMarkers.forEach((marker) => {
+      this.scene?.remove(marker);
+      marker.geometry.dispose();
+      (marker.material as MeshBasicMaterial).dispose();
+    });
+    this.measureMarkers = [];
   }
 
   private applyFloorPlanTexture(url: string | null): void {

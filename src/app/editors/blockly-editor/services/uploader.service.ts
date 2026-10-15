@@ -19,6 +19,7 @@ import { BleOtaProgress, UploaderBleService } from '../../../services/uploader-b
 import { AppDataResourceLockService } from '../../../services/appdata-resource-lock.service';
 import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
 import { CrazyflieTelemetryService } from '../../../services/crazyflie-telemetry.service';
+import { CrazyflieConnectionService } from '../../../services/crazyflie-connection.service';
 
 @Injectable()
 export class _UploaderService {
@@ -41,7 +42,8 @@ export class _UploaderService {
     private uploaderBleService: UploaderBleService,
     private appDataResourceLock: AppDataResourceLockService,
     private crazyflieSimService: CrazyflieSimService,
-    private crazyflieTelemetryService: CrazyflieTelemetryService
+    private crazyflieTelemetryService: CrazyflieTelemetryService,
+    private crazyflieConnectionService: CrazyflieConnectionService
   ) { }
 
   uploadInProgress = false;
@@ -187,6 +189,7 @@ export class _UploaderService {
 
   private async uploadCrazyflieFlow(crazyflieCode: string): Promise<ActionState> {
     const title = 'Crazyflie 链路测试';
+    this.crazyflieConnectionService.setChecking();
     this.crazyflieTelemetryService.clear();
     this.noticeService.update({
       title,
@@ -198,6 +201,7 @@ export class _UploaderService {
 
     const api = window['crazyflie'];
     if (!api || typeof api.testLink !== 'function') {
+      this.crazyflieConnectionService.setResult(false, '未找到 Crazyflie 测试接口，请重启应用后重试');
       this.noticeService.update({
         title,
         text: '未找到 Crazyflie 测试接口，请重启应用后重试',
@@ -281,6 +285,9 @@ export class _UploaderService {
       result = hasRunFlowCmd
         ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex })
         : await api.testLink({ timeoutMs: 5000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex });
+    } catch (error: any) {
+      this.crazyflieConnectionService.setResult(false, error?.message || 'Crazyflie 链路检测异常');
+      throw error;
     } finally {
       this.clearBlocklySelection();
       if (disposeFlowLog) {
@@ -290,6 +297,12 @@ export class _UploaderService {
     if (result?.success) {
       const links: string[] = Array.isArray(result?.links) ? result.links : [];
       const executed: string[] = Array.isArray(result?.executed) ? result.executed : [];
+      const connectionMessage = hasRunFlowCmd
+        ? '真机通信成功'
+        : links.length > 0
+          ? `已发现 ${links.length} 台 Crazyflie`
+          : 'Crazyradio 已就绪，尚未发现飞行器';
+      this.crazyflieConnectionService.setResult(true, connectionMessage);
       if (!receivedRealtimeLog) {
         executed.forEach((line) => {
           if (typeof line !== 'string' || !line.trim()) {
@@ -313,6 +326,7 @@ export class _UploaderService {
     }
 
     const detail = result?.detail ? JSON.stringify(result.detail, null, 2) : '';
+    this.crazyflieConnectionService.setResult(false, result?.message || 'Crazyflie 链路测试失败');
     this.noticeService.update({
       title,
       text: result?.message || 'Crazyflie 链路测试失败',

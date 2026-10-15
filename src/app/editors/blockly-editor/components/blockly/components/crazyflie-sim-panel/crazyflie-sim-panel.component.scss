@@ -125,6 +125,15 @@
   background: rgba(24, 42, 62, 0.5);
   border-radius: 6px;
   padding: 4px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  max-width: calc(100% - 20px);
+}
+
+.sim-hud__measure {
+  color: #ffdc88;
+  flex-basis: 100%;
 }
 
 .sim-quick-actions {
@@ -149,6 +158,11 @@
   &:hover {
     border-color: rgba(120, 188, 255, 0.8);
     color: #ffffff;
+  }
+
+  &.active {
+    border-color: rgba(120, 188, 255, 0.8);
+    background: rgba(43, 89, 128, 0.88);
   }
 }
 

@@ -25,31 +25,13 @@ interface ToolboxContextMenuAction {
   disabled?: (item: BlocklyToolboxFacadeItem) => boolean;
 }
 
-interface DeckShortcut {
-  label: string;
-  search: string;
-}
-
-interface DeckBoundItem {
-  key: string;
-  label: string;
-}
-
-interface DeckStarterBlock {
-  label: string;
-  search: string;
-}
-
 interface DeckGroup {
   key: string;
   name: string;
+  description: string;
   iconClass: string;
   expanded: boolean;
-  boundItems: DeckBoundItem[];
-  starterBlocks: DeckStarterBlock[];
-  shortcuts: DeckShortcut[];
   allTargetKey?: string | null;
-  allSearchQuery?: string;
 }
 
 @Component({
@@ -66,83 +48,38 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   items: BlocklyToolboxFacadeItem[] = [];
   selectedKey: string | null = null;
   searchQuery = '';
+  crazyflieIntroExpanded = false;
   showContextMenu = false;
   dragVisualActive = false;
   hoverSuppressed = false;
   deckGroups: DeckGroup[] = [
     {
       key: 'flow-v2',
-      name: 'Flow deck v2',
+      name: 'Flow 定位甲板 v2',
+      description: '利用光流和下视测距辅助定位，可配合起飞、移动、等待等积木编写飞行流程。',
       iconClass: 'fa-light fa-arrows-up-down-left-right',
       expanded: false,
-      boundItems: [],
-      starterBlocks: [
-        { label: '起飞', search: 'takeoff' },
-        { label: '降落', search: 'land' },
-        { label: '向前飞', search: 'move forward' },
-        { label: '向上飞', search: 'move up' },
-        { label: '探测Flow v2', search: 'cf_detect_flow_v2 bcFlow2 flow deck detect' },
-      ],
-      shortcuts: [
-        { label: '起飞/降落', search: 'takeoff land' },
-        { label: '前后左右移动', search: 'move forward back left right' },
-        { label: '上下移动', search: 'move up down' },
-        { label: '等待', search: 'delay wait' },
-      ],
     },
     {
       key: 'multiranger',
-      name: 'Multiranger deck',
+      name: '多向测距甲板',
+      description: '读取前、后、左、右和上方的距离，可用于障碍物判断与避障逻辑。',
       iconClass: 'fa-light fa-radar',
       expanded: false,
-      boundItems: [],
-      starterBlocks: [
-        { label: '探测Multiranger', search: 'cf_detect_multiranger' },
-        { label: '前后左右上距离', search: 'cf_mr_get_distance cf_mr_log_all_distances' },
-        { label: '有障碍物？', search: 'cf_mr_has_obstacle' },
-        { label: '单向距离打印', search: 'cf_mr_log_distance' },
-      ],
-      shortcuts: [
-        { label: '前后左右上距离', search: 'range front back left right up' },
-        { label: '是否有障碍物', search: 'obstacle if' },
-        { label: '避障逻辑', search: 'avoid obstacle' },
-      ],
     },
     {
       key: 'led-ring',
-      name: 'LED-ring deck',
+      name: 'LED 灯环甲板',
+      description: '设置灯环颜色和灯效，或关闭灯环，用灯光反馈飞行状态。',
       iconClass: 'fa-light fa-circle-dot',
       expanded: false,
-      boundItems: [],
-      starterBlocks: [
-        { label: '探测LED-ring', search: 'cf_detect_led_ring deck bcColorLedTop bcColorLedBot' },
-        { label: '设置颜色', search: 'cf_led_ring_set_color ring.solidRed ring.solidGreen ring.solidBlue' },
-        { label: '设置灯效', search: 'cf_led_ring_set_effect ring.effect' },
-        { label: '关闭灯环', search: 'cf_led_ring_off ring.effect 0' },
-      ],
-      shortcuts: [
-        { label: '设置颜色', search: 'led color' },
-        { label: '闪烁/呼吸', search: 'led blink breathe' },
-        { label: '灯效模式', search: 'led effect ring' },
-      ],
     },
     {
       key: 'buzzer',
-      name: 'Buzzer deck',
+      name: '蜂鸣器甲板',
+      description: '控制蜂鸣器发出提示音，为起飞、到达或状态变化提供声音反馈。',
       iconClass: 'fa-light fa-volume',
       expanded: false,
-      boundItems: [],
-      starterBlocks: [
-        { label: '探测Buzzer', search: 'cf_detect_buzzer deck bcBuzzer' },
-        { label: '蜂鸣', search: 'cf_buzzer_beep sound.effect' },
-        { label: '提示音', search: 'cf_buzzer_beep duration times' },
-        { label: '旋律', search: 'buzzer melody note (planned)' },
-      ],
-      shortcuts: [
-        { label: '蜂鸣', search: 'buzzer beep tone' },
-        { label: '提示音', search: 'sound alert' },
-        { label: '旋律', search: 'melody note' },
-      ],
     },
   ];
   contextMenuPosition = { x: 0, y: 0 };
@@ -248,10 +185,6 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     return deck.key;
   }
 
-  trackDeckBoundItem(_index: number, item: DeckBoundItem): string {
-    return item.key;
-  }
-
   onSearchFocus() {
     this.blocklyService.activateToolboxSearch();
   }
@@ -273,9 +206,23 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     this.blocklyService.clickToolboxFacadeItem(item.key);
   }
 
+  onCrazyflieClick(item: BlocklyToolboxFacadeItem) {
+    this.crazyflieIntroExpanded = !this.crazyflieIntroExpanded;
+    if (this.crazyflieIntroExpanded) {
+      this.blocklyService.selectToolboxFacadeItem(item.key);
+    } else {
+      this.blocklyService.clearToolboxSelection();
+    }
+  }
+
   onToggleClick(item: BlocklyToolboxFacadeItem, event: MouseEvent) {
     event.stopPropagation();
     this.blocklyService.toggleToolboxFacadeItem(item.key);
+  }
+
+  onCrazyflieToggleClick(item: BlocklyToolboxFacadeItem, event: MouseEvent) {
+    event.stopPropagation();
+    this.onCrazyflieClick(item);
   }
 
   onToolboxItemContextMenu(item: BlocklyToolboxFacadeItem, event: MouseEvent) {
@@ -339,52 +286,17 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     this.deckGroups = this.deckGroups.map((deck) =>
       deck.key === deckKey ? { ...deck, expanded: !deck.expanded } : deck,
     );
-  }
-
-  onDeckShortcutClick(search: string): void {
-    this.blocklyService.activateToolboxSearch();
-    this.blocklyService.setToolboxSearchQuery(search);
-  }
-
-  onDeckStarterBlockClick(search: string): void {
-    this.blocklyService.activateToolboxSearch();
-    this.blocklyService.setToolboxSearchQuery(search);
-  }
-
-  onDeckBoundItemClick(itemKey: string): void {
-    if (itemKey.startsWith('__deck_all__:')) {
-      const deckKey = itemKey.replace('__deck_all__:', '');
-      this.onDeckShowAll(deckKey);
-      return;
-    }
-
-    const item = this.findItemByKey(itemKey, this.items);
-    if (!item) {
-      return;
-    }
-
-    this.blocklyService.clickToolboxFacadeItem(item.key);
+    this.onDeckShowAll(deckKey);
   }
 
   private onDeckShowAll(deckKey: string): void {
     const deck = this.deckGroups.find((item) => item.key === deckKey);
-    if (!deck) {
+    if (!deck?.allTargetKey) {
       return;
     }
 
-    if (deck.allTargetKey) {
-      this.blocklyService.clearToolboxSearch();
-      this.blocklyService.clickToolboxFacadeItem(deck.allTargetKey);
-      return;
-    }
-
-    const query = String(deck.allSearchQuery || '').trim();
-    if (!query) {
-      return;
-    }
-
-    this.blocklyService.activateToolboxSearch();
-    this.blocklyService.setToolboxSearchQuery(query);
+    this.blocklyService.clearToolboxSearch();
+    this.blocklyService.clickToolboxFacadeItem(deck.allTargetKey);
   }
 
   private refreshDeckBindings(items: BlocklyToolboxFacadeItem[]): void {
@@ -422,21 +334,8 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
 
     this.deckGroups = this.deckGroups.map((deck) => ({
       ...deck,
-      boundItems: this.buildDeckBoundItems(deck.key, grouped.get(deck.key) || []),
       allTargetKey: this.resolveDeckAllTargetKey(grouped.get(deck.key) || []),
-      allSearchQuery: this.buildDeckAllSearchQuery(deck, grouped.get(deck.key) || []),
     }));
-  }
-
-  private buildDeckBoundItems(deckKey: string, items: BlocklyToolboxFacadeItem[]): DeckBoundItem[] {
-    const dedup = new Map<string, DeckBoundItem>();
-    items.forEach((item) => {
-      if (!dedup.has(item.key)) {
-        dedup.set(item.key, { key: item.key, label: item.name || item.key });
-      }
-    });
-
-    return [{ key: `__deck_all__:${deckKey}`, label: '所有' }, ...Array.from(dedup.values())];
   }
 
   private resolveDeckAllTargetKey(items: BlocklyToolboxFacadeItem[]): string | null {
@@ -452,27 +351,6 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     });
 
     return preferred[0]?.key || null;
-  }
-
-  private buildDeckAllSearchQuery(deck: DeckGroup, items: BlocklyToolboxFacadeItem[]): string {
-    const terms = new Set<string>();
-
-    terms.add(deck.name);
-    terms.add(deck.key.replace(/-/g, ' '));
-    terms.add('deck detect');
-
-    items.forEach((item) => {
-      terms.add(String(item.name || ''));
-      terms.add(String(item.key || '').replace(/_/g, ' '));
-    });
-
-    deck.starterBlocks.forEach((item) => terms.add(item.search));
-    deck.shortcuts.forEach((item) => terms.add(item.search));
-
-    return Array.from(terms)
-      .map((item) => item.trim())
-      .filter((item) => !!item)
-      .join(' ');
   }
 
   private flattenToolboxItems(items: BlocklyToolboxFacadeItem[]): BlocklyToolboxFacadeItem[] {

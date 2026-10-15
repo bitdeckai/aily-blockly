@@ -57,6 +57,8 @@ $header-inner-height: 38px;
 
   .null-box {
     flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 8px;
     height: 100%;
     position: relative;
 
@@ -66,15 +68,14 @@ $header-inner-height: 38px;
   }
 
   .project-box {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    max-width: 26vw;
-    width: max-content;
+    position: relative;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 20vw;
+    margin: 0 8px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    z-index: 4;
     pointer-events: none;
   }
 
@@ -133,6 +134,102 @@ $header-inner-height: 38px;
         color: var(--aily-text-hint);
         font-size: 10px;
       }
+    }
+  }
+
+  .cf-runtime-control,
+  .cf-connection-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin: 0 6px;
+  }
+
+  .cf-runtime-control__label,
+  .cf-connection-status {
+    color: var(--aily-text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .cf-mode-segments {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid color-mix(in srgb, var(--aily-border-input) 78%, transparent);
+    border-radius: 6px;
+    background: var(--aily-bg-secondary);
+
+    button {
+      min-height: 26px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--aily-text-secondary);
+      font-size: 11px;
+      white-space: nowrap;
+      cursor: pointer;
+
+      &.active {
+        background: color-mix(in srgb, #3f9b75 32%, var(--aily-bg-primary));
+        color: var(--aily-text-primary);
+      }
+    }
+  }
+
+  .cf-run-button,
+  .cf-link-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 30px;
+    padding: 0 8px;
+    border: 1px solid color-mix(in srgb, var(--aily-border-input) 78%, transparent);
+    border-radius: 6px;
+    background: var(--aily-bg-secondary);
+    color: var(--aily-text-primary);
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      border-color: var(--aily-color-link-hover);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  }
+
+  .cf-run-button {
+    background: color-mix(in srgb, #3f9b75 30%, var(--aily-bg-secondary));
+  }
+
+  .cf-connection-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+
+    &__dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #8b929a;
+    }
+
+    &[data-status='checking'] .cf-connection-status__dot {
+      background: #e5b84b;
+    }
+
+    &[data-status='ready'] .cf-connection-status__dot {
+      background: #46c782;
+    }
+
+    &[data-status='error'] .cf-connection-status__dot {
+      background: #e15b5b;
     }
   }
 
