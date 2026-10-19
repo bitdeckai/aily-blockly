@@ -16,20 +16,17 @@
     <div class="down ccenter"><i class="fa-regular fa-angle-down"></i></div>
   </div>
   }
-  @if (showTopTelemetry) {
-  <div class="cf-telemetry-top">
-    <div class="cf-row">
-      <span class="label">Battery</span>
-      <div class="bar"><div class="fill" [style.width.%]="topBatteryPercent" [ngClass]="topBatteryLevelClass()"></div></div>
-      <span class="value">{{ topBatteryPercent }}%</span>
-      <span class="value volts">{{ topBatteryVolts }} V</span>
-    </div>
-    <div class="cf-row">
-      <span class="label">Link</span>
-      <div class="bar"><div class="fill" [style.width.%]="topLinkQuality" [ngClass]="topLinkLevelClass()"></div></div>
-      <span class="value">{{ topLinkQuality }}%</span>
-      <span class="value volts"></span>
-    </div>
+  @if (canShowSimulatorControls()) {
+  <div class="cf-connection-control cf-connection-control--board">
+    <button type="button" class="cf-connection-status cf-link-check"
+      [attr.data-status]="connectionState.status" [title]="connectionState.message"
+      [attr.aria-label]="connectionButtonTooltip" nz-tooltip [nzTooltipTitle]="connectionButtonTooltip"
+      [disabled]="connectionState.status === 'checking'" (click)="toggleCrazyflieConnection()">
+      <span class="cf-connection-status__dot"></span>
+      <i class="fa-light" [class.fa-link]="connectionState.status !== 'ready' && connectionState.status !== 'checking'"
+        [class.fa-link-slash]="connectionState.status === 'ready'"
+        [class.fa-spinner-third]="connectionState.status === 'checking'" aria-hidden="true"></i>
+    </button>
   </div>
   }
   <div class="null-box drag" (dblclick)="maximize()"></div>
@@ -44,24 +41,20 @@
       <div class="cf-runtime-control" role="group" aria-label="Crazyflie 运行模式">
         <span class="cf-runtime-control__label">运行模式</span>
         <div class="cf-mode-segments">
-          <button type="button" [class.active]="runtimePolicy === 'sim-only'"
+          <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'sim-only'"
             (click)="setCrazyflieRuntimeMode('sim-only')">仅模拟</button>
-          <button type="button" [class.active]="runtimePolicy === 'real-only'"
+          <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'real-only'"
             (click)="setCrazyflieRuntimeMode('real-only')">仅实飞</button>
-          <button type="button" [class.active]="runtimePolicy === 'sim-first'"
-            (click)="setCrazyflieRuntimeMode('sim-first')">模拟+实飞</button>
+          <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'sim-first'"
+            (click)="setCrazyflieRuntimeMode('sim-first')">仿真通过后实飞</button>
         </div>
-        <button type="button" class="cf-run-button" nz-tooltip nzTooltipTitle="运行当前模式"
+        <button type="button" class="cf-run-button" [disabled]="crazyflieRunInProgress"
+          nz-tooltip nzTooltipTitle="运行当前模式"
           (click)="runSelectedCrazyflieMode()">
-          <i class="fa-light fa-play"></i><span>运行</span>
+          <i class="fa-light" [class.fa-play]="!crazyflieRunInProgress"
+            [class.fa-spinner-third]="crazyflieRunInProgress"></i>
+          <span>{{ crazyflieRunInProgress ? '运行中' : '运行' }}</span>
         </button>
-      </div>
-      <div class="cf-connection-control">
-        <span class="cf-connection-status" [attr.data-status]="connectionState.status" [title]="connectionState.message">
-          <span class="cf-connection-status__dot"></span>{{ connectionStatusLabel }}
-        </span>
-        <button type="button" class="cf-link-check" [disabled]="connectionState.status === 'checking'"
-          (click)="checkCrazyflieLink()">检测链路</button>
       </div>
       }
       @for (btn of headerBtns; track $index) {

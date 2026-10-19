@@ -120,6 +120,52 @@ app-guide {
           }
         }
       }
+
+      .cf-bottom-telemetry {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 14px;
+        margin-left: auto;
+        padding: 0 10px;
+        min-width: 0;
+        color: var(--aily-text-secondary);
+        font-size: 10px;
+        line-height: 1;
+      }
+
+      .cf-bottom-telemetry__metric {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+      }
+
+      .cf-bottom-telemetry__label {
+        color: var(--aily-text-hint);
+      }
+
+      .cf-bottom-telemetry__bar {
+        width: 54px;
+        height: 6px;
+        overflow: hidden;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .cf-bottom-telemetry__fill {
+        height: 100%;
+        transition: width 0.2s ease;
+
+        &.level-good { background: linear-gradient(90deg, #3ac57b, #6de6a5); }
+        &.level-warn { background: linear-gradient(90deg, #e6b93f, #f3d76f); }
+        &.level-danger { background: linear-gradient(90deg, #d65a5a, #f08787); }
+      }
+
+      .cf-bottom-telemetry__value {
+        color: var(--aily-text-primary);
+        text-align: right;
+      }
     }
 
     .content {

@@ -26,16 +26,23 @@ $footer-inner-height: 28px;
 }
 
 .state {
-  position: absolute;
-  top: 0;
-  right: 10px;
   height: 26px;
   display: flex;
   align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 
   .icon {
     width: 26px;
     height: 26px;
+  }
+
+  &.state--with-telemetry {
+    margin-left: 8px;
   }
 
   .fa-circle-xmark{
@@ -49,4 +56,48 @@ $footer-inner-height: 28px;
   .fa-circle-check{
     color: rgb(0, 200, 0);
   }
+}
+
+.cf-footer-telemetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  margin: 0 10px 0 auto;
+  color: var(--aily-text-secondary);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.cf-footer-telemetry__metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.cf-footer-telemetry__label {
+  color: var(--aily-text-hint);
+}
+
+.cf-footer-telemetry__bar {
+  width: 52px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.cf-footer-telemetry__fill {
+  height: 100%;
+  transition: width 0.2s ease;
+
+  &.level-good { background: linear-gradient(90deg, #3ac57b, #6de6a5); }
+  &.level-warn { background: linear-gradient(90deg, #e6b93f, #f3d76f); }
+  &.level-danger { background: linear-gradient(90deg, #d65a5a, #f08787); }
+}
+
+.cf-footer-telemetry__value {
+  color: var(--aily-text-primary);
+  text-align: right;
 }

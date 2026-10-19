@@ -246,6 +246,10 @@
 .deck-row {
   border-radius: 8px;
   background: color-mix(in srgb, var(--aily-bg-secondary) 72%, transparent);
+
+  &.active {
+    box-shadow: inset 2px 0 var(--aily-color-link-hover);
+  }
 }
 
 .deck-row__header {

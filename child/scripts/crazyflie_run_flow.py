@@ -460,6 +460,16 @@ def run_flow(uri: str, commands, address_hex: str | None):
             time.sleep(min(0.05, end_ts - now))
         ensure_link_ok()
 
+    def request_deck_parameter(scf, name: str):
+        request_update = getattr(scf.cf.param, "request_param_update", None)
+        if not callable(request_update):
+            return "cflib parameter update API is unavailable"
+        try:
+            request_update(f"deck.{name}")
+            return None
+        except Exception as exc:
+            return str(exc)
+
     def detect_flow_v2_deck(scf, timeout_sec: float = 5.0):
         detected = Event()
         raw_value = {"value": None}
@@ -474,10 +484,11 @@ def run_flow(uri: str, commands, address_hex: str | None):
                 pass
 
         scf.cf.param.add_update_callback(group="deck", name="bcFlow2", cb=_on_update)
-        # Give the callback subscription a short time window to receive updates.
-        time.sleep(1.0)
+        request_error = request_deck_parameter(scf, "bcFlow2")
+        if request_error:
+            return False, {"value": raw_value["value"], "error": request_error}
         ok = detected.wait(timeout=max(0.1, float(timeout_sec)))
-        return ok, raw_value["value"]
+        return ok, {"value": raw_value["value"], "error": None}
 
     def detect_multiranger_deck(scf, timeout_sec: float = 5.0):
         detected = Event()
@@ -493,9 +504,11 @@ def run_flow(uri: str, commands, address_hex: str | None):
                 pass
 
         scf.cf.param.add_update_callback(group="deck", name="bcMultiranger", cb=_on_update)
-        time.sleep(1.0)
+        request_error = request_deck_parameter(scf, "bcMultiranger")
+        if request_error:
+            return False, {"value": raw_value["value"], "error": request_error}
         ok = detected.wait(timeout=max(0.1, float(timeout_sec)))
-        return ok, raw_value["value"]
+        return ok, {"value": raw_value["value"], "error": None}
 
     def read_multiranger_distances_once(scf):
         distances = {"front": None, "back": None, "left": None, "right": None, "up": None}
@@ -546,9 +559,13 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
         scf.cf.param.add_update_callback(group="deck", name="bcColorLedTop", cb=_on_top)
         scf.cf.param.add_update_callback(group="deck", name="bcColorLedBot", cb=_on_bot)
-        time.sleep(1.0)
+        top_error = request_deck_parameter(scf, "bcColorLedTop")
+        bot_error = request_deck_parameter(scf, "bcColorLedBot")
+        request_errors = [error for error in (top_error, bot_error) if error]
+        if request_errors:
+            return False, {**values, "errors": request_errors}
         ok = detected.wait(timeout=max(0.1, float(timeout_sec)))
-        return ok, values
+        return ok, {**values, "errors": []}
 
     def set_led_ring_effect(scf, effect: int):
         scf.cf.param.set_value("ring.effect", str(int(effect)))
@@ -571,11 +588,13 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
         try:
             scf.cf.param.add_update_callback(group="deck", name="bcBuzzer", cb=_on_update)
-            time.sleep(0.8)
+            request_error = request_deck_parameter(scf, "bcBuzzer")
+            if request_error:
+                return False, {"value": raw_value["value"], "error": request_error}
             ok = detected.wait(timeout=max(0.1, float(timeout_sec)))
-            return ok, raw_value["value"]
-        except Exception:
-            return False, None
+            return ok, {"value": raw_value["value"], "error": None}
+        except Exception as exc:
+            return False, {"value": raw_value["value"], "error": str(exc)}
 
     def buzzer_beep(scf, duration_ms: int, times: int):
         # Firmware support differs; try common sound params, fallback to no-op log.
@@ -945,7 +964,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
             "executed": executed,
         }
 
-    if not has_motion_cmd and (has_led_cmd or has_buzzer_cmd):
+    if not has_motion_cmd and (has_flow_detect_cmd or has_mr_cmd or has_led_cmd or has_buzzer_cmd):
         overall_success = True
         with SyncCrazyflie(active_uri) as scf:
             for cmd, arg in commands:
@@ -976,6 +995,44 @@ def run_flow(uri: str, commands, address_hex: str | None):
                     executed.append("test_crazyflie_link")
                     emit_live_telemetry(scf)
                     emit_live_telemetry(scf)
+                elif cmd == "detect_flow_v2":
+                    require_link_gate("detect_flow_v2")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, "detect_flow_v2")
+                    ok, raw = detect_flow_v2_deck(scf)
+                    overall_success = overall_success and ok
+                    executed.append(f"detect_flow_v2:{'1' if ok else '0'}")
+                    print(f"flow_v2_detected={ok}, raw={raw}", flush=True)
+                elif cmd == "detect_multiranger":
+                    require_link_gate("detect_multiranger")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, "detect_multiranger")
+                    ok, raw = detect_multiranger_deck(scf)
+                    overall_success = overall_success and ok
+                    executed.append(f"detect_multiranger:{'1' if ok else '0'}")
+                    print(f"multiranger_detected={ok}, raw={raw}", flush=True)
+                elif cmd == "mr_log_distance":
+                    require_link_gate("mr_log_distance")
+                    direction = (arg or {}).get("dir", "front")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, f"mr_log_distance:{direction}")
+                    distances = read_multiranger_distances_once(scf)
+                    value = handle_range_measurement(distances.get(direction))
+                    text = f"{float(value):.3f}"
+                    executed.append(f"mr_log_distance:{direction}:{text}")
+                    print(f"mr_{direction}={text}", flush=True)
+                elif cmd == "mr_log_all_distances":
+                    require_link_gate("mr_log_all_distances")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, "mr_log_all_distances")
+                    distances = read_multiranger_distances_once(scf)
+                    pieces = [
+                        f"{key}={float(handle_range_measurement(distances.get(key))):.3f}"
+                        for key in ("front", "back", "left", "right", "up")
+                    ]
+                    line = ",".join(pieces)
+                    executed.append(f"mr_log_all_distances:{line}")
+                    print(line, flush=True)
                 elif cmd == "detect_led_ring":
                     require_link_gate("detect_led_ring")
                     step_index += 1
@@ -1117,7 +1174,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
         return {
             "success": overall_success,
-            "message": "LED/Buzzer commands executed" if overall_success else "Some LED/Buzzer commands failed",
+            "message": "Crazyflie deck commands executed" if overall_success else "Some Crazyflie deck commands failed",
             "radioStatus": radio_status,
             "uri": uri,
             "addressHex": normalized_address,

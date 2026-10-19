@@ -30,12 +30,12 @@ import { APP_LIST } from '../../../configs/tool.config';
 import { Subscription } from 'rxjs';
 import { BleOtaDeviceItem, UploaderBleService } from '../../../services/uploader-ble.service';
 import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
-import { CrazyflieTelemetryService, CrazyflieTelemetryState } from '../../../services/crazyflie-telemetry.service';
 import { CrazyflieRuntimePolicy, CrazyflieRuntimeService } from '../../../services/crazyflie-runtime.service';
 import { CrazyflieConnectionService, CrazyflieConnectionState } from '../../../services/crazyflie-connection.service';
 
 @Component({
   selector: 'app-header',
+  standalone: true,
   imports: [
     CommonModule,
     NzToolTipModule,
@@ -66,7 +66,6 @@ export class HeaderComponent implements OnDestroy {
   private unsubscribeMaximizeChanged?: () => void;
   private unsubscribeCloseRequest?: () => void;
   private bleDevicesSubscription?: Subscription;
-  private telemetrySubscription?: Subscription;
   private runtimePolicySubscription?: Subscription;
   private connectionStateSubscription?: Subscription;
   private blePortListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,66 +100,13 @@ export class HeaderComponent implements OnDestroy {
     return this.projectService.currentBoardConfig?.name;
   }
 
-  telemetryState: CrazyflieTelemetryState | null = null;
   runtimePolicy: CrazyflieRuntimePolicy = 'sim-only';
+  crazyflieRunInProgress = false;
   connectionState: CrazyflieConnectionState = {
     status: 'unknown',
     message: '尚未检测',
     updatedAt: null,
   };
-
-  get showTopTelemetry(): boolean {
-    if (!this.canShowSimulatorControls() || !this.telemetryState) {
-      return false;
-    }
-    const hasBattery = Number.isFinite(Number(this.telemetryState.batteryPercent));
-    const hasLink = Number.isFinite(Number(this.telemetryState.linkQuality));
-    return hasBattery || hasLink;
-  }
-
-  get topBatteryPercent(): number {
-    const value = Number(this.telemetryState?.batteryPercent);
-    if (!Number.isFinite(value)) {
-      return 0;
-    }
-    return Math.max(0, Math.min(100, Math.round(value)));
-  }
-
-  get topLinkQuality(): number {
-    const value = Number(this.telemetryState?.linkQuality);
-    if (!Number.isFinite(value)) {
-      return 0;
-    }
-    return Math.max(0, Math.min(100, Math.round(value)));
-  }
-
-  get topBatteryVolts(): string {
-    const value = Number(this.telemetryState?.batteryVolts);
-    if (!Number.isFinite(value)) {
-      return '--';
-    }
-    return value.toFixed(3);
-  }
-
-  topBatteryLevelClass(): string {
-    if (this.topBatteryPercent <= 25) {
-      return 'level-danger';
-    }
-    if (this.topBatteryPercent <= 60) {
-      return 'level-warn';
-    }
-    return 'level-good';
-  }
-
-  topLinkLevelClass(): string {
-    if (this.topLinkQuality <= 40) {
-      return 'level-danger';
-    }
-    if (this.topLinkQuality <= 70) {
-      return 'level-warn';
-    }
-    return 'level-good';
-  }
 
   currentUrl = null;
 
@@ -193,7 +139,6 @@ export class HeaderComponent implements OnDestroy {
     private uploaderBleService: UploaderBleService,
     private ngZone: NgZone,
     private crazyflieSimService: CrazyflieSimService,
-    private crazyflieTelemetryService: CrazyflieTelemetryService,
     private crazyflieRuntimeService: CrazyflieRuntimeService,
     private crazyflieConnectionService: CrazyflieConnectionService,
     // private appStoreService: AppStoreService
@@ -265,17 +210,36 @@ export class HeaderComponent implements OnDestroy {
     this.crazyflieRuntimeService.setPolicy(policy);
   }
 
-  runSelectedCrazyflieMode(): void {
-    if (this.runtimePolicy === 'real-only') {
-      void this.runCrazyflieRealFlight();
-    } else if (this.runtimePolicy === 'sim-first') {
-      void this.runCrazyflieSimAndReal();
-    } else {
-      void this.runCrazyflieSimulation();
+  async runSelectedCrazyflieMode(): Promise<void> {
+    if (this.crazyflieRunInProgress) {
+      return;
+    }
+
+    this.crazyflieRunInProgress = true;
+    this.cd.markForCheck();
+    try {
+      if (this.runtimePolicy === 'real-only') {
+        await this.runCrazyflieRealFlight();
+      } else if (this.runtimePolicy === 'sim-first') {
+        await this.runCrazyflieSimAndReal();
+      } else {
+        await this.runCrazyflieSimulation();
+      }
+    } finally {
+      this.crazyflieRunInProgress = false;
+      this.cd.markForCheck();
     }
   }
 
-  async checkCrazyflieLink(): Promise<void> {
+  async toggleCrazyflieConnection(): Promise<void> {
+    if (this.connectionState.status === 'checking') {
+      return;
+    }
+    if (this.connectionState.status === 'ready') {
+      this.crazyflieConnectionService.disconnect();
+      return;
+    }
+
     const state = await this.crazyflieConnectionService.checkLink();
     if (state.status === 'ready') {
       this.message.success(state.message);
@@ -286,25 +250,29 @@ export class HeaderComponent implements OnDestroy {
 
   get connectionStatusLabel(): string {
     switch (this.connectionState.status) {
-      case 'checking': return '检测中';
+      case 'checking': return '连接中…';
+      case 'disconnected': return '连接';
+      case 'unknown':
+      case 'error': return '连接';
       case 'ready':
-        if (this.connectionState.message.includes('未发现') || this.connectionState.message.includes('已就绪')) {
-          return '无线模块就绪';
+        if (this.connectionState.message.includes('部分甲板/流程检测失败')) {
+          return '断开';
         }
-        return this.connectionState.message.includes('已发现') ? '已发现飞行器' : '真机通信成功';
-      case 'error': return '链路不可用';
-      default: return '未检测';
+        if (this.connectionState.message.includes('未发现') || this.connectionState.message.includes('已就绪')) {
+          return '断开';
+        }
+        return '断开';
     }
   }
 
-  async ngAfterViewInit() {
-    this.telemetrySubscription = this.crazyflieTelemetryService.telemetry$.subscribe((state) => {
-      this.telemetryState = state;
-      setTimeout(() => {
-        this.cd.markForCheck();
-      }, 0);
-    });
+  get connectionButtonTooltip(): string {
+    if (this.connectionState.status === 'checking') {
+      return '正在连接 Crazyflie';
+    }
+    return this.connectionState.status === 'ready' ? '断开 Crazyflie' : '连接 Crazyflie';
+  }
 
+  async ngAfterViewInit() {
     this.runtimePolicySubscription = this.crazyflieRuntimeService.policy$.subscribe((policy) => {
       this.runtimePolicy = policy;
       this.cd.markForCheck();
@@ -898,9 +866,6 @@ export class HeaderComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
-    if (this.telemetrySubscription) {
-      this.telemetrySubscription.unsubscribe();
-    }
     if (this.bleDevicesSubscription) {
       this.bleDevicesSubscription.unsubscribe();
     }

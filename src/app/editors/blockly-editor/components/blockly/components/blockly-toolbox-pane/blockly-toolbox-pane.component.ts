@@ -49,6 +49,7 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   selectedKey: string | null = null;
   searchQuery = '';
   crazyflieIntroExpanded = false;
+  activeDeckKey: string | null = null;
   showContextMenu = false;
   dragVisualActive = false;
   hoverSuppressed = false;
@@ -153,6 +154,12 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
           this.items = items;
           this.refreshDeckBindings(items);
           this.selectedKey = selectedKey;
+          if (this.activeDeckKey) {
+            const activeDeck = this.deckGroups.find((deck) => deck.key === this.activeDeckKey);
+            if (activeDeck?.allTargetKey !== selectedKey) {
+              this.activeDeckKey = null;
+            }
+          }
           this.searchQuery = searchQuery;
           if (this.contextMenuTarget && !this.findItemByKey(this.contextMenuTarget.key, items)) {
             this.closeContextMenu();
@@ -208,6 +215,7 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
 
   onCrazyflieClick(item: BlocklyToolboxFacadeItem) {
     this.crazyflieIntroExpanded = !this.crazyflieIntroExpanded;
+    this.activeDeckKey = null;
     if (this.crazyflieIntroExpanded) {
       this.blocklyService.selectToolboxFacadeItem(item.key);
     } else {
@@ -286,17 +294,21 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     this.deckGroups = this.deckGroups.map((deck) =>
       deck.key === deckKey ? { ...deck, expanded: !deck.expanded } : deck,
     );
-    this.onDeckShowAll(deckKey);
-  }
-
-  private onDeckShowAll(deckKey: string): void {
     const deck = this.deckGroups.find((item) => item.key === deckKey);
     if (!deck?.allTargetKey) {
       return;
     }
 
+    const isAlreadySelected = this.activeDeckKey === deckKey || this.selectedKey === deck.allTargetKey;
+    if (isAlreadySelected) {
+      this.activeDeckKey = null;
+      this.blocklyService.clearToolboxSelection();
+      return;
+    }
+
+    this.activeDeckKey = deckKey;
     this.blocklyService.clearToolboxSearch();
-    this.blocklyService.clickToolboxFacadeItem(deck.allTargetKey);
+    this.blocklyService.selectToolboxFacadeItem(deck.allTargetKey);
   }
 
   private refreshDeckBindings(items: BlocklyToolboxFacadeItem[]): void {

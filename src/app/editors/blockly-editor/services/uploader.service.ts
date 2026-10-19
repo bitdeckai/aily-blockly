@@ -326,7 +326,18 @@ export class _UploaderService {
     }
 
     const detail = result?.detail ? JSON.stringify(result.detail, null, 2) : '';
-    this.crazyflieConnectionService.setResult(false, result?.message || 'Crazyflie 链路测试失败');
+    const radioStatus = String(result?.radioStatus || '').trim().toLowerCase();
+    const links: string[] = Array.isArray(result?.links) ? result.links : [];
+    const connectionFailure = /link unstable|disconnected|connection lost|crazyflie_link_failed|test_radio_failed/i
+      .test(String(result?.message || ''));
+    const radioAvailable = !!radioStatus
+      && !radioStatus.startsWith('error')
+      && !radioStatus.includes('not found');
+    if (!connectionFailure && radioAvailable && links.length > 0) {
+      this.crazyflieConnectionService.setResult(true, '无线链路正常，部分甲板/流程检测失败');
+    } else {
+      this.crazyflieConnectionService.setResult(false, result?.message || 'Crazyflie 链路测试失败');
+    }
     this.noticeService.update({
       title,
       text: result?.message || 'Crazyflie 链路测试失败',
@@ -559,23 +570,21 @@ export class _UploaderService {
     const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
     const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
 
-    const [simRun, realRun] = await Promise.allSettled([
-      this.simulateCrazyflie(),
-      this.uploadCrazyflieFlow(crazyflieCode),
-    ]);
-
-    const realResult: ActionState = realRun.status === 'fulfilled'
-      ? realRun.value
-      : (realRun.reason || { state: 'error', text: 'Crazyflie 实飞执行失败' });
-
-    if (simRun.status === 'rejected') {
-      const simErrorText = simRun.reason?.text || simRun.reason?.message || '模拟执行失败';
-      this.logService.update({ detail: `[Crazyflie][sim] ${simErrorText}`, state: 'warn' });
-    } else if (simRun.value?.state !== 'done') {
-      this.logService.update({ detail: `[Crazyflie][sim] ${simRun.value?.text || '模拟未完成'}`, state: 'warn' });
+    let simRun: ActionState;
+    try {
+      simRun = await this.simulateCrazyflie();
+    } catch (error: any) {
+      simRun = { state: 'error', text: error?.text || error?.message || '模拟执行失败' };
     }
 
-    return realResult;
+    if (simRun.state !== 'done') {
+      const simErrorText = simRun.text || '模拟未通过，已停止实飞';
+      this.logService.update({ detail: `[Crazyflie][sim] ${simErrorText}`, state: 'warn' });
+      return { ...simRun, text: simErrorText };
+    }
+
+    this.logService.update({ detail: '[Crazyflie] 仿真通过，开始实飞', state: 'warn' });
+    return await this.uploadCrazyflieFlow(crazyflieCode);
   }
 
   async upload(): Promise<ActionState> {

@@ -129,6 +129,13 @@ function parseJsonOutput(output) {
   }
 }
 
+function parseScriptResultFromError(errorInfo) {
+  const parsed = parseLastJsonLine(errorInfo?.stdout) || parseLastJsonLine(errorInfo?.stderr);
+  return parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, "success")
+    ? parsed
+    : null;
+}
+
 function normalizeUri(input) {
   const text = String(input || "").trim();
   return text || DEFAULT_CRAZYFLIE_URI;
@@ -184,6 +191,17 @@ async function testLink(options = {}) {
         detail: { stdout, stderr },
       };
     } catch (errorInfo) {
+      const parsed = parseScriptResultFromError(errorInfo);
+      if (parsed) {
+        return {
+          success: !!parsed.success,
+          message: parsed.message || (parsed.success ? "Link test success" : "Link test failed"),
+          radioStatus: parsed.radioStatus || "unknown",
+          links: parsed.links || [],
+          loadedFrom: parsed.loadedFrom || null,
+          detail: parsed,
+        };
+      }
       errors.push({
         pythonCmd,
         message: errorInfo?.error?.message || "unknown error",
@@ -246,6 +264,18 @@ async function runFlow(options = {}) {
         detail: { stdout, stderr },
       };
     } catch (errorInfo) {
+      const parsed = parseScriptResultFromError(errorInfo);
+      if (parsed) {
+        return {
+          success: !!parsed.success,
+          message: parsed.message || (parsed.success ? "Flow executed" : "Flow failed"),
+          radioStatus: parsed.radioStatus || "unknown",
+          links: parsed.links || [],
+          executed: parsed.executed || [],
+          loadedFrom: parsed.loadedFrom || null,
+          detail: parsed,
+        };
+      }
       errors.push({
         pythonCmd,
         message: errorInfo?.error?.message || "unknown error",
@@ -426,6 +456,18 @@ async function runFlowStream(event, options = {}) {
         detail: { stdout, stderr },
       };
     } catch (errorInfo) {
+      const parsed = parseScriptResultFromError(errorInfo);
+      if (parsed) {
+        return {
+          success: !!parsed.success,
+          message: parsed.message || (parsed.success ? "Flow executed" : "Flow failed"),
+          radioStatus: parsed.radioStatus || "unknown",
+          links: parsed.links || [],
+          executed: parsed.executed || [],
+          loadedFrom: parsed.loadedFrom || null,
+          detail: parsed,
+        };
+      }
       errors.push({
         pythonCmd,
         message: errorInfo?.error?.message || "unknown error",

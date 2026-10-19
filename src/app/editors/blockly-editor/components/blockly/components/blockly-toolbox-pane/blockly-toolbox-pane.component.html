@@ -37,7 +37,8 @@
   <div class="deck-panel" *ngIf="showDeckPanel">
     <div class="deck-panel__title">扩展甲板</div>
     <div class="deck-panel__list">
-      <div class="deck-row" *ngFor="let deck of deckGroups; trackBy: trackDeck" [class.expanded]="deck.expanded">
+      <div class="deck-row" *ngFor="let deck of deckGroups; trackBy: trackDeck"
+        [class.expanded]="deck.expanded" [class.active]="activeDeckKey === deck.key">
         <button type="button" class="deck-row__header" [attr.aria-expanded]="deck.expanded"
           (click)="onDeckRowClick(deck.key)">
           <span class="deck-row__icon"><i [class]="deck.iconClass"></i></span>

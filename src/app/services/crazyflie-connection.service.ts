@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
-export type CrazyflieConnectionStatus = 'unknown' | 'checking' | 'ready' | 'error';
+export type CrazyflieConnectionStatus = 'unknown' | 'checking' | 'ready' | 'error' | 'disconnected';
 
 export interface CrazyflieConnectionState {
   status: CrazyflieConnectionStatus;
@@ -29,6 +29,10 @@ export class CrazyflieConnectionService {
       message: message || (success ? 'Crazyradio 已就绪' : '无线链路检测失败'),
       updatedAt: Date.now(),
     });
+  }
+
+  disconnect(): void {
+    this.state$.next({ status: 'disconnected', message: '连接已断开', updatedAt: Date.now() });
   }
 
   async checkLink(): Promise<CrazyflieConnectionState> {

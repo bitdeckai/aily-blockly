@@ -9,9 +9,8 @@
     <i class="{{item.icon}}"></i>
   </div>
   }
-  <!-- 这里显示状态，如保存中，项目加载中，正在安装xxx等 -->
   @if(actionData){
-  <div class="state ccenter">
+  <div class="state ccenter" [class.state--with-telemetry]="showCrazyflieTelemetry">
     @switch(actionData.state){
     @case('doing'){
     <div class="icon lloading ccenter">
@@ -35,6 +34,26 @@
     }
     }
     {{ actionData.text }}
+  </div>
+  }
+  @if (showCrazyflieTelemetry) {
+  <div class="cf-footer-telemetry" aria-label="Crazyflie 链路和电池状态">
+    <div class="cf-footer-telemetry__metric">
+      <span class="cf-footer-telemetry__label">Link</span>
+      <div class="cf-footer-telemetry__bar">
+        <div class="cf-footer-telemetry__fill" [style.width.%]="linkQuality ?? 0"
+          [ngClass]="linkLevelClass()"></div>
+      </div>
+      <span class="cf-footer-telemetry__value">{{ linkQuality ?? '--' }}%</span>
+    </div>
+    <div class="cf-footer-telemetry__metric">
+      <span class="cf-footer-telemetry__label">Battery</span>
+      <div class="cf-footer-telemetry__bar">
+        <div class="cf-footer-telemetry__fill" [style.width.%]="batteryPercent ?? 0"
+          [ngClass]="batteryLevelClass()"></div>
+      </div>
+      <span class="cf-footer-telemetry__value">{{ batteryPercent ?? '--' }}% · {{ batteryVolts }} V</span>
+    </div>
   </div>
   }
 </div>

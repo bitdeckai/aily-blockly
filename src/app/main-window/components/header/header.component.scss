@@ -79,64 +79,6 @@ $header-inner-height: 38px;
     pointer-events: none;
   }
 
-  .cf-telemetry-top {
-    position: relative;
-    width: 188px;
-    margin-left: 39px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    font-size: 10px;
-    line-height: 1.1;
-
-    .cf-row {
-      display: grid;
-      grid-template-columns: 34px 82px 30px 40px;
-      align-items: center;
-      gap: 4px;
-      color: var(--aily-text-secondary);
-
-      .label {
-        color: var(--aily-text-hint);
-      }
-
-      .bar {
-        height: 6px;
-        border-radius: 4px;
-        overflow: hidden;
-        background: rgba(255, 255, 255, 0.12);
-
-        .fill {
-          height: 100%;
-          transition: width 0.2s ease;
-
-          &.level-good {
-            background: linear-gradient(90deg, #3ac57b, #6de6a5);
-          }
-
-          &.level-warn {
-            background: linear-gradient(90deg, #e6b93f, #f3d76f);
-          }
-
-          &.level-danger {
-            background: linear-gradient(90deg, #d65a5a, #f08787);
-          }
-        }
-      }
-
-      .value {
-        text-align: right;
-        color: var(--aily-text-primary);
-      }
-
-      .volts {
-        color: var(--aily-text-hint);
-        font-size: 10px;
-      }
-    }
-  }
-
   .cf-runtime-control,
   .cf-connection-control {
     display: inline-flex;
@@ -144,6 +86,10 @@ $header-inner-height: 38px;
     gap: 6px;
     flex: 0 0 auto;
     margin: 0 6px;
+  }
+
+  .cf-connection-control--board {
+    margin: 0 4px 0 8px;
   }
 
   .cf-runtime-control__label,
@@ -206,6 +152,14 @@ $header-inner-height: 38px;
 
   .cf-run-button {
     background: color-mix(in srgb, #3f9b75 30%, var(--aily-bg-secondary));
+  }
+
+  .cf-link-check {
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+    gap: 3px;
+    font-size: 14px;
   }
 
   .cf-connection-status {
@@ -329,11 +283,5 @@ $header-inner-height: 38px;
     &:hover {
       color: var(--aily-color-error);
     }
-  }
-}
-
-@media (max-width: 1360px) {
-  .header-box .cf-telemetry-top {
-    display: none;
   }
 }
