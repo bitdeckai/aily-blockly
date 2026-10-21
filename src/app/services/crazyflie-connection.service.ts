@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
 export type CrazyflieConnectionStatus = 'unknown' | 'checking' | 'ready' | 'error' | 'disconnected';
+export type CrazyflieDeckType = 'flow-v2' | 'multiranger' | 'led-ring' | 'buzzer';
 
 export interface CrazyflieConnectionState {
   status: CrazyflieConnectionStatus;
@@ -13,6 +14,8 @@ export interface CrazyflieConnectionState {
   providedIn: 'root',
 })
 export class CrazyflieConnectionService {
+  readonly detectedDecks$ = new BehaviorSubject<CrazyflieDeckType[]>([]);
+
   readonly state$ = new BehaviorSubject<CrazyflieConnectionState>({
     status: 'unknown',
     message: '尚未检测',
@@ -31,8 +34,19 @@ export class CrazyflieConnectionService {
     });
   }
 
+  setDeckDetected(deck: CrazyflieDeckType, detected: boolean): void {
+    const decks = new Set(this.detectedDecks$.value);
+    if (detected) {
+      decks.add(deck);
+    } else {
+      decks.delete(deck);
+    }
+    this.detectedDecks$.next(Array.from(decks));
+  }
+
   disconnect(): void {
     this.state$.next({ status: 'disconnected', message: '连接已断开', updatedAt: Date.now() });
+    this.detectedDecks$.next([]);
   }
 
   async checkLink(): Promise<CrazyflieConnectionState> {

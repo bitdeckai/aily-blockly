@@ -23,8 +23,25 @@
       <input type="range" min="0.2" max="3" step="0.1" [value]="speed" (input)="onSpeedChanged($any($event.target).value)">
       <span>{{ speed | number:'1.1-1' }}x</span>
     </label>
+    <label class="speed-control explosion-control">
+      爆炸图
+      <input type="range" min="0" max="100" step="1" [value]="explosionPercent" (input)="setExplosionAmount($any($event.target).value)">
+      <span>{{ explosionPercent }}%</span>
+    </label>
     <input #floorPlanInput type="file" accept="image/*" (change)="onFloorPlanSelected($event)" hidden>
     <input #sceneModelInput type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" (change)="onSceneModelSelected($event)" hidden>
+    <div class="sim-view-tools" role="toolbar" aria-label="三维视角控制">
+      <button class="sim-icon-btn" title="放大 (+)" aria-label="放大" (click)="zoomCamera(0.7)"><i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="缩小 (-)" aria-label="缩小" (click)="zoomCamera(1.4)"><i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="适配整个场景 (Home)" aria-label="适配整个场景" (click)="fitCameraToScene()"><i class="fa-solid fa-expand" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="聚焦飞行器 (F)" aria-label="聚焦飞行器" (click)="focusAircraft()"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="向左旋转 15 度" aria-label="向左旋转" (click)="orbitCamera(-15)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="向右旋转 15 度" aria-label="向右旋转" (click)="orbitCamera(15)"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="抬高视角 15 度" aria-label="抬高视角" (click)="orbitCamera(0, -15)"><i class="fa-solid fa-angle-up" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="降低视角 15 度" aria-label="降低视角" (click)="orbitCamera(0, 15)"><i class="fa-solid fa-angle-down" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" [class.active]="axesVisible" [attr.aria-pressed]="axesVisible" title="飞行器坐标：X 前、Y 左、Z 上" aria-label="显示飞行器坐标系" (click)="toggleFlightAxes()"><i class="fa-solid fa-arrows-up-down-left-right" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" title="保存场景截图" aria-label="保存场景截图" (click)="captureScene()"><i class="fa-solid fa-camera" aria-hidden="true"></i></button>
+    </div>
   </div>
 
   <div class="sim-panel__canvas-wrap">
@@ -33,9 +50,23 @@
       <span>Y {{ telemetry.yCm }} cm</span>
       <span>高度 {{ telemetry.altitudeCm }} cm</span>
       <span>航向 {{ telemetry.yawDeg }}°</span>
+      <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel }}</span>
       <span *ngIf="measureStatus" class="sim-hud__measure">{{ measureStatus }}</span>
     </div>
-    <div #canvasHost class="sim-panel__canvas" (click)="onCanvasClick($event)"></div>
+    <div #canvasHost class="sim-panel__canvas" tabindex="0" aria-label="三维场景" title="左键拖动旋转，右键拖动平移，滚轮缩放；点击场景后可用方向键旋转、Home 全景、F 聚焦" (keydown)="onViewportKeydown($event)" (click)="onCanvasClick($event)"></div>
+    <div class="sim-orientation">
+      <canvas #orientationCanvas width="112" height="112" aria-label="飞行器方向坐标：X 前、Y 左、Z 上" title="X 前（红）· Y 左（绿）· Z 上（蓝）"></canvas>
+      <select aria-label="标准视角" title="按飞行器坐标选择观察方向" [value]="selectedView" (change)="setCameraView($any($event.target).value)">
+        <option value="" disabled>自由视角</option>
+        <option value="iso">等轴视图</option>
+        <option value="front">前视图 (+X)</option>
+        <option value="back">后视图 (-X)</option>
+        <option value="left">左视图 (+Y)</option>
+        <option value="right">右视图 (-Y)</option>
+        <option value="top">俯视图 (+Z)</option>
+        <option value="bottom">仰视图 (-Z)</option>
+      </select>
+    </div>
     <div class="sim-quick-actions">
       <button class="sim-quick-btn" [class.active]="measureMode" (click)="toggleMeasureMode()">{{ measureMode ? '取消测距' : '测距' }}</button>
       <button class="sim-quick-btn" [class.active]="gridVisible" (click)="toggleGrid()">网格</button>

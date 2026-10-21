@@ -231,10 +231,40 @@
 }
 
 .deck-panel__title {
-  padding: 0 8px 6px;
+  padding: 0 8px;
   font-size: 12px;
   letter-spacing: 0.2px;
   color: var(--aily-text-secondary);
+}
+
+.deck-panel__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  padding: 0 2px 4px 0;
+}
+
+.deck-language-toggle {
+  min-width: 32px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--aily-border-input) 78%, transparent);
+  border-radius: 5px;
+  background: var(--aily-bg-secondary);
+  color: var(--aily-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: var(--aily-color-link-hover);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
 }
 
 .deck-panel__list {

@@ -294,9 +294,10 @@ export class _UploaderService {
         disposeFlowLog();
       }
     }
+    const executed: string[] = Array.isArray(result?.executed) ? result.executed : [];
+    this.updateCrazyflieDeckDetection(executed);
     if (result?.success) {
       const links: string[] = Array.isArray(result?.links) ? result.links : [];
-      const executed: string[] = Array.isArray(result?.executed) ? result.executed : [];
       const connectionMessage = hasRunFlowCmd
         ? '真机通信成功'
         : links.length > 0
@@ -346,6 +347,24 @@ export class _UploaderService {
       setTimeout: 180000
     });
     return { state: 'error', text: result?.message || 'Crazyflie 链路测试失败' };
+  }
+
+  private updateCrazyflieDeckDetection(executed: string[]): void {
+    const deckResults: Array<{ pattern: RegExp; deck: 'flow-v2' | 'multiranger' | 'led-ring' | 'buzzer' }> = [
+      { pattern: /^detect_flow_v2:([01])$/, deck: 'flow-v2' },
+      { pattern: /^detect_multiranger:([01])$/, deck: 'multiranger' },
+      { pattern: /^detect_led_ring:([01])$/, deck: 'led-ring' },
+      { pattern: /^detect_buzzer:([01])$/, deck: 'buzzer' },
+    ];
+    executed.forEach((entry) => {
+      for (const result of deckResults) {
+        const match = result.pattern.exec(entry);
+        if (match) {
+          this.crazyflieConnectionService.setDeckDetected(result.deck, match[1] === '1');
+          break;
+        }
+      }
+    });
   }
 
   private getCrazyflieExecutionBlocksInOrder(): any[] {

@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
+import { CrazyflieConnectionService } from './crazyflie-connection.service';
 
 export type CrazyflieRoomPreset = 'classroom' | 'home' | 'custom';
 
@@ -26,8 +27,10 @@ export interface CrazyflieStepEvent {
 })
 export class CrazyflieSimService {
   private readonly originPose: CrazyfliePose = { x: 0, y: 0.06, z: 0, yaw: 0 };
-  private readonly classroomDeskHelipadPose: CrazyfliePose = { x: 0.39, y: 0.43, z: -0.43, yaw: 0 };
+  private readonly classroomDeskHelipadPose: CrazyfliePose = { x: 0.39, y: 0.76573, z: -0.43, yaw: 0 };
   private readonly baseMoveSpeedMps = 0.9;
+
+  constructor(private readonly connectionService: CrazyflieConnectionService) {}
 
   panelVisible$ = new BehaviorSubject<boolean>(true);
   running$ = new BehaviorSubject<boolean>(false);
@@ -200,11 +203,13 @@ export class CrazyflieSimService {
             await this.waitWithControl(200, true);
             break;
           case 'detect_flow_v2':
+            this.connectionService.setDeckDetected('flow-v2', true);
             this.appendLog('sim: detect_flow_v2 => true');
             executed.push('detect_flow_v2:1');
             await this.waitWithControl(180, true);
             break;
           case 'detect_multiranger':
+            this.connectionService.setDeckDetected('multiranger', true);
             this.appendLog('sim: detect_multiranger => true');
             executed.push('detect_multiranger:1');
             await this.waitWithControl(180, true);
@@ -229,6 +234,7 @@ export class CrazyflieSimService {
             break;
           }
           case 'detect_led_ring':
+            this.connectionService.setDeckDetected('led-ring', true);
             this.appendLog('sim: detect_led_ring => true');
             executed.push('detect_led_ring:1');
             await this.waitWithControl(120, true);
@@ -255,6 +261,7 @@ export class CrazyflieSimService {
             await this.waitWithControl(120, true);
             break;
           case 'detect_buzzer':
+            this.connectionService.setDeckDetected('buzzer', true);
             this.appendLog('sim: detect_buzzer => true');
             executed.push('detect_buzzer:1');
             await this.waitWithControl(120, true);

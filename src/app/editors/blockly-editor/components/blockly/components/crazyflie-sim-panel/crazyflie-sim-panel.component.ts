@@ -2,6 +2,8 @@ import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } fr
 import { CommonModule } from '@angular/common';
 import {
   AmbientLight,
+  ArrowHelper,
+  Box3,
   BufferGeometry,
   BoxGeometry,
   CanvasTexture,
@@ -9,10 +11,12 @@ import {
   Color,
   CylinderGeometry,
   DirectionalLight,
+  Float32BufferAttribute,
   GridHelper,
   HemisphereLight,
   EdgesGeometry,
   Group,
+  InstancedMesh,
   LineBasicMaterial,
   LineDashedMaterial,
   Line,
@@ -20,14 +24,18 @@ import {
   MathUtils,
   Mesh,
   MeshBasicMaterial,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
+  Object3D,
   Plane,
   PerspectiveCamera,
   PlaneGeometry,
+  PCFSoftShadowMap,
   RepeatWrapping,
   Raycaster,
   Scene,
   SphereGeometry,
+  Spherical,
   SRGBColorSpace,
   TextureLoader,
   TorusGeometry,
@@ -38,9 +46,11 @@ import {
 } from 'three';
 import * as Blockly from 'blockly';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Subscription } from 'rxjs';
 import { CrazyflieSimService } from '../../../../../../services/crazyflie-sim.service';
+import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
 import { BlocklyService } from '../../../../services/blockly.service';
 import { NzMessageService } from 'ng-zorro-antd/message';
 
@@ -55,6 +65,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   @ViewChild('canvasHost', { static: true }) private canvasHostRef!: ElementRef<HTMLDivElement>;
   @ViewChild('floorPlanInput', { static: true }) private floorPlanInputRef!: ElementRef<HTMLInputElement>;
   @ViewChild('sceneModelInput', { static: true }) private sceneModelInputRef!: ElementRef<HTMLInputElement>;
+  @ViewChild('orientationCanvas', { static: true }) private orientationCanvasRef!: ElementRef<HTMLCanvasElement>;
 
   running = false;
   paused = false;
@@ -62,11 +73,22 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   stepText = 'idle';
   logs: string[] = [];
   telemetry = { xCm: 0, yCm: 0, altitudeCm: 6, yawDeg: 0 };
-  gridVisible = true;
+  gridVisible = false;
   flightPathVisible = true;
   sceneReady = false;
   measureMode = false;
   measureStatus = '';
+  explosionPercent = 0;
+  detectedDeckLabels: string[] = [];
+  axesVisible = true;
+  selectedView = 'iso';
+  private flightAxes: Group | null = null;
+  private aircraftYaw = 0;
+  private readonly flightDirections = [
+    { label: 'X', color: '#ed5353', direction: new Vector3(-1, 0, 0) },
+    { label: 'Y', color: '#32b86a', direction: new Vector3(0, 0, 1) },
+    { label: 'Z', color: '#399cec', direction: new Vector3(0, 1, 0) },
+  ];
 
   private scene: Scene | null = null;
   private camera: PerspectiveCamera | null = null;
@@ -78,12 +100,24 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private droneGroup: Group | null = null;
   private propellerMeshes: Group[] = [];
   private propellerDirections: number[] = [];
+  private explodedModelRoot: Group | null = null;
+  private explodedParts: Array<{ node: Object3D; origin: Vector3; direction: Vector3 }> = [];
+  private deckMountGroup: Group | null = null;
+  private detectedDeckTypes: CrazyflieDeckType[] = [];
+  private readonly deckLabels: Record<CrazyflieDeckType, string> = {
+    'flow-v2': 'Flow v2',
+    multiranger: 'Multiranger',
+    'led-ring': 'LED-ring',
+    buzzer: 'Buzzer',
+  };
+  private readonly deckShellAssets: Partial<Record<CrazyflieDeckType, string>> = {};
+  private readonly deckShellRoots = new Map<CrazyflieDeckType, { root: Object3D; url: string }>();
+  private readonly deckLoadTokens = new Map<CrazyflieDeckType, number>();
   private roomWireframe: LineSegments | null = null;
   private gridHelper: GridHelper | null = null;
   private trailHistoryLine: Line | null = null;
   private trailLine: Line | null = null;
   private trailTubeMesh: Mesh | null = null;
-  private trailEndpoint: Mesh | null = null;
   private trailPoints: Vector3[] = [];
   private lastTrailPoint: Vector3 | null = null;
   private floorMesh: Mesh | null = null;
@@ -91,6 +125,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private presetInteriorRoot: Group | null = null;
   private currentRoomSize = { width: 8, depth: 10, height: 3 };
   private readonly gltfLoader = new GLTFLoader();
+  private readonly colladaLoader = new ColladaLoader();
+  private classroomDeskAssetPromise: Promise<{ geometry: BufferGeometry; material: MeshStandardMaterial }> | null = null;
+  private readonly classroomProtoAssetPromises = new Map<string, Promise<Group>>();
+  private varnishedPineMaterialPromise: Promise<MeshStandardMaterial> | null = null;
   private readonly measureRaycaster = new Raycaster();
   private readonly measurePointer = new Vector2();
   private readonly measureFloor = new Plane(new Vector3(0, 1, 0), 0);
@@ -117,6 +155,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   constructor(
     public simService: CrazyflieSimService,
+    private connectionService: CrazyflieConnectionService,
     private blocklyService: BlocklyService,
     private message: NzMessageService,
   ) {}
@@ -138,6 +177,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   ngOnDestroy(): void {
     this.subscriptions.forEach((sub) => sub.unsubscribe());
     this.subscriptions = [];
+    this.flightAxes?.children.forEach((axis) => {
+      if (axis instanceof ArrowHelper) {
+        axis.dispose();
+      }
+    });
+    this.flightAxes = null;
 
     if (this.animationFrameId != null) {
       cancelAnimationFrame(this.animationFrameId);
@@ -227,9 +272,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     if (this.trailTubeMesh) {
       this.trailTubeMesh.visible = this.flightPathVisible && this.trailPoints.length > 1;
     }
-    if (this.trailEndpoint) {
-      this.trailEndpoint.visible = this.flightPathVisible && this.trailPoints.length > 0;
-    }
   }
 
   toggleMeasureMode(): void {
@@ -245,6 +287,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   onCanvasClick(event: MouseEvent): void {
+    this.canvasHostRef.nativeElement.focus({ preventScroll: true });
     if (!this.measureMode || !this.renderer || !this.camera || !this.scene) {
       return;
     }
@@ -274,7 +317,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.addMeasureMarker(point);
     this.measureLine = new Line(
       new BufferGeometry().setFromPoints([this.measureStart, point]),
-      new LineBasicMaterial({ color: '#ffca55', depthTest: false }),
+      new LineBasicMaterial({ color: '#39c9dc', depthTest: false }),
     );
     this.measureLine.renderOrder = 4;
     this.scene.add(this.measureLine);
@@ -340,11 +383,178 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     if (!this.camera) {
       return;
     }
+    this.settleCameraControls();
     this.camera.position.copy(this.defaultCameraPosition);
     this.camera.lookAt(this.defaultCameraTarget);
     if (this.controls) {
       this.controls.target.copy(this.defaultCameraTarget);
       this.controls.update();
+    }
+    this.selectedView = 'iso';
+  }
+
+  private settleCameraControls(): void {
+    if (this.controls) {
+      const damping = this.controls.enableDamping;
+      this.controls.enableDamping = false;
+      this.controls.update();
+      this.controls.enableDamping = damping;
+    }
+  }
+
+  zoomCamera(factor: number): void {
+    if (!this.camera || !this.controls) {
+      return;
+    }
+    this.settleCameraControls();
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const distance = MathUtils.clamp(offset.length() * factor, this.controls.minDistance, this.controls.maxDistance);
+    this.camera.position.copy(this.controls.target).add(offset.normalize().multiplyScalar(distance));
+    this.controls.update();
+  }
+
+  fitCameraToScene(): void {
+    const room = this.currentRoomSize;
+    const bounds = new Box3(new Vector3(-room.width / 2, 0, -room.depth / 2), new Vector3(room.width / 2, room.height, room.depth / 2));
+    if (this.sceneModelRoot) {
+      bounds.expandByObject(this.sceneModelRoot);
+    }
+    if (this.droneGroup) {
+      bounds.expandByObject(this.droneGroup);
+    }
+    this.frameCameraBounds(bounds);
+  }
+
+  focusAircraft(): void {
+    if (this.droneGroup) {
+      this.frameCameraBounds(new Box3().setFromObject(this.droneGroup), 0.2);
+    }
+  }
+
+  private frameCameraBounds(bounds: Box3, minimumSize = 0): void {
+    if (!this.camera || !this.controls || bounds.isEmpty()) {
+      return;
+    }
+    this.settleCameraControls();
+    const center = bounds.getCenter(new Vector3());
+    const size = bounds.getSize(new Vector3());
+    const verticalFov = MathUtils.degToRad(this.camera.fov);
+    const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * this.camera.aspect);
+    const diameter = Math.max(size.length(), minimumSize);
+    const distance = diameter / (2 * Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.1;
+    this.controls.maxDistance = Math.max(30, distance * 1.5);
+    const direction = this.camera.position.clone().sub(this.controls.target).normalize();
+    if (direction.lengthSq() === 0) {
+      direction.set(1, 1, -1).normalize();
+    }
+    this.controls.target.copy(center);
+    this.camera.position.copy(center).addScaledVector(direction, distance);
+    this.camera.far = Math.max(100, distance * 4);
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+  }
+
+  setCameraView(view: string): void {
+    if (!this.camera || !this.controls) {
+      return;
+    }
+    const directions: Record<string, Vector3> = {
+      front: new Vector3(-1, 0, 0), back: new Vector3(1, 0, 0),
+      left: new Vector3(0, 0, 1), right: new Vector3(0, 0, -1),
+      top: new Vector3(-0.0001, 1, 0), bottom: new Vector3(-0.0001, -1, 0),
+      iso: new Vector3(1, 0.8, -1),
+    };
+    const direction = directions[view];
+    if (!direction) {
+      return;
+    }
+    this.settleCameraControls();
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    direction.applyAxisAngle(new Vector3(0, 1, 0), this.aircraftYaw);
+    this.camera.position.copy(this.controls.target).addScaledVector(direction.normalize(), distance);
+    this.selectedView = view;
+    this.controls.update();
+  }
+
+  orbitCamera(horizontal: number, vertical = 0): void {
+    if (!this.camera || !this.controls) {
+      return;
+    }
+    this.settleCameraControls();
+    const spherical = new Spherical().setFromVector3(this.camera.position.clone().sub(this.controls.target));
+    spherical.theta += MathUtils.degToRad(horizontal);
+    spherical.phi = MathUtils.clamp(spherical.phi + MathUtils.degToRad(vertical), 0.001, Math.PI - 0.001);
+    this.camera.position.copy(this.controls.target).add(new Vector3().setFromSpherical(spherical));
+    this.selectedView = '';
+    this.controls.update();
+  }
+
+  toggleFlightAxes(): void {
+    this.axesVisible = !this.axesVisible;
+    if (this.flightAxes) {
+      this.flightAxes.visible = this.axesVisible;
+    }
+  }
+
+  captureScene(): void {
+    if (!this.renderer || !this.scene || !this.camera) {
+      return;
+    }
+    this.renderer.render(this.scene, this.camera);
+    const link = document.createElement('a');
+    link.download = `crazyflie-scene-${Date.now()}.png`;
+    link.href = this.renderer.domElement.toDataURL('image/png');
+    link.click();
+  }
+
+  onViewportKeydown(event: KeyboardEvent): void {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    const actions: Record<string, () => void> = {
+      '+': () => this.zoomCamera(0.7), '=': () => this.zoomCamera(0.7), '-': () => this.zoomCamera(1.4),
+      Home: () => this.fitCameraToScene(), f: () => this.focusAircraft(), F: () => this.focusAircraft(),
+      ArrowLeft: () => this.orbitCamera(-15), ArrowRight: () => this.orbitCamera(15),
+      ArrowUp: () => this.orbitCamera(0, -15), ArrowDown: () => this.orbitCamera(0, 15),
+    };
+    if (actions[event.key]) {
+      event.preventDefault();
+      actions[event.key]();
+    }
+  }
+
+  private drawOrientationCompass(): void {
+    if (!this.camera) {
+      return;
+    }
+    const canvas = this.orientationCanvasRef.nativeElement;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return;
+    }
+    context.clearRect(0, 0, 112, 112);
+    const inverseCamera = this.camera.quaternion.clone().invert();
+    const directions = this.flightDirections.map((axis) => ({ ...axis,
+      projected: axis.direction.clone().applyAxisAngle(new Vector3(0, 1, 0), this.aircraftYaw).applyQuaternion(inverseCamera),
+    })).sort((left, right) => left.projected.z - right.projected.z);
+    context.lineWidth = 3;
+    context.font = 'bold 14px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    for (const axis of directions) {
+      const x = 56 + axis.projected.x * 34;
+      const y = 56 - axis.projected.y * 34;
+      context.strokeStyle = axis.color;
+      context.beginPath();
+      context.moveTo(56, 56);
+      context.lineTo(x, y);
+      context.stroke();
+      context.fillStyle = axis.color;
+      context.beginPath();
+      context.arc(x, y, 10, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = '#ffffff';
+      context.fillText(axis.label, x, y);
     }
   }
 
@@ -356,24 +566,27 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.scene = new Scene();
     this.scene.background = new Color('#dfe8f2');
 
-    this.camera = new PerspectiveCamera(58, width / height, 0.1, 100);
+    this.camera = new PerspectiveCamera(58, width / height, 0.005, 100);
     this.camera.position.copy(this.defaultCameraPosition);
     this.camera.lookAt(this.defaultCameraTarget);
 
     this.renderer = new WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(width, height);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
     host.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.addEventListener('start', () => { this.selectedView = ''; });
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
     this.controls.enablePan = true;
     this.controls.screenSpacePanning = true;
-    this.controls.minDistance = 1.2;
+    this.controls.minDistance = 0.08;
     this.controls.maxDistance = 30;
     this.controls.minPolarAngle = 0;
-    this.controls.maxPolarAngle = Math.PI * 0.49;
+    this.controls.maxPolarAngle = Math.PI - 0.001;
     this.controls.target.copy(this.defaultCameraTarget);
     this.controls.update();
 
@@ -381,6 +594,14 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     const hemiLight = new HemisphereLight('#f6f8ff', '#e0ddd2', 0.8);
     const directionalLight = new DirectionalLight(0xffffff, 1.15);
     directionalLight.position.set(5, 7, 3);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.set(1024, 1024);
+    directionalLight.shadow.camera.left = -6;
+    directionalLight.shadow.camera.right = 6;
+    directionalLight.shadow.camera.top = 6;
+    directionalLight.shadow.camera.bottom = -6;
+    directionalLight.shadow.camera.near = 0.1;
+    directionalLight.shadow.camera.far = 18;
     const fillLight = new DirectionalLight('#fff6ea', 0.55);
     fillLight.position.set(-4, 4, -2);
     this.scene.add(ambientLight, hemiLight, directionalLight, fillLight);
@@ -400,6 +621,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.droneGroup = this.createDroneMesh();
     this.scene.add(this.droneGroup);
+    this.flightAxes = new Group();
+    this.flightAxes.name = 'Aircraft coordinates: X forward, Y left, Z up';
+    for (const axis of this.flightDirections) {
+      this.flightAxes.add(new ArrowHelper(axis.direction, new Vector3(), 0.16, axis.color, 0.03, 0.015));
+    }
+    this.scene.add(this.flightAxes);
 
     this.ensureTrailLine();
 
@@ -412,6 +639,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   private createDroneMesh(): Group {
+    const group = this.createProceduralDroneMesh();
+    this.loadBitcrazeAssembly(group);
+    return group;
+  }
+
+  private createProceduralDroneMesh(): Group {
     const group = new Group();
 
     const frameMaterial = new MeshStandardMaterial({ color: '#202b36', roughness: 0.5, metalness: 0.18 });
@@ -525,6 +758,196 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return group;
   }
 
+  setExplosionAmount(value: string | number): void {
+    this.explosionPercent = MathUtils.clamp(Number(value) || 0, 0, 100);
+    const offset = (this.explosionPercent / 100) * 0.075;
+    this.explodedParts.forEach(({ node, origin, direction }) => {
+      node.position.copy(origin).addScaledVector(direction, offset);
+    });
+  }
+
+  registerDeckShellAsset(deck: CrazyflieDeckType, url: string): void {
+    this.deckShellAssets[deck] = url;
+    if (this.detectedDeckTypes.includes(deck)) {
+      this.loadDetectedDeckShell(deck, url);
+    }
+  }
+
+  private updateDetectedDeckShells(decks: CrazyflieDeckType[]): void {
+    this.detectedDeckTypes = [...decks];
+    this.detectedDeckLabels = decks.map((deck) => this.deckLabels[deck]);
+    for (const [deck, loaded] of this.deckShellRoots) {
+      if (!decks.includes(deck)) {
+        this.deckMountGroup?.remove(loaded.root);
+        this.disposeObject3D(loaded.root);
+        this.deckShellRoots.delete(deck);
+        this.deckLoadTokens.set(deck, (this.deckLoadTokens.get(deck) || 0) + 1);
+      }
+    }
+    if (!this.deckMountGroup) {
+      return;
+    }
+    decks.forEach((deck) => {
+      const url = this.deckShellAssets[deck];
+      const loaded = this.deckShellRoots.get(deck);
+      if (loaded?.url === url) {
+        if (loaded.root.parent !== this.deckMountGroup) {
+          this.deckMountGroup.add(loaded.root);
+        }
+      } else if (url) {
+        this.loadDetectedDeckShell(deck, url);
+      }
+    });
+  }
+
+  private loadDetectedDeckShell(deck: CrazyflieDeckType, url: string): void {
+    const loadToken = (this.deckLoadTokens.get(deck) || 0) + 1;
+    this.deckLoadTokens.set(deck, loadToken);
+    const assetUrl = new URL(url, window.location.href).href;
+    this.gltfLoader.load(
+      assetUrl,
+      (gltf) => {
+        if (this.deckLoadTokens.get(deck) !== loadToken
+          || !this.detectedDeckTypes.includes(deck)
+          || this.deckShellAssets[deck] !== url) {
+          this.disposeObject3D(gltf.scene);
+          return;
+        }
+        const previous = this.deckShellRoots.get(deck);
+        if (previous) {
+          this.deckMountGroup?.remove(previous.root);
+          this.disposeObject3D(previous.root);
+        }
+        this.deckMountGroup?.add(gltf.scene);
+        this.deckShellRoots.set(deck, { root: gltf.scene, url });
+      },
+      undefined,
+      (error) => {
+        if (this.deckLoadTokens.get(deck) === loadToken) {
+          console.warn(`Failed to load detected ${this.deckLabels[deck]} deck shell:`, error);
+        }
+      },
+    );
+  }
+
+  private loadBitcrazeAssembly(group: Group): void {
+    const assemblyUrl = new URL('./models/crazyflie/cf2_assembly.dae', window.location.href).href;
+    this.colladaLoader.load(
+      assemblyUrl,
+      (collada) => {
+        if (!this.scene || this.droneGroup !== group) {
+          return;
+        }
+
+        group.children.slice().forEach((child) => {
+          group.remove(child);
+          this.disposeObject3D(child);
+        });
+
+        const visualRoot = collada.scene;
+        visualRoot.name = 'Bitcraze Crazyflie 2 assembly';
+        this.explodedParts = [];
+        visualRoot.children.slice().forEach((part) => {
+          let hasMesh = false;
+          part.traverse((node) => {
+            if ((node as Mesh).isMesh) {
+              hasMesh = true;
+            }
+          });
+          if (!hasMesh) {
+            return;
+          }
+
+          const wrapper = new Group();
+          wrapper.name = `${part.name || 'component'} exploded component`;
+          wrapper.position.copy(part.position);
+          wrapper.quaternion.copy(part.quaternion);
+          wrapper.scale.copy(part.scale);
+          part.position.set(0, 0, 0);
+          part.quaternion.identity();
+          part.scale.set(1, 1, 1);
+          visualRoot.remove(part);
+          wrapper.add(part);
+          visualRoot.add(wrapper);
+
+          const direction = wrapper.position.clone().sub(new Vector3(0, 0, 0.015));
+          if (direction.lengthSq() < 0.000001) {
+            direction.set(0, 1, 0);
+          } else {
+            direction.normalize();
+          }
+          this.explodedParts.push({ node: wrapper, origin: wrapper.position.clone(), direction });
+        });
+
+        const assemblyRoot = new Group();
+        assemblyRoot.position.y = -0.015;
+        assemblyRoot.add(visualRoot);
+        this.explodedModelRoot = assemblyRoot;
+        group.add(assemblyRoot);
+
+        this.deckMountGroup = new Group();
+        this.deckMountGroup.name = 'Crazyflie deck attachment mount';
+        this.deckMountGroup.position.y = -0.015;
+        group.add(this.deckMountGroup);
+        this.updateDetectedDeckShells(this.detectedDeckTypes);
+        this.setExplosionAmount(this.explosionPercent);
+        this.loadBitcrazePropellers(group);
+      },
+      undefined,
+      (error) => console.warn('Failed to load Bitcraze Crazyflie assembly:', error),
+    );
+  }
+
+  private loadBitcrazePropellers(group: Group): void {
+    const propellerUrl = new URL('./models/crazyflie/ccw_prop.dae', window.location.href).href;
+    this.colladaLoader.load(
+      propellerUrl,
+      (collada) => {
+        if (!this.scene || this.droneGroup !== group) {
+          return;
+        }
+        const positions: Array<{ x: number; z: number; direction: number }> = [
+          { x: 0.031, z: 0.031, direction: -1 },
+          { x: -0.031, z: 0.031, direction: 1 },
+          { x: -0.031, z: -0.031, direction: -1 },
+          { x: 0.031, z: -0.031, direction: 1 },
+        ];
+        this.propellerMeshes = [];
+        this.propellerDirections = [];
+        positions.forEach(({ x, z, direction }) => {
+          const rotor = new Group();
+          rotor.name = 'Crazyflie propeller';
+          rotor.position.set(x, 0.008, z);
+          rotor.add(collada.scene.clone(true));
+          group.add(rotor);
+          this.propellerMeshes.push(rotor);
+          this.propellerDirections.push(direction);
+        });
+      },
+      undefined,
+      (error) => console.warn('Failed to load Bitcraze Crazyflie propeller:', error),
+    );
+  }
+
+  private disposeObject3D(root: Object3D): void {
+    root.traverse((node) => {
+      const mesh = node as Mesh;
+      if (!mesh.isMesh) {
+        return;
+      }
+      mesh.geometry.dispose();
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      materials.forEach((material) => {
+        Object.values(material).forEach((value: any) => {
+          if (value?.isTexture) {
+            value.dispose();
+          }
+        });
+        material.dispose();
+      });
+    });
+  }
+
   private createDroneIconTexture(): CanvasTexture {
     const size = 512;
     const canvas = document.createElement('canvas');
@@ -613,6 +1036,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   private setupSubscriptions(): void {
     this.subscriptions.push(
+      this.connectionService.detectedDecks$.subscribe((decks) => {
+        this.updateDetectedDeckShells(decks);
+      }),
+    );
+
+    this.subscriptions.push(
       this.simService.running$.subscribe((running) => {
         if (running && !this.running) {
           this.clearFlightPath();
@@ -651,6 +1080,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.subscriptions.push(
       this.simService.pose$.subscribe((pose) => {
+        this.aircraftYaw = pose.yaw;
         this.targetPosition.set(pose.x, pose.y, pose.z);
         this.telemetry = {
           xCm: Math.round(pose.x * 100),
@@ -694,7 +1124,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
     const marker = new Mesh(
       new SphereGeometry(0.045, 12, 8),
-      new MeshBasicMaterial({ color: '#ffca55', depthTest: false }),
+      new MeshBasicMaterial({ color: '#39c9dc', depthTest: false }),
     );
     marker.position.copy(position);
     marker.renderOrder = 5;
@@ -814,6 +1244,447 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.scene.add(this.roomWireframe);
   }
 
+  private loadClassroomDeskAsset(): Promise<{ geometry: BufferGeometry; material: MeshStandardMaterial }> {
+    if (!this.classroomDeskAssetPromise) {
+      const protoUrl = new URL('./models/classroom/Desk.proto', window.location.href).href;
+      const extractArray = (source: string, pattern: RegExp, label: string): number[] => {
+        const match = pattern.exec(source);
+        if (!match) {
+          throw new Error(`Desk.proto is missing ${label}`);
+        }
+        return match[1].trim().split(/\s+/).map(Number);
+      };
+      const splitFaces = (indices: number[]): number[][] => {
+        const faces: number[][] = [];
+        let face: number[] = [];
+        indices.forEach((index) => {
+          if (index === -1) {
+            if (face.length >= 3) {
+              faces.push(face);
+            }
+            face = [];
+          } else {
+            face.push(index);
+          }
+        });
+        if (face.length >= 3) {
+          faces.push(face);
+        }
+        return faces;
+      };
+
+      const loadPromise = fetch(protoUrl)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Desk.proto request failed with status ${response.status}`);
+          }
+          return response.text();
+        })
+        .then(async (source) => {
+          const coordinates = extractArray(source, /coord Coordinate\s*\{\s*point\s*\[([\s\S]*?)\]/, 'coordinates');
+          const textureCoordinates = extractArray(source, /texCoord TextureCoordinate\s*\{\s*point\s*\[([\s\S]*?)\]/, 'texture coordinates');
+          const coordinateFaces = splitFaces(extractArray(source, /coordIndex\s*\[([\s\S]*?)\]/, 'coordinate indices'));
+          const textureFaces = splitFaces(extractArray(source, /texCoordIndex\s*\[([\s\S]*?)\]/, 'texture indices'));
+          if (coordinateFaces.length !== textureFaces.length) {
+            throw new Error('Desk.proto coordinate and texture face counts do not match');
+          }
+
+          const positions: number[] = [];
+          const uvs: number[] = [];
+          coordinateFaces.forEach((face, faceIndex) => {
+            const uvFace = textureFaces[faceIndex];
+            if (face.length !== uvFace.length) {
+              throw new Error(`Desk.proto face ${faceIndex} has mismatched UV coordinates`);
+            }
+            for (let triangle = 1; triangle < face.length - 1; triangle += 1) {
+              [0, triangle, triangle + 1].forEach((corner) => {
+                const vertex = face[corner];
+                const uv = uvFace[corner];
+                positions.push(coordinates[vertex * 3], coordinates[vertex * 3 + 2], coordinates[vertex * 3 + 1]);
+                uvs.push(textureCoordinates[uv * 2], textureCoordinates[uv * 2 + 1]);
+              });
+            }
+          });
+
+          const geometry = new BufferGeometry();
+          geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+          geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
+          geometry.computeVertexNormals();
+          geometry.computeBoundingBox();
+          geometry.computeBoundingSphere();
+
+          const textureLoader = new TextureLoader();
+          const textureUrl = (name: string) => new URL(`./models/classroom/${name}`, window.location.href).href;
+          const [map, roughnessMap, metalnessMap, normalMap] = await Promise.all([
+            textureLoader.loadAsync(textureUrl('desk.jpg')),
+            textureLoader.loadAsync(textureUrl('desk_roughness.jpg')),
+            textureLoader.loadAsync(textureUrl('desk_metalness.jpg')),
+            textureLoader.loadAsync(textureUrl('desk_normal.jpg')),
+          ]);
+          map.colorSpace = SRGBColorSpace;
+          const lightMap = this.createLightClassroomTexture(map, '#d39451', 0.28);
+          const context = lightMap.image.getContext('2d')!;
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = lightMap.image.width;
+          maskCanvas.height = lightMap.image.height;
+          const maskContext = maskCanvas.getContext('2d')!;
+          maskContext.drawImage(metalnessMap.image, 0, 0, maskCanvas.width, maskCanvas.height);
+          const maskPixels = maskContext.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+          const colorPixels = context.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+          for (let pixel = 0; pixel < colorPixels.data.length; pixel += 4) {
+            const metalWeight = maskPixels[pixel] / 255;
+            for (let channel = 0; channel < 3; channel += 1) {
+              const silver = [195, 203, 207][channel];
+              colorPixels.data[pixel + channel] = colorPixels.data[pixel + channel] * (1 - metalWeight) + silver * metalWeight;
+            }
+          }
+          context.putImageData(colorPixels, 0, 0);
+          lightMap.needsUpdate = true;
+          map.dispose();
+          const material = new MeshStandardMaterial({ map: lightMap, roughnessMap, metalnessMap, normalMap, roughness: 0.7, metalness: 0.5 });
+          return { geometry, material };
+        });
+
+      this.classroomDeskAssetPromise = loadPromise;
+      void loadPromise.catch(() => {
+        if (this.classroomDeskAssetPromise === loadPromise) {
+          this.classroomDeskAssetPromise = null;
+        }
+      });
+    }
+    return this.classroomDeskAssetPromise;
+  }
+
+  private createLightClassroomTexture(source: { image: CanvasImageSource }, tint: string, opacity: number): CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      throw new Error('Unable to create classroom texture canvas');
+    }
+    context.drawImage(source.image, 0, 0, canvas.width, canvas.height);
+    context.fillStyle = tint;
+    context.globalAlpha = opacity;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.wrapS = RepeatWrapping;
+    texture.wrapT = RepeatWrapping;
+    return texture;
+  }
+
+  private loadParquetryFloor(group: Group, room: { width: number; depth: number }): void {
+    const geometry = new PlaneGeometry(room.width, room.depth);
+    geometry.setAttribute('uv2', geometry.getAttribute('uv').clone());
+    const material = new MeshStandardMaterial({ color: '#d8b88c', roughness: 0.88, metalness: 0 });
+    const floor = new Mesh(geometry, material);
+    floor.name = 'Webots parquetry classroom floor';
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0.012;
+    floor.receiveShadow = true;
+    group.add(floor);
+
+    const texturesRoot = './models/classroom/appearances/protos/textures/parquetry/';
+    const textureUrl = (name: string) => new URL(`${texturesRoot}${name}`, window.location.href).href;
+    const loader = new TextureLoader();
+    void Promise.all([
+      loader.loadAsync(textureUrl('light_strip_parquetry_base_color.jpg')),
+      loader.loadAsync(textureUrl('light_strip_parquetry_roughness.jpg')),
+      loader.loadAsync(textureUrl('light_strip_parquetry_normal.jpg')),
+    ]).then(([map, roughnessMap, normalMap]) => {
+      if (this.presetInteriorRoot !== group) {
+        [map, roughnessMap, normalMap].forEach((texture) => texture.dispose());
+        return;
+      }
+      map.colorSpace = SRGBColorSpace;
+      [map, roughnessMap, normalMap].forEach((texture) => {
+        texture.wrapS = RepeatWrapping;
+        texture.wrapT = RepeatWrapping;
+        texture.repeat.set(room.width * 2, room.depth * 2);
+      });
+      const lightMap = this.createLightClassroomTexture(map, '#e6c99c', 0.15);
+      lightMap.repeat.copy(map.repeat);
+      map.dispose();
+      material.map = lightMap;
+      material.roughnessMap = roughnessMap;
+      material.normalMap = normalMap;
+      material.aoMap = null;
+      material.color.set('#ffffff');
+      material.needsUpdate = true;
+    }).catch((error) => console.error('Failed to load Webots parquetry classroom floor:', error));
+  }
+
+  private extractVrmlBlocks(source: string, pattern: RegExp): string[] {
+    const blocks: string[] = [];
+    let offset = 0;
+    while (offset < source.length) {
+      pattern.lastIndex = 0;
+      const match = pattern.exec(source.slice(offset));
+      if (!match) {
+        break;
+      }
+      const start = offset + match.index;
+      const openBrace = source.indexOf('{', start);
+      if (openBrace < 0) {
+        break;
+      }
+      let depth = 0;
+      let end = openBrace;
+      for (; end < source.length; end += 1) {
+        if (source[end] === '{') {
+          depth += 1;
+        } else if (source[end] === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            break;
+          }
+        }
+      }
+      if (depth !== 0) {
+        break;
+      }
+      blocks.push(source.slice(openBrace + 1, end));
+      offset = end + 1;
+    }
+    return blocks;
+  }
+
+  private extractVrmlArray(source: string, field: string): number[] {
+    const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`${escapedField}\\s*\\[([\\s\\S]*?)\\]`).exec(source);
+    return match ? match[1].trim().split(/\s+/).filter(Boolean).map(Number) : [];
+  }
+
+  private splitVrmlFaces(indices: number[]): number[][] {
+    const faces: number[][] = [];
+    let face: number[] = [];
+    indices.forEach((index) => {
+      if (index === -1) {
+        if (face.length >= 3) {
+          faces.push(face);
+        }
+        face = [];
+      } else {
+        face.push(index);
+      }
+    });
+    if (face.length >= 3) {
+      faces.push(face);
+    }
+    return faces;
+  }
+
+  private loadVarnishedPineMaterial(): Promise<MeshStandardMaterial> {
+    if (!this.varnishedPineMaterialPromise) {
+      const protoUrl = new URL('./models/classroom/appearances/protos/VarnishedPine.proto', window.location.href).href;
+      const loadPromise = fetch(protoUrl)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`VarnishedPine.proto request failed with status ${response.status}`);
+          }
+          return response.text();
+        })
+        .then(async (source) => {
+          const textureUrl = (appearance: string) => {
+            const pattern = new RegExp(`${appearance}\\s+ImageTexture\\s*\\{\\s*url\\s*\\[\\s*"([^"]+)"`);
+            const match = pattern.exec(source);
+            if (!match) {
+              throw new Error(`VarnishedPine.proto is missing ${appearance} texture`);
+            }
+            return new URL(match[1], protoUrl).href;
+          };
+          const textureLoader = new TextureLoader();
+          const [map, roughnessMap, normalMap, aoMap] = await Promise.all([
+            textureLoader.loadAsync(textureUrl('baseColorMap')),
+            textureLoader.loadAsync(textureUrl('roughnessMap')),
+            textureLoader.loadAsync(textureUrl('normalMap')),
+            textureLoader.loadAsync(textureUrl('occlusionMap')),
+          ]);
+          map.colorSpace = SRGBColorSpace;
+          [map, roughnessMap, normalMap, aoMap].forEach((texture) => {
+            texture.wrapS = RepeatWrapping;
+            texture.wrapT = RepeatWrapping;
+            texture.repeat.set(3, 3);
+          });
+          const lightMap = this.createLightClassroomTexture(map, '#dba567', 0.32);
+          lightMap.repeat.copy(map.repeat);
+          map.dispose();
+          return new MeshStandardMaterial({
+            color: '#ffffff',
+            map: lightMap,
+            roughnessMap,
+            normalMap,
+            aoMap,
+            roughness: 1,
+            metalness: 0,
+            side: 2,
+          });
+        });
+      this.varnishedPineMaterialPromise = loadPromise;
+      void loadPromise.catch(() => {
+        if (this.varnishedPineMaterialPromise === loadPromise) {
+          this.varnishedPineMaterialPromise = null;
+        }
+      });
+    }
+    return this.varnishedPineMaterialPromise;
+  }
+  private applyVarnishedPineFinish(root: Object3D): void {
+    void this.loadVarnishedPineMaterial().then((template) => {
+      if (!this.presetInteriorRoot || !this.presetInteriorRoot.children.includes(root)) {
+        let isInCurrentPreset = false;
+        this.presetInteriorRoot?.traverse((node) => {
+          if (node === root) {
+            isInCurrentPreset = true;
+          }
+        });
+        if (!isInCurrentPreset) {
+          return;
+        }
+      }
+
+      const material = template.clone();
+      material.color.set('#ffffff');
+      root.traverse((node) => {
+        const mesh = node as Mesh;
+        if (!mesh.isMesh) {
+          return;
+        }
+        if (mesh.geometry.getAttribute('uv') && !mesh.geometry.getAttribute('uv2')) {
+          mesh.geometry.setAttribute('uv2', mesh.geometry.getAttribute('uv').clone());
+        }
+        const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        oldMaterials.forEach((oldMaterial) => oldMaterial.dispose());
+        mesh.material = material;
+        mesh.userData.sharedClassroomTextures = true;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      });
+    }).catch((error) => console.error('Failed to apply Webots varnished pine material:', error));
+  }
+
+  private loadClassroomProtoAsset(protoPath: string): Promise<Group> {
+    const cached = this.classroomProtoAssetPromises.get(protoPath);
+    if (cached) {
+      return cached;
+    }
+
+    const protoUrl = new URL(`./models/classroom/${protoPath}`, window.location.href).href;
+    const loadPromise = fetch(protoUrl)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`${protoPath} request failed with status ${response.status}`);
+        }
+        return response.text();
+      })
+      .then(async (source) => {
+        const shapes = this.extractVrmlBlocks(source, /\bShape\s*\{/g);
+        const root = new Group();
+        const textureLoader = new TextureLoader();
+        for (let shapeIndex = 0; shapeIndex < shapes.length; shapeIndex += 1) {
+          const shape = shapes[shapeIndex];
+          const geometryBlock = this.extractVrmlBlocks(shape, /\bgeometry\s+IndexedFaceSet\s*\{/g)[0];
+          if (!geometryBlock) {
+            continue;
+          }
+          const coordinateBlock = this.extractVrmlBlocks(geometryBlock, /\bcoord\s+Coordinate\s*\{/g)[0];
+          const textureCoordinateBlock = this.extractVrmlBlocks(geometryBlock, /\btexCoord\s+TextureCoordinate\s*\{/g)[0];
+          const coordinates = this.extractVrmlArray(coordinateBlock || '', 'point');
+          const textureCoordinates = this.extractVrmlArray(textureCoordinateBlock || '', 'point');
+          const coordinateFaces = this.splitVrmlFaces(this.extractVrmlArray(geometryBlock, 'coordIndex'));
+          const textureFaces = this.splitVrmlFaces(this.extractVrmlArray(geometryBlock, 'texCoordIndex'));
+          if (coordinates.length < 9 || coordinateFaces.length === 0) {
+            continue;
+          }
+          if (textureCoordinates.length > 0 && coordinateFaces.length !== textureFaces.length) {
+            throw new Error(`${protoPath} shape ${shapeIndex} has mismatched texture faces`);
+          }
+          const imageMatch = /ImageTexture\s*\{\s*url\s*\[\s*"([^"]+)"/.exec(shape);
+          const protoTextureMatch = /field\s+MFString\s+textureUrl\s+"([^"]+)"/.exec(source);
+          const imagePath = imageMatch?.[1] || protoTextureMatch?.[1] || null;
+          const projectionAxes = [0, 1, 2].map((axis) => {
+            let min = Number.POSITIVE_INFINITY;
+            let max = Number.NEGATIVE_INFINITY;
+            for (let vertex = axis; vertex < coordinates.length; vertex += 3) {
+              min = Math.min(min, coordinates[vertex]);
+              max = Math.max(max, coordinates[vertex]);
+            }
+            return { axis, min, range: Math.max(max - min, 1e-6) };
+          }).sort((left, right) => right.range - left.range).slice(0, 2);
+
+          const transformMatch = /TextureTransform\s*\{\s*scale\s+([-+\d.eE]+)\s+([-+\d.eE]+)/.exec(shape);
+          const textureScaleU = transformMatch ? Number(transformMatch[1]) : 1;
+          const textureScaleV = transformMatch ? Number(transformMatch[2]) : 1;
+          const positions: number[] = [];
+          const uvs: number[] = [];
+          coordinateFaces.forEach((face, faceIndex) => {
+            const uvFace = textureFaces[faceIndex] || face;
+            if (textureCoordinates.length > 0 && face.length !== uvFace.length) {
+              throw new Error(`${protoPath} shape ${shapeIndex} face ${faceIndex} has mismatched UVs`);
+            }
+            for (let triangle = 1; triangle < face.length - 1; triangle += 1) {
+              [0, triangle, triangle + 1].forEach((corner) => {
+                const vertex = face[corner];
+                positions.push(coordinates[vertex * 3], coordinates[vertex * 3 + 2], -coordinates[vertex * 3 + 1]);
+                if (textureCoordinates.length > 0) {
+                  const uv = uvFace[corner];
+                  uvs.push(textureCoordinates[uv * 2] * textureScaleU, textureCoordinates[uv * 2 + 1] * textureScaleV);
+                } else if (imagePath) {
+                  const uAxis = projectionAxes[0];
+                  const vAxis = projectionAxes[1];
+                  uvs.push(
+                    ((coordinates[vertex * 3 + uAxis.axis] - uAxis.min) / uAxis.range) * textureScaleU,
+                    ((coordinates[vertex * 3 + vAxis.axis] - vAxis.min) / vAxis.range) * textureScaleV,
+                  );
+                }
+              });
+            }
+          });
+
+          const geometry = new BufferGeometry();
+          geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+          if (uvs.length > 0) {
+            const uvAttribute = new Float32BufferAttribute(uvs, 2);
+            geometry.setAttribute('uv', uvAttribute);
+            geometry.setAttribute('uv2', uvAttribute.clone());
+          }
+          geometry.computeVertexNormals();
+          geometry.computeBoundingBox();
+          geometry.computeBoundingSphere();
+
+          let material: MeshStandardMaterial;
+          if (/\bVarnishedPine\b/.test(shape)) {
+            material = (await this.loadVarnishedPineMaterial()).clone();
+          } else {
+            if (imagePath) {
+              const map = await textureLoader.loadAsync(new URL(imagePath, protoUrl).href);
+              map.colorSpace = SRGBColorSpace;
+              map.wrapS = RepeatWrapping;
+              map.wrapT = RepeatWrapping;
+              material = new MeshStandardMaterial({ map, roughness: 1, side: 2 });
+            } else {
+              material = new MeshStandardMaterial({ color: '#73736e', roughness: 0.9, side: 2 });
+            }
+          }
+          const mesh = new Mesh(geometry, material);
+          mesh.name = `${protoPath} shape ${shapeIndex}`;
+          mesh.userData.sharedClassroomAsset = true;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          root.add(mesh);
+        }
+        if (root.children.length === 0) {
+          throw new Error(`${protoPath} contains no supported IndexedFaceSet shapes`);
+        }
+        return root;
+      });
+
+    this.classroomProtoAssetPromises.set(protoPath, loadPromise);
+    void loadPromise.catch(() => this.classroomProtoAssetPromises.delete(protoPath));
+    return loadPromise;
+  }
+
   private ensureTrailLine(): void {
     if (!this.scene || this.trailLine) {
       return;
@@ -853,18 +1724,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.trailTubeMesh.visible = false;
     this.scene.add(this.trailTubeMesh);
 
-    this.trailEndpoint = new Mesh(
-      new SphereGeometry(0.03, 14, 14),
-      new MeshStandardMaterial({
-        color: theme.endpoint,
-        emissive: theme.endpoint,
-        emissiveIntensity: 0.9,
-        roughness: 0.28,
-        metalness: 0.04,
-      }),
-    );
-    this.trailEndpoint.visible = false;
-    this.scene.add(this.trailEndpoint);
   }
 
   private clearFlightPath(): void {
@@ -886,9 +1745,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       ]);
       this.trailTubeMesh.geometry = new TubeGeometry(resetCurve, 8, this.trailTubeRadius, 10, false);
       this.trailTubeMesh.visible = false;
-    }
-    if (this.trailEndpoint) {
-      this.trailEndpoint.visible = false;
     }
   }
 
@@ -920,10 +1776,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.trailTubeMesh.geometry = new TubeGeometry(curve, segments, this.trailTubeRadius, 10, false);
         this.trailTubeMesh.visible = this.flightPathVisible;
       }
-      if (this.trailEndpoint) {
-        this.trailEndpoint.position.copy(p);
-        this.trailEndpoint.visible = this.flightPathVisible;
-      }
     }
   }
 
@@ -949,12 +1801,69 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       mat.needsUpdate = true;
     }
 
-    if (this.trailEndpoint) {
-      const mat = this.trailEndpoint.material as MeshStandardMaterial;
-      mat.color.set(theme.endpoint);
-      mat.emissive.set(theme.endpoint);
-      mat.needsUpdate = true;
+  }
+
+  private createAircraftBulletinTexture(group: Group): CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2400;
+    canvas.height = 960;
+    const context = canvas.getContext('2d');
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    if (!context) {
+      return texture;
     }
+    context.fillStyle = '#244a43';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#f5e6a0';
+    context.font = 'bold 64px "Microsoft YaHei", sans-serif';
+    context.fillText('认识飞行器与扩展甲板  |  Crazyflie & Decks', 65, 100);
+    context.strokeStyle = '#8aafa2';
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(65, 132);
+    context.lineTo(2335, 132);
+    context.stroke();
+
+    const exhibits = [
+      { file: 'crazyflie-2-1-plus.jpg', title: 'Crazyflie 2.1+', lines: ['29 g 掌上开源飞行开发平台', '支持无线通信与自动识别扩展甲板'], x: 65, y: 180, imageSize: 530, textX: 65, textY: 780 },
+      { file: 'flow-v2.jpg', title: 'Flow deck v2', lines: ['光流测量水平位移', '向下 ToF 测量离地距离'], x: 780, y: 190, imageSize: 235, textX: 1050, textY: 240 },
+      { file: 'multiranger.jpg', title: 'Multiranger deck', lines: ['测量前、后、左、右、上', '五个方向的物体距离'], x: 1570, y: 190, imageSize: 235, textX: 1840, textY: 240 },
+      { file: 'led-ring.jpg', title: 'LED-ring deck', lines: ['12 颗朝下 RGB 彩灯', '可编程颜色与灯光效果'], x: 780, y: 540, imageSize: 235, textX: 1050, textY: 590 },
+      { file: 'buzzer.jpg', title: 'Buzzer deck', lines: ['压电蜂鸣器', '播放提示音、音调与旋律'], x: 1570, y: 540, imageSize: 235, textX: 1840, textY: 590 },
+    ];
+    for (const exhibit of exhibits) {
+      context.fillStyle = '#ffffff';
+      context.fillRect(exhibit.x, exhibit.y, exhibit.imageSize, exhibit.imageSize);
+      context.fillStyle = '#f6e8ba';
+      context.font = 'bold 40px "Microsoft YaHei", sans-serif';
+      context.fillText(exhibit.title, exhibit.textX, exhibit.textY);
+      context.fillStyle = '#e3eee8';
+      context.font = '32px "Microsoft YaHei", sans-serif';
+      exhibit.lines.forEach((line, index) => {
+        context.fillText(line, exhibit.textX, exhibit.textY + 54 + index * 46);
+      });
+      const image = new Image();
+      image.onload = () => {
+        if (this.presetInteriorRoot !== group) {
+          return;
+        }
+        const inset = 8;
+        const available = exhibit.imageSize - inset * 2;
+        const scale = Math.min(available / image.naturalWidth, available / image.naturalHeight);
+        const width = image.naturalWidth * scale;
+        const height = image.naturalHeight * scale;
+        context.drawImage(image, exhibit.x + (exhibit.imageSize - width) / 2, exhibit.y + (exhibit.imageSize - height) / 2, width, height);
+        texture.needsUpdate = true;
+      };
+      image.onerror = () => console.warn(`Failed to load bulletin photograph: ${exhibit.file}`);
+      image.src = new URL(`./models/classroom/bitcraze/${exhibit.file}`, window.location.href).href;
+    }
+    context.fillStyle = '#bacfc6';
+    context.font = '24px "Microsoft YaHei", sans-serif';
+    context.fillText('产品照片及资料来源：Bitcraze  ·  store.bitcraze.io  ·  Deck 组合需核对官方兼容性说明', 65, 932);
+    texture.needsUpdate = true;
+    return texture;
   }
 
   private rebuildPresetInterior(preset: 'classroom' | 'home' | 'custom', room: { width: number; depth: number; height: number }): void {
@@ -969,15 +1878,58 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
 
     const group = new Group();
-    const wallColor = preset === 'classroom' ? '#f6f0e3' : '#5a5148';
+    const wallColor = preset === 'classroom' ? '#f7f5ed' : '#5a5148';
     const accentColor = preset === 'classroom' ? '#7fb3df' : '#c89266';
 
     const wallMat = new MeshStandardMaterial({ color: wallColor, roughness: 0.86, metalness: 0.01, transparent: true, opacity: preset === 'classroom' ? 0.78 : 0.35 });
     const wallThickness = 0.08;
+    const classroomWindowCenters = [-0.8, 0.9, 2.6];
+    const buildClassroomSideWall = (wallZ: number, withDoor: boolean) => {
+      const openings = classroomWindowCenters.map((center) => ({ left: center - 0.6, right: center + 0.6, bottom: 1.1, top: 2.14 }));
+      if (withDoor) {
+        const center = -room.width * 0.26;
+        openings.push({ left: center - 0.43, right: center + 0.43, bottom: 0, top: 2.16 });
+      }
+      const xEdges = [...new Set([-room.width / 2, room.width / 2, ...openings.flatMap((opening) => [opening.left, opening.right])])].sort((left, right) => left - right);
+      const yEdges = [0, 1.1, 2.14, 2.16, room.height];
+      for (let column = 0; column < xEdges.length - 1; column += 1) {
+        for (let row = 0; row < yEdges.length - 1; row += 1) {
+          const centerX = (xEdges[column] + xEdges[column + 1]) / 2;
+          const centerY = (yEdges[row] + yEdges[row + 1]) / 2;
+          if (openings.some((opening) => centerX > opening.left && centerX < opening.right && centerY > opening.bottom && centerY < opening.top)) {
+            continue;
+          }
+          const wall = new Mesh(new BoxGeometry(xEdges[column + 1] - xEdges[column], yEdges[row + 1] - yEdges[row], wallThickness), wallMat);
+          wall.name = 'Classroom side wall with window openings';
+          wall.position.set(centerX, centerY, wallZ);
+          group.add(wall);
+        }
+      }
+    };
+
+    if (preset === 'classroom') {
+      const wallNormalUrl = new URL('./models/classroom/appearances/protos/textures/roughcast/roughcast_normal.jpg', window.location.href).href;
+      void new TextureLoader().loadAsync(wallNormalUrl).then((normalMap) => {
+        if (this.presetInteriorRoot !== group) {
+          normalMap.dispose();
+          return;
+        }
+        normalMap.wrapS = RepeatWrapping;
+        normalMap.wrapT = RepeatWrapping;
+        normalMap.repeat.set(room.width / 2, room.height / 2);
+        wallMat.normalMap = normalMap;
+        wallMat.needsUpdate = true;
+      }).catch((error) => console.error('Failed to load Webots classroom wall material:', error));
+    }
 
     const backWall = new Mesh(new BoxGeometry(room.width, room.height, wallThickness), wallMat);
     backWall.position.set(0, room.height / 2, -room.depth / 2);
-    group.add(backWall);
+    if (preset === 'classroom') {
+      backWall.geometry.dispose();
+      buildClassroomSideWall(-room.depth / 2, false);
+    } else {
+      group.add(backWall);
+    }
 
     const leftWall = new Mesh(new BoxGeometry(wallThickness, room.height, room.depth), wallMat);
     leftWall.position.set(-room.width / 2, room.height / 2, 0);
@@ -989,41 +1941,41 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     const frontWallTop = new Mesh(new BoxGeometry(room.width, room.height * 0.4, wallThickness), wallMat);
     frontWallTop.position.set(0, room.height * 0.8, room.depth / 2);
-    group.add(frontWallTop);
+    if (preset !== 'classroom') {
+      group.add(frontWallTop);
+    }
 
     const frontWallLeft = new Mesh(new BoxGeometry(room.width * 0.38, room.height * 0.6, wallThickness), wallMat);
     frontWallLeft.position.set(-room.width * 0.31, room.height * 0.3, room.depth / 2);
-    group.add(frontWallLeft);
+    if (preset !== 'classroom') {
+      group.add(frontWallLeft);
+    }
 
     const frontWallRight = new Mesh(new BoxGeometry(room.width * 0.38, room.height * 0.6, wallThickness), wallMat);
     frontWallRight.position.set(room.width * 0.31, room.height * 0.3, room.depth / 2);
-    group.add(frontWallRight);
+    if (preset !== 'classroom') {
+      group.add(frontWallRight);
+    } else {
+      [frontWallTop, frontWallLeft, frontWallRight].forEach((wall) => wall.geometry.dispose());
+      buildClassroomSideWall(room.depth / 2, true);
+    }
 
     if (preset === 'classroom') {
       const trimMat = new MeshStandardMaterial({ color: '#83b8e5', roughness: 0.58, metalness: 0.04 });
-      const floorTileDark = new MeshStandardMaterial({ color: '#cebba2', roughness: 0.9, metalness: 0.01 });
-      const floorTileLight = new MeshStandardMaterial({ color: '#e2d3be', roughness: 0.88, metalness: 0.01 });
-      const tilesX = 10;
-      const tilesZ = 12;
-      const tileW = room.width / tilesX;
-      const tileD = room.depth / tilesZ;
-      for (let tx = 0; tx < tilesX; tx += 1) {
-        for (let tz = 0; tz < tilesZ; tz += 1) {
-          const tile = new Mesh(
-            new BoxGeometry(tileW - 0.02, 0.006, tileD - 0.02),
-            (tx + tz) % 2 === 0 ? floorTileDark : floorTileLight,
-          );
-          tile.position.set(-room.width / 2 + tileW * (tx + 0.5), 0.003, -room.depth / 2 + tileD * (tz + 0.5));
-          group.add(tile);
-        }
-      }
+      void this.loadParquetryFloor(group, room);
 
-      const carpet = new Mesh(
-        new BoxGeometry(room.width * 0.78, 0.008, room.depth * 0.58),
-        new MeshStandardMaterial({ color: '#9fa8ad', roughness: 0.95, metalness: 0.0 }),
-      );
-      carpet.position.set(room.width * 0.06, 0.008, 0);
-      group.add(carpet);
+      const wallTrim = new MeshStandardMaterial({ color: '#b9d9df', roughness: 0.58, metalness: 0.02 });
+      const baseboardHeight = 0.12;
+      const baseboardThickness = 0.035;
+      [
+        { size: new Vector3(room.width, baseboardHeight, baseboardThickness), position: new Vector3(0, baseboardHeight / 2, -room.depth / 2 + wallThickness / 2) },
+        { size: new Vector3(baseboardThickness, baseboardHeight, room.depth), position: new Vector3(-room.width / 2 + wallThickness / 2, baseboardHeight / 2, 0) },
+        { size: new Vector3(baseboardThickness, baseboardHeight, room.depth), position: new Vector3(room.width / 2 - wallThickness / 2, baseboardHeight / 2, 0) },
+      ].forEach(({ size, position }) => {
+        const molding = new Mesh(new BoxGeometry(size.x, size.y, size.z), wallTrim);
+        molding.position.copy(position);
+        group.add(molding);
+      });
 
       const teachingStage = new Mesh(
         new BoxGeometry(1.35, 0.09, room.depth * 0.86),
@@ -1031,14 +1983,16 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       );
       teachingStage.position.set(-room.width / 2 + 0.95, 0.045, 0);
       group.add(teachingStage);
+      this.applyVarnishedPineFinish(teachingStage);
 
+      const blackboardFallback = new Group();
       const blackboardFrame = new Mesh(
         new BoxGeometry(0.06, 1.28, Math.max(2.7, room.depth * 0.58)),
         new MeshStandardMaterial({ color: '#b88e63', roughness: 0.72, metalness: 0.03 }),
       );
       blackboardFrame.position.set(-room.width / 2 + 0.07, Math.min(room.height - 0.85, 1.78), 0);
       blackboardFrame.rotation.y = 0;
-      group.add(blackboardFrame);
+      blackboardFallback.add(blackboardFrame);
 
       const board = new Mesh(
         new BoxGeometry(0.03, 1.12, Math.max(2.55, room.depth * 0.54)),
@@ -1046,7 +2000,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       );
       board.position.set(-room.width / 2 + 0.095, Math.min(room.height - 0.85, 1.78), 0);
       board.rotation.y = 0;
-      group.add(board);
+      blackboardFallback.add(board);
 
       const chalkLineMat = new MeshStandardMaterial({ color: '#d9e3d8', roughness: 0.75, metalness: 0.01 });
       const chalkY = Math.min(room.height - 0.85, 1.78);
@@ -1059,7 +2013,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       chalkLines.forEach(([z, y, w, h]) => {
         const line = new Mesh(new BoxGeometry(0.008, h, w), chalkLineMat);
         line.position.set(chalkX, chalkY + y, z);
-        group.add(line);
+        blackboardFallback.add(line);
       });
 
       const chalkTray = new Mesh(
@@ -1068,7 +2022,47 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       );
       chalkTray.position.set(-room.width / 2 + 0.18, Math.min(room.height - 1.45, 1.18), 0);
       chalkTray.rotation.y = 0;
-      group.add(chalkTray);
+      blackboardFallback.add(chalkTray);
+      group.add(blackboardFallback);
+      void this.loadClassroomProtoAsset('school_furniture/protos/Blackboard.proto').then((asset) => {
+        if (this.presetInteriorRoot !== group) {
+          return;
+        }
+        const importedBlackboard = asset.clone(true);
+        importedBlackboard.position.set(-room.width / 2 + 0.1, 1.72, 0);
+        group.remove(blackboardFallback);
+        group.add(importedBlackboard);
+      }).catch((error) => console.error('Failed to load Webots classroom blackboard:', error));
+
+      const chalkCanvas = document.createElement('canvas');
+      chalkCanvas.width = 1400;
+      chalkCanvas.height = 640;
+      const chalkContext = chalkCanvas.getContext('2d');
+      if (chalkContext) {
+        chalkContext.fillStyle = '#f1eee1';
+        chalkContext.font = '52px "Microsoft YaHei", sans-serif';
+        chalkContext.fillText('科学课堂  |  Science Class', 75, 95);
+        chalkContext.strokeStyle = '#c4cfb3';
+        chalkContext.lineWidth = 3;
+        chalkContext.beginPath();
+        chalkContext.moveTo(75, 125);
+        chalkContext.lineTo(1325, 125);
+        chalkContext.stroke();
+        chalkContext.font = '38px "Microsoft YaHei", sans-serif';
+        chalkContext.fillText('观察 · 思考 · 探索', 75, 230);
+        chalkContext.fillText('Observe, Think, Explore', 75, 300);
+        chalkContext.fillStyle = '#e4d587';
+        chalkContext.fillText('X  前后     Y  左右     Z  上下', 75, 430);
+        chalkContext.fillStyle = '#c6dfdc';
+        chalkContext.fillText('Today: Flight & Motion', 75, 530);
+        const chalkTexture = new CanvasTexture(chalkCanvas);
+        chalkTexture.colorSpace = SRGBColorSpace;
+        const chalkWriting = new Mesh(new PlaneGeometry(2.38, 1.1), new MeshBasicMaterial({ map: chalkTexture, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }));
+        chalkWriting.name = 'Bilingual classroom chalk lesson';
+        chalkWriting.rotation.y = Math.PI / 2;
+        chalkWriting.position.set(-room.width / 2 + 0.15, 1.72, 0);
+        group.add(chalkWriting);
+      }
 
       const artFrame = new Mesh(
         new BoxGeometry(0.72, 0.5, 0.025),
@@ -1086,71 +2080,97 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       artInner.rotation.y = Math.PI / 2;
       group.add(artInner);
 
-      const teacherDesk = new Mesh(
+      const teacherDesk = new Group();
+      teacherDesk.position.set(-room.width / 2 + 1.55, 0, -0.55);
+      teacherDesk.rotation.y = Math.PI / 2;
+      const teacherDeskFallback = new Mesh(
         new BoxGeometry(1.4, 0.74, 0.62),
         new MeshStandardMaterial({ color: '#e0c39d', roughness: 0.78, metalness: 0.01 }),
       );
-      teacherDesk.position.set(-room.width / 2 + 1.55, 0.37, -0.55);
-      teacherDesk.rotation.y = Math.PI / 2;
+      teacherDeskFallback.position.y = 0.37;
+      teacherDesk.add(teacherDeskFallback);
       group.add(teacherDesk);
+      void this.loadClassroomDeskAsset().then(({ geometry, material }) => {
+        if (this.presetInteriorRoot !== group) {
+          return;
+        }
+        teacherDesk.remove(teacherDeskFallback);
+        const deskMesh = new Mesh(geometry.clone(), material.clone());
+        deskMesh.scale.set(2, 1, 0.62 / 1.2);
+        deskMesh.userData.sharedClassroomTextures = true;
+        deskMesh.castShadow = true;
+        deskMesh.receiveShadow = true;
+        teacherDesk.add(deskMesh);
+      }).catch((error) => console.error('Failed to load Webots teacher desk:', error));
 
-      const whiteboardStand = new Mesh(
-        new BoxGeometry(1.1, 1.0, 0.04),
-        new MeshStandardMaterial({ color: '#fcfbf6', roughness: 0.7, metalness: 0.01 }),
-      );
-      whiteboardStand.position.set(room.width / 2 - 0.24, 0.95, 0);
-      whiteboardStand.rotation.y = Math.PI / 2;
-      group.add(whiteboardStand);
-
-      const whiteboardFrame = new Mesh(
-        new BoxGeometry(1.18, 1.08, 0.03),
-        new MeshStandardMaterial({ color: '#8ab6df', roughness: 0.62, metalness: 0.03 }),
-      );
-      whiteboardFrame.position.set(room.width / 2 - 0.2, 0.95, 0);
-      whiteboardFrame.rotation.y = Math.PI / 2;
-      group.add(whiteboardFrame);
-
-      const podium = new Mesh(
-        new BoxGeometry(0.48, 1.02, 0.42),
-        new MeshStandardMaterial({ color: '#caa47d', roughness: 0.74, metalness: 0.01 }),
-      );
-      podium.position.set(-room.width / 2 + 1.36, 0.51, 1.02);
-      podium.rotation.y = Math.PI / 2;
-      group.add(podium);
-
-      const podiumTop = new Mesh(
-        new BoxGeometry(0.58, 0.06, 0.5),
-        new MeshStandardMaterial({ color: '#d9b388', roughness: 0.72, metalness: 0.01 }),
-      );
-      podiumTop.position.set(-room.width / 2 + 1.36, 1.03, 1.02);
-      podiumTop.rotation.y = Math.PI / 2;
-      group.add(podiumTop);
-
-      const podiumStep = new Mesh(
-        new BoxGeometry(0.62, 0.12, 0.3),
-        new MeshStandardMaterial({ color: '#d6b089', roughness: 0.76, metalness: 0.01 }),
-      );
-      podiumStep.position.set(-room.width / 2 + 1.62, 0.06, 1.02);
-      podiumStep.rotation.y = Math.PI / 2;
-      group.add(podiumStep);
-
-      const windowMaterial = new MeshStandardMaterial({ color: '#f8fbff', roughness: 0.22, metalness: 0.02, transparent: true, opacity: 0.75 });
-      for (let i = 0; i < 4; i += 1) {
-        const panel = new Mesh(new BoxGeometry(0.03, 0.92, 1.0), windowMaterial);
-        panel.position.set(room.width / 2 - 0.06, 1.62, -room.depth * 0.34 + i * 1.05);
-        group.add(panel);
-
-        const frame = new Mesh(new BoxGeometry(0.04, 1.0, 1.08), trimMat);
-        frame.position.set(room.width / 2 - 0.075, 1.62, -room.depth * 0.34 + i * 1.05);
-        group.add(frame);
-
-        const curtain = new Mesh(
-          new BoxGeometry(0.05, 0.18, 1.08),
-          new MeshStandardMaterial({ color: '#98bde0', roughness: 0.8, metalness: 0.01 }),
-        );
-        curtain.position.set(room.width / 2 - 0.095, 2.02, -room.depth * 0.34 + i * 1.05);
-        group.add(curtain);
+      const bulletinFrame = new Mesh(new BoxGeometry(0.065, 1.5, 3.65), new MeshStandardMaterial({ color: '#b48b5e', roughness: 0.65 }));
+      bulletinFrame.position.set(room.width / 2 - 0.085, 1.72, 0);
+      group.add(bulletinFrame);
+      {
+        const bulletinTexture = this.createAircraftBulletinTexture(group);
+        const bulletin = new Mesh(new PlaneGeometry(3.5, 1.4), new MeshBasicMaterial({ map: bulletinTexture }));
+        bulletin.name = 'Aircraft exploration classroom bulletin board';
+        bulletin.rotation.y = -Math.PI / 2;
+        bulletin.position.set(room.width / 2 - 0.125, 1.72, 0);
+        group.add(bulletin);
       }
+
+      const windowFrameMaterial = new MeshStandardMaterial({ color: '#e7f2f5', roughness: 0.52, metalness: 0.02 });
+      const windowGlassMaterial = new MeshPhysicalMaterial({ color: '#b9e3f4', roughness: 0.12, metalness: 0, transparent: true, opacity: 0.34, transmission: 0.3, thickness: 0.02, side: 2 });
+      for (const side of [-1, 1]) {
+        for (const centerX of classroomWindowCenters) {
+          const windowGroup = new Group();
+          windowGroup.name = 'Classroom side window';
+          windowGroup.position.set(centerX, 1.62, side * room.depth / 2);
+          const glass = new Mesh(new PlaneGeometry(1.08, 0.92), windowGlassMaterial);
+          windowGroup.add(glass);
+          for (const offsetX of [-0.57, 0, 0.57]) {
+            const upright = new Mesh(new BoxGeometry(0.06, 1.04, 0.1), windowFrameMaterial);
+            upright.position.x = offsetX;
+            windowGroup.add(upright);
+          }
+          for (const offsetY of [-0.49, 0, 0.49]) {
+            const rail = new Mesh(new BoxGeometry(1.2, 0.06, 0.1), windowFrameMaterial);
+            rail.position.y = offsetY;
+            windowGroup.add(rail);
+          }
+          const sill = new Mesh(new BoxGeometry(1.3, 0.05, 0.22), windowFrameMaterial);
+          sill.position.set(0, -0.54, -side * 0.04);
+          windowGroup.add(sill);
+          group.add(windowGroup);
+        }
+      }
+
+      const podiumGroup = new Group();
+      podiumGroup.position.set(-room.width / 2 + 1.36, 0, 1.02);
+      podiumGroup.rotation.y = Math.PI / 2;
+      const podiumWood = new MeshStandardMaterial({ color: '#9b6945', roughness: 0.54, metalness: 0.02 });
+      const podiumEdge = new MeshStandardMaterial({ color: '#5f4232', roughness: 0.48, metalness: 0.03 });
+      const podiumPanel = new Mesh(new BoxGeometry(0.46, 0.9, 0.035), podiumWood);
+      podiumPanel.position.set(0, 0.51, 0.18);
+      podiumGroup.add(podiumPanel);
+      const podiumSide = new Mesh(new BoxGeometry(0.035, 0.9, 0.36), podiumWood);
+      podiumSide.position.set(0.21, 0.51, 0);
+      podiumGroup.add(podiumSide);
+      const podiumSideBack = podiumSide.clone();
+      podiumSideBack.position.x = -0.21;
+      podiumGroup.add(podiumSideBack);
+      const podiumBase = new Mesh(new BoxGeometry(0.58, 0.09, 0.46), podiumEdge);
+      podiumBase.position.y = 0.045;
+      podiumGroup.add(podiumBase);
+      const podiumTop = new Mesh(new BoxGeometry(0.62, 0.055, 0.5), podiumWood);
+      podiumTop.position.y = 0.98;
+      podiumGroup.add(podiumTop);
+      const lecternSurface = new Mesh(new BoxGeometry(0.58, 0.035, 0.42), podiumWood);
+      lecternSurface.position.set(0, 1.08, -0.035);
+      lecternSurface.rotation.x = -0.22;
+      podiumGroup.add(lecternSurface);
+      const bookStop = new Mesh(new BoxGeometry(0.58, 0.07, 0.035), podiumEdge);
+      bookStop.position.set(0, 1.12, -0.22);
+      bookStop.rotation.x = -0.22;
+      podiumGroup.add(bookStop);
+      group.add(podiumGroup);
+      this.applyVarnishedPineFinish(podiumGroup);
 
       const wallClock = new Mesh(
         new CylinderGeometry(0.12, 0.12, 0.02, 24),
@@ -1160,30 +2180,85 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       wallClock.position.set(-room.width * 0.43, 2.0, -room.depth * 0.28);
       group.add(wallClock);
 
-      const door = new Mesh(
-        new BoxGeometry(0.78, 2.05, 0.035),
-        new MeshStandardMaterial({ color: '#efe2cf', roughness: 0.8, metalness: 0.01 }),
-      );
-      door.position.set(-room.width * 0.26, 1.02, room.depth / 2 - 0.045);
-      group.add(door);
-
-      const doorFrame = new Mesh(new BoxGeometry(0.88, 2.16, 0.03), trimMat);
+      const doorGroup = new Group();
+      const doorMaterial = new MeshStandardMaterial({ color: '#a5744e', roughness: 0.58, metalness: 0.01 });
+      const doorFrame = new Mesh(new BoxGeometry(0.08, 2.16, 0.12), trimMat);
       doorFrame.position.set(-room.width * 0.26, 1.08, room.depth / 2 - 0.055);
-      group.add(doorFrame);
+      doorFrame.position.x -= 0.405;
+      doorGroup.add(doorFrame);
+      const oppositeDoorFrame = doorFrame.clone();
+      oppositeDoorFrame.position.x += 0.81;
+      doorGroup.add(oppositeDoorFrame);
+      const doorHeader = new Mesh(new BoxGeometry(0.89, 0.08, 0.12), trimMat);
+      doorHeader.position.set(-room.width * 0.26, 2.12, room.depth / 2 - 0.055);
+      doorGroup.add(doorHeader);
+      const doorLeaf = new Mesh(new BoxGeometry(0.73, 2.02, 0.045), doorMaterial);
+      doorLeaf.position.set(-room.width * 0.26, 1.02, room.depth / 2 - 0.04);
+      doorGroup.add(doorLeaf);
+      for (const panel of [
+        { y: 0.56, height: 0.72, width: 0.53 },
+        { y: 1.48, height: 0.72, width: 0.53 },
+      ]) {
+        const inset = new Mesh(new BoxGeometry(panel.width, panel.height, 0.014), podiumWood);
+        inset.position.set(-room.width * 0.26, panel.y, room.depth / 2 - 0.072);
+        doorGroup.add(inset);
+      }
+      const doorHandleMaterial = new MeshStandardMaterial({ color: '#a6a9a8', roughness: 0.3, metalness: 0.8 });
+      const handlePlate = new Mesh(new BoxGeometry(0.07, 0.12, 0.012), doorHandleMaterial);
+      handlePlate.position.set(-room.width * 0.26 + 0.27, 1.02, room.depth / 2 - 0.08);
+      doorGroup.add(handlePlate);
+      const handle = new Mesh(new SphereGeometry(0.025, 12, 10), doorHandleMaterial);
+      handle.position.set(-room.width * 0.26 + 0.27, 1.02, room.depth / 2 - 0.105);
+      doorGroup.add(handle);
+      group.add(doorGroup);
+      this.applyVarnishedPineFinish(doorGroup);
 
-      const storageCabinet = new Mesh(
-        new BoxGeometry(0.5, 1.1, 1.8),
-        new MeshStandardMaterial({ color: '#e2c6a4', roughness: 0.79, metalness: 0.01 }),
-      );
-      storageCabinet.position.set(-room.width / 2 + 0.32, 0.55, -0.2);
-      group.add(storageCabinet);
+      const cabinetGroup = new Group();
+      const cabinetMaterial = new MeshStandardMaterial({ color: '#a87b55', roughness: 0.6, metalness: 0.01 });
+      const cabinetX = -room.width / 2 + 0.32;
+      const cabinetZ = -0.2;
+      for (const side of [-1, 1]) {
+        const panel = new Mesh(new BoxGeometry(0.48, 1.08, 0.045), cabinetMaterial);
+        panel.position.set(cabinetX, 0.55, cabinetZ + side * 0.86);
+        cabinetGroup.add(panel);
+      }
+      for (const y of [0.06, 1.08]) {
+        const shelf = new Mesh(new BoxGeometry(0.5, 0.045, 1.8), cabinetMaterial);
+        shelf.position.set(cabinetX, y, cabinetZ);
+        cabinetGroup.add(shelf);
+      }
+      for (let shelfIndex = 1; shelfIndex <= 3; shelfIndex += 1) {
+        const shelf = new Mesh(new BoxGeometry(0.44, 0.026, 1.7), cabinetMaterial);
+        shelf.position.set(cabinetX, shelfIndex * 0.26, cabinetZ);
+        cabinetGroup.add(shelf);
+      }
+      const cabinetDoorMaterial = new MeshStandardMaterial({ color: '#bb8d65', roughness: 0.55, metalness: 0.01 });
+      for (const side of [-1, 1]) {
+        const panel = new Mesh(new BoxGeometry(0.025, 0.94, 0.85), cabinetDoorMaterial);
+        panel.position.set(cabinetX + 0.25, 0.57, cabinetZ + side * 0.43);
+        cabinetGroup.add(panel);
+        const handle = new Mesh(new BoxGeometry(0.025, 0.12, 0.025), doorHandleMaterial);
+        handle.position.set(cabinetX + 0.28, 0.57, cabinetZ + side * 0.09);
+        cabinetGroup.add(handle);
+      }
+      group.add(cabinetGroup);
+      this.applyVarnishedPineFinish(cabinetGroup);
 
-      const lowShelf = new Mesh(
-        new BoxGeometry(1.1, 0.7, 0.34),
-        new MeshStandardMaterial({ color: '#dfc09b', roughness: 0.82, metalness: 0.01 }),
-      );
-      lowShelf.position.set(room.width * 0.34, 0.35, room.depth * 0.3);
-      group.add(lowShelf);
+      const lowShelfGroup = new Group();
+      const lowShelfMaterial = new MeshStandardMaterial({ color: '#9a704e', roughness: 0.6, metalness: 0.02 });
+      for (const y of [0.08, 0.32, 0.56]) {
+        const board = new Mesh(new BoxGeometry(1.1, 0.035, 0.34), lowShelfMaterial);
+        board.position.y = y;
+        lowShelfGroup.add(board);
+      }
+      for (const x of [-0.52, 0.52]) {
+        const upright = new Mesh(new BoxGeometry(0.045, 0.55, 0.32), lowShelfMaterial);
+        upright.position.set(x, 0.3, 0);
+        lowShelfGroup.add(upright);
+      }
+      lowShelfGroup.position.set(room.width * 0.34, 0, room.depth * 0.3);
+      group.add(lowShelfGroup);
+      this.applyVarnishedPineFinish(lowShelfGroup);
 
       for (let i = 0; i < 4; i += 1) {
         const book = new Mesh(
@@ -1229,97 +2304,151 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       const helipadX = firstRowX + rowSpacing * helipadDeskRow;
       const helipadZ = colCenters[helipadDeskCol];
 
+      const chairOffsetX = deskD / 2 + 0.2;
+      const classroomMetalMaterial = new MeshStandardMaterial({ color: '#c3cbd0', roughness: 0.32, metalness: 0.5 });
+      const chairSeatInstances = new InstancedMesh(
+        new BoxGeometry(0.25, 0.035, 0.25),
+        new MeshStandardMaterial({ color: '#cc9255', roughness: 0.55, metalness: 0.01 }),
+        rows * cols,
+      );
+      const chairBackInstances = new InstancedMesh(
+        new BoxGeometry(0.025, 0.29, 0.25),
+        chairSeatInstances.material,
+        rows * cols,
+      );
+      const chairLegInstances = new InstancedMesh(
+        new CylinderGeometry(0.009, 0.012, 0.42, 10),
+        classroomMetalMaterial,
+        rows * cols * 4,
+      );
+      const chairBackPostInstances = new InstancedMesh(
+        new CylinderGeometry(0.009, 0.009, 0.29, 10),
+        classroomMetalMaterial,
+        rows * cols * 2,
+      );
+      const instanceTransform = new Object3D();
+      let chairIndex = 0;
+      let chairLegIndex = 0;
+      let chairPostIndex = 0;
+      const placeInstance = (instances: InstancedMesh, index: number, x: number, y: number, z: number, scaleX = 1, scaleY = 1, scaleZ = 1) => {
+        instanceTransform.position.set(x, y, z);
+        instanceTransform.rotation.set(0, 0, 0);
+        instanceTransform.scale.set(scaleX, scaleY, scaleZ);
+        instanceTransform.updateMatrix();
+        instances.setMatrixAt(index, instanceTransform.matrix);
+      };
+
       for (let r = 0; r < rows; r += 1) {
         const x = firstRowX + r * rowSpacing;
         for (let c = 0; c < cols; c += 1) {
           const z = colCenters[c];
-
-          const deskTop = new Mesh(new BoxGeometry(deskD, 0.055, deskW), deskTopMat);
-          deskTop.position.set(x, 0.38, z);
-          group.add(deskTop);
-
-          const deskBase = new Mesh(new BoxGeometry(deskD - 0.06, 0.56, deskW - 0.08), deskBaseMat);
-          deskBase.position.set(x, 0.1, z);
-          group.add(deskBase);
-
-          const chair = new Mesh(new BoxGeometry(0.24, 0.34, 0.24), chairMat);
-          chair.position.set(x + deskD / 2 + 0.2, 0.17, z);
-          group.add(chair);
+          const chairX = x + chairOffsetX;
+          const chairSeatY = 0.45;
+          placeInstance(chairSeatInstances, chairIndex, chairX, chairSeatY, z);
+          placeInstance(chairBackInstances, chairIndex, chairX + 0.105, 0.60, z);
+          chairIndex += 1;
+          const chairLegY = 0.22;
+          [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([sx, sz]) => {
+            placeInstance(chairLegInstances, chairLegIndex++, chairX + sx * 0.095, chairLegY, z + sz * 0.095);
+          });
+          [-1, 1].forEach((side) => {
+            placeInstance(chairBackPostInstances, chairPostIndex++, chairX + 0.105, 0.60, z + side * 0.105);
+          });
         }
       }
 
-      const deskSurfaceY = 0.38 + 0.055 / 2;
-      const helipadDeskHighlight = new Mesh(
-        new BoxGeometry(deskW + 0.1, 0.01, deskD + 0.1),
-        new MeshStandardMaterial({
-          color: '#b6d4ef',
-          roughness: 0.5,
-          metalness: 0.04,
-          emissive: '#8fbde5',
-          emissiveIntensity: 0.35,
-          transparent: true,
-          opacity: 0.86,
-        }),
-      );
-      helipadDeskHighlight.position.set(helipadX, deskSurfaceY + 0.006, helipadZ);
-      group.add(helipadDeskHighlight);
+      [chairSeatInstances, chairBackInstances, chairLegInstances, chairBackPostInstances].forEach((instances) => {
+        instances.instanceMatrix.needsUpdate = true;
+        instances.castShadow = true;
+        instances.receiveShadow = true;
+        group.add(instances);
+      });
 
+      void this.loadClassroomDeskAsset().then(({ geometry, material }) => {
+        if (this.presetInteriorRoot !== group) {
+          return;
+        }
+        const desks = new InstancedMesh(geometry.clone(), material.clone(), rows * cols);
+        desks.name = 'Webots school desk instances';
+        desks.userData.sharedClassroomTextures = true;
+        let deskIndex = 0;
+        for (let r = 0; r < rows; r += 1) {
+          const x = firstRowX + r * rowSpacing;
+          for (let c = 0; c < cols; c += 1) {
+            placeInstance(desks, deskIndex++, x, 0, colCenters[c], deskD / 0.7, 1, deskW / 1.2);
+          }
+        }
+        desks.instanceMatrix.needsUpdate = true;
+        desks.castShadow = true;
+        desks.receiveShadow = true;
+        group.add(desks);
+      }).catch((error) => console.error('Failed to load Webots classroom desk asset:', error));
+
+      const bookDeskPlacements: Array<{ row: number; col: number; xOffset: number; zOffset: number; yaw: number }> = [
+        { row: 0, col: 0, xOffset: -0.08, zOffset: 0.08, yaw: 0 },
+        { row: 1, col: 4, xOffset: 0.06, zOffset: -0.08, yaw: 0.12 },
+        { row: 2, col: 1, xOffset: -0.05, zOffset: -0.06, yaw: -0.1 },
+        { row: 4, col: 4, xOffset: 0.04, zOffset: 0.07, yaw: 0.08 },
+        { row: 5, col: 0, xOffset: -0.07, zOffset: -0.05, yaw: -0.12 },
+      ];
+      void this.loadClassroomProtoAsset('school_furniture/protos/Book.proto').then((bookAsset) => {
+        if (this.presetInteriorRoot !== group) {
+          return;
+        }
+        bookDeskPlacements.forEach(({ row, col, xOffset, zOffset, yaw }) => {
+          const book = bookAsset.clone(true);
+          const deskX = firstRowX + row * rowSpacing;
+          const deskZ = colCenters[col];
+          book.name = 'Webots school book';
+          book.position.set(deskX + xOffset, deskSurfaceY + 0.011, deskZ + zOffset);
+          book.rotation.set(0, yaw, Math.PI / 2);
+          group.add(book);
+        });
+      }).catch((error) => console.error('Failed to load Webots classroom books:', error));
+
+      const deskSurfaceY = 0.71001;
       const helipadBase = new Mesh(
-        new CylinderGeometry(0.18, 0.18, 0.01, 40),
-        new MeshStandardMaterial({ color: '#d6dadf', roughness: 0.86, metalness: 0.01 }),
+        new BoxGeometry(0.3, 0.024, 0.3),
+        new MeshStandardMaterial({ color: '#101214', roughness: 0.82, metalness: 0.08 }),
       );
-      helipadBase.position.set(helipadX, deskSurfaceY + 0.005, helipadZ);
+      helipadBase.position.set(helipadX, deskSurfaceY + 0.012, helipadZ);
       group.add(helipadBase);
 
-      const helipadRing = new Mesh(
-        new CylinderGeometry(0.16, 0.16, 0.012, 40),
-        new MeshStandardMaterial({ color: '#7ea8cf', roughness: 0.68, metalness: 0.02 }),
+      const helipadDeckPlate = new Mesh(
+        new BoxGeometry(0.284, 0.008, 0.284),
+        new MeshStandardMaterial({ color: '#b86616', roughness: 0.72, metalness: 0.02 }),
       );
-      helipadRing.position.set(helipadX, deskSurfaceY + 0.007, helipadZ);
-      group.add(helipadRing);
+      helipadDeckPlate.position.set(helipadX, deskSurfaceY + 0.028, helipadZ);
+      group.add(helipadDeckPlate);
 
-      const hMat = new MeshStandardMaterial({ color: '#4f79a4', roughness: 0.64, metalness: 0.02 });
-      const hBarL = new Mesh(new BoxGeometry(0.03, 0.008, 0.11), hMat);
-      hBarL.position.set(helipadX - 0.045, deskSurfaceY + 0.013, helipadZ);
-      group.add(hBarL);
-      const hBarR = new Mesh(new BoxGeometry(0.03, 0.008, 0.11), hMat);
-      hBarR.position.set(helipadX + 0.045, deskSurfaceY + 0.013, helipadZ);
-      group.add(hBarR);
-      const hBarM = new Mesh(new BoxGeometry(0.11, 0.008, 0.03), hMat);
-      hBarM.position.set(helipadX, deskSurfaceY + 0.013, helipadZ);
-      group.add(hBarM);
-
-      const beaconMaterial = new MeshStandardMaterial({
-        color: '#ffd778',
-        roughness: 0.35,
-        metalness: 0.04,
-        emissive: '#ffdb82',
-        emissiveIntensity: 0.6,
-      });
-      const beaconOffsets: Array<[number, number]> = [
-        [-(deskD / 2 + 0.05), -(deskW / 2 + 0.05)],
-        [deskD / 2 + 0.05, -(deskW / 2 + 0.05)],
-        [-(deskD / 2 + 0.05), deskW / 2 + 0.05],
-        [deskD / 2 + 0.05, deskW / 2 + 0.05],
-      ];
-      beaconOffsets.forEach(([ox, oz]) => {
-        const beacon = new Mesh(new CylinderGeometry(0.012, 0.012, 0.035, 16), beaconMaterial);
-        beacon.position.set(helipadX + ox, deskSurfaceY + 0.02, helipadZ + oz);
-        group.add(beacon);
-      });
-
-      const nameplate = new Mesh(
-        new BoxGeometry(0.012, 0.04, 0.24),
-        new MeshStandardMaterial({
-          color: '#6e95bc',
-          roughness: 0.55,
-          metalness: 0.05,
-          emissive: '#87afd4',
-          emissiveIntensity: 0.28,
-        }),
+      const helipadTop = new Mesh(
+        new CylinderGeometry(0.126, 0.126, 0.006, 48),
+        new MeshStandardMaterial({ color: '#080a0b', roughness: 0.78, metalness: 0.08 }),
       );
-      nameplate.position.set(helipadX - deskD / 2 - 0.065, deskSurfaceY + 0.02, helipadZ);
-      group.add(nameplate);
+      helipadTop.position.set(helipadX, deskSurfaceY + 0.035, helipadZ);
+      group.add(helipadTop);
+
+      const safetyDashMaterial = new MeshStandardMaterial({ color: '#e1c63c', roughness: 0.64, metalness: 0.04, emissive: '#372f08', emissiveIntensity: 0.1 });
+      const safetyDashCount = 16;
+      for (let dashIndex = 0; dashIndex < safetyDashCount; dashIndex += 1) {
+        const angle = (dashIndex / safetyDashCount) * Math.PI * 2;
+        const radius = 0.108;
+        const dash = new Mesh(new BoxGeometry(0.03, 0.004, 0.009), safetyDashMaterial);
+        dash.position.set(helipadX + Math.sin(angle) * radius, deskSurfaceY + 0.040, helipadZ + Math.cos(angle) * radius);
+        dash.rotation.y = angle;
+        group.add(dash);
+      }
+
+      const hMarkMaterial = new MeshStandardMaterial({ color: '#e6e3d8', roughness: 0.74, metalness: 0.01 });
+      const hBarLeft = new Mesh(new BoxGeometry(0.014, 0.004, 0.095), hMarkMaterial);
+      hBarLeft.position.set(helipadX - 0.034, deskSurfaceY + 0.040, helipadZ);
+      group.add(hBarLeft);
+      const hBarRight = new Mesh(new BoxGeometry(0.014, 0.004, 0.095), hMarkMaterial);
+      hBarRight.position.set(helipadX + 0.034, deskSurfaceY + 0.040, helipadZ);
+      group.add(hBarRight);
+      const hBarCross = new Mesh(new BoxGeometry(0.082, 0.004, 0.014), hMarkMaterial);
+      hBarCross.position.set(helipadX, deskSurfaceY + 0.040, helipadZ);
+      group.add(hBarCross);
 
     } else {
       const sofa = new Mesh(
@@ -1348,15 +2477,27 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.scene.remove(this.presetInteriorRoot);
     this.presetInteriorRoot.traverse((node: any) => {
+      if (node.userData?.sharedClassroomAsset) {
+        return;
+      }
       if (node.geometry?.dispose) {
         node.geometry.dispose();
       }
       if (node.material?.dispose) {
-        if (Array.isArray(node.material)) {
-          node.material.forEach((material: any) => material?.dispose?.());
-        } else {
-          node.material.dispose();
-        }
+        const materials = Array.isArray(node.material) ? node.material : [node.material];
+        materials.forEach((material: any) => {
+          if (!material) {
+            return;
+          }
+          if (!node.userData?.sharedClassroomTextures) {
+            Object.values(material).forEach((value: any) => {
+              if (value?.isTexture) {
+                value.dispose();
+              }
+            });
+          }
+          material.dispose();
+        });
       }
     });
     this.presetInteriorRoot = null;
@@ -1394,8 +2535,16 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.droneGroup.position.y = MathUtils.lerp(this.droneGroup.position.y, this.targetPosition.y, 0.16);
       this.droneGroup.position.z = MathUtils.lerp(this.droneGroup.position.z, this.targetPosition.z, 0.16);
       this.updatePropellerAnimation(deltaSec);
-      this.updateFlightPath(this.droneGroup.position);
+      if (this.running && !this.paused) {
+        this.updateFlightPath(this.droneGroup.position);
+      }
       this.controls?.update();
+
+      if (this.flightAxes) {
+        this.flightAxes.position.copy(this.droneGroup.position);
+        this.flightAxes.rotation.y = this.aircraftYaw;
+      }
+      this.drawOrientationCompass();
 
       this.renderer.render(this.scene, this.camera);
       this.animationFrameId = requestAnimationFrame(animate);

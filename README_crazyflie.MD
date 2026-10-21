@@ -193,3 +193,22 @@ npm run build
 - electron/crazyflie.js（Python 调用与 IPC）
 - child/scripts/crazyflie_link_test.py（链路测试）
 - child/scripts/crazyflie_run_flow.py（流程执行）
+
+## 10. Crazyflie 三维模型与 deck 外壳
+
+### 三维视角控制
+
+- 图标工具栏提供放大、缩小、适配整个场景、聚焦飞行器、左右旋转、俯仰、坐标轴开关和 PNG 截图。
+- 右上角坐标导航随相机方向更新，可选择前、后、左、右、俯视、仰视及等轴视图；标准方向以当前飞行器航向为参考，观察中心保持不变。
+- 左键拖动旋转，右键拖动平移，滚轮缩放。点击画布后可用 `+`/`-` 缩放、`Home` 全景适配、`F` 聚焦飞机、方向键旋转；不会拦截 Blockly 编辑区的按键。
+- 飞行坐标为 X 向前（红）、Y 向左（绿）、Z 向上（蓝）。当前仿真零航向对应 Three.js 的 -X、+Z、+Y，坐标导航不直接使用 Three.js 的轴名。
+- 这些操作只调整观察相机，不改变飞行器位置，不触发真机操作。
+
+### 模型资源
+
+- Three.js 使用 `public/models/crazyflie/cf2_assembly.dae` 和 `ccw_prop.dae`，来自本地 Webots R2025a 的 Crazyflie 模型目录；网格文件头标注 `Copyright (c) 2022 Bitcraze` 和 MIT License，许可正文保存在同目录 `LICENSE.txt`。
+- 机体按原始米制比例加载，保留 DAE 中的独立装配部件；模拟器的“爆炸图”滑块只移动部件展示，不改变飞行坐标。四个独立桨叶仍随电机状态旋转。
+- deck 检测状态由 `CrazyflieConnectionService.detectedDecks$` 提供，支持 Flow v2、Multiranger、LED-ring 和 Buzzer。外壳尚未随模型包提供；补充 GLB/GLTF 后，通过 `CrazyflieSimPanelComponent.registerDeckShellAsset(deck, url)` 注册即可按检测状态装卸。
+- deck 外壳模型以米为单位、Y 轴朝上，根节点原点放在 Crazyflie 的 deck 安装点；每个 deck 外壳应独立提供文件，许可文件也应随资产保留。
+- 教室场景复用了 Webots 的 Desk、WoodenChair、Blackboard 网格，以及 VarnishedPine、Parquetry、Roughcast 材质与纹理；静态资源位于 `public/models/classroom/`。
+- Webots 家具网格由 Three.js 解析 PROTO 中的 IndexedFaceSet/UV，课桌以共享实例绘制；讲台、门窗、柜架和墙面装饰由独立分件几何构成。桌面高度为 0.74 m，Crazyflie 默认停放高度为 0.765 m。

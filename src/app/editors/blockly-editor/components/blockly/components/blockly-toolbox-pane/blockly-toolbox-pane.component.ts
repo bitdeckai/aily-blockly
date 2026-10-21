@@ -8,6 +8,7 @@ import {
   BlocklyToolboxFacadeItem,
 } from '../../../../services/blockly.service';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
+import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
 import { MenuComponent } from '../../../../../../components/menu/menu.component';
 import { IMenuItem } from '../../../../../../configs/menu.config';
 import { ElectronService } from '../../../../../../services/electron.service';
@@ -36,7 +37,7 @@ interface DeckGroup {
 
 @Component({
   selector: 'app-blockly-toolbox-pane',
-  imports: [CommonModule, TranslateModule, MenuComponent],
+  imports: [CommonModule, TranslateModule, MenuComponent, NzToolTipModule],
   templateUrl: './blockly-toolbox-pane.component.html',
   styleUrl: './blockly-toolbox-pane.component.scss',
 })
@@ -48,6 +49,8 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   items: BlocklyToolboxFacadeItem[] = [];
   selectedKey: string | null = null;
   searchQuery = '';
+  crazyflieBlockLanguage: 'en' | 'zh' = 'en';
+  languageSwitching = false;
   crazyflieIntroExpanded = false;
   activeDeckKey: string | null = null;
   showContextMenu = false;
@@ -143,6 +146,7 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   ) { }
 
   ngOnInit(): void {
+    this.crazyflieBlockLanguage = this.blocklyService.crazyflieBlockLanguage;
     combineLatest([
       this.blocklyService.toolboxFacadeItemsSubject,
       this.blocklyService.toolboxSelectedKeySubject,
@@ -272,6 +276,28 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
 
   onLibraryManagerClick() {
     this.libraryManagerRequested.emit();
+  }
+
+  async toggleCrazyflieBlockLanguage(): Promise<void> {
+    if (this.languageSwitching) {
+      return;
+    }
+
+    this.languageSwitching = true;
+    try {
+      const saveResult = await this.projectService.save();
+      if (!saveResult.success) {
+        this.message.error(saveResult.error || '保存失败，语言未切换');
+        return;
+      }
+
+      const nextLanguage = this.crazyflieBlockLanguage === 'en' ? 'zh' : 'en';
+      this.blocklyService.setCrazyflieBlockLanguage(nextLanguage);
+      this.crazyflieBlockLanguage = nextLanguage;
+      await this.projectService.projectOpen(this.projectService.currentProjectPath, { reason: 'reload' });
+    } finally {
+      this.languageSwitching = false;
+    }
   }
 
   get showDeckPanel(): boolean {
