@@ -31,6 +31,7 @@ import { LocalLibrarySyncService } from '../../services/local-library-sync.servi
 import { CodeViewerIpcService } from './services/code-viewer-ipc.service';
 import { CrossPlatformCmdService } from '../../services/cross-platform-cmd.service';
 import { MissingLibInfo, PasteInstallDialogComponent } from './components/paste-install-dialog/paste-install-dialog.component';
+import { CrazyflieSimService } from '../../services/crazyflie-sim.service';
 
 @Component({
   selector: 'app-blockly-editor',
@@ -66,6 +67,7 @@ export class BlocklyEditorComponent implements OnInit, AfterViewInit, OnDestroy 
   private pendingLibraryLoadInProgress = false;
 
   devmode;
+  isCrazyflieProject = false;
 
   get developerMode() {
     return this.configService.data.devmode;
@@ -94,6 +96,7 @@ export class BlocklyEditorComponent implements OnInit, AfterViewInit, OnDestroy 
     private ngZone: NgZone,
     private localLibrarySyncService: LocalLibrarySyncService,
     private codeViewerIpcService: CodeViewerIpcService,
+    private crazyflieSimService: CrazyflieSimService,
   ) { }
 
   ngOnInit(): void {
@@ -176,6 +179,8 @@ export class BlocklyEditorComponent implements OnInit, AfterViewInit, OnDestroy 
     this.devmode = packageJson.devmode || 'arduino'; // 可选项: 'arduino', 'micropython'
     const deps = packageJson?.dependencies || {};
     const isCrazyflieProject = !!deps['@aily-project/board-crazyflie'];
+    this.isCrazyflieProject = isCrazyflieProject;
+    this.crazyflieSimService.setPanelVisible(isCrazyflieProject);
     if (isCrazyflieProject && this.devmode !== 'micropython') {
       this.devmode = 'micropython';
       packageJson.devmode = 'micropython';
@@ -264,6 +269,9 @@ export class BlocklyEditorComponent implements OnInit, AfterViewInit, OnDestroy 
         }),
       });
       await this.blocklyService.loadLibrary(libPackageName, projectPath);
+    }
+    if (isCrazyflieProject) {
+      this.blocklyService.loadCrazyflieBasicBlocks();
     }
     // 5. 加载project.abi数据
     this.uiService.updateFooterState({

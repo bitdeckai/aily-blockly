@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { CrazyflieConnectionService } from './crazyflie-connection.service';
+import { MotionCommand, motionDurationSeconds, parseMotionCall, validateMotionSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/motion-blocks';
 
 export type CrazyflieRoomPreset = 'classroom' | 'home' | 'custom';
 
@@ -12,7 +13,7 @@ export interface CrazyfliePose {
 }
 
 interface CrazyflieSimCommand {
-  type: 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'set_link' | 'test_link' | 'crazyflie_link' | 'test_crazyflie_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
+  type: 'motion' | 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'set_link' | 'test_link' | 'crazyflie_link' | 'test_crazyflie_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
   value?: any;
 }
 
@@ -32,7 +33,7 @@ export class CrazyflieSimService {
 
   constructor(private readonly connectionService: CrazyflieConnectionService) {}
 
-  panelVisible$ = new BehaviorSubject<boolean>(true);
+  panelVisible$ = new BehaviorSubject<boolean>(false);
   running$ = new BehaviorSubject<boolean>(false);
   pose$ = new BehaviorSubject<CrazyfliePose>({ ...this.classroomDeskHelipadPose });
   step$ = new BehaviorSubject<CrazyflieStepEvent | null>(null);
@@ -145,6 +146,7 @@ export class CrazyflieSimService {
     }
 
     const commands = this.parseCommands(code);
+    validateMotionSequence(commands);
     if (commands.length === 0) {
       return { success: false, message: '未检测到可模拟的 Crazyflie 指令', executed: [] };
     }
@@ -182,6 +184,13 @@ export class CrazyflieSimService {
         }
 
         switch (command.type) {
+          case 'motion': {
+            const motion: MotionCommand = command.value;
+            this.appendLog(`sim: ${motion.kind} ${motion.values.join(', ')}`);
+            executed.push(`motion:${motion.kind}:${motion.values.join(':')}`);
+            await this.animateMotion(pose, motion);
+            break;
+          }
           case 'set_link':
             this.appendLog(`sim: set_link uri=${String(command.value?.uri || 'radio://0/80/2M')} address=${String(command.value?.address || 'E7E7E7E7E7')}`);
             executed.push(`set_link:${String(command.value?.uri || 'radio://0/80/2M')}:${String(command.value?.address || 'E7E7E7E7E7')}`);
@@ -275,7 +284,7 @@ export class CrazyflieSimService {
             break;
           }
           case 'takeoff':
-            pose.y = Math.max(0.5, pose.y);
+            pose.y = this.getLandingReferenceY() + 0.3;
             this.pose$.next({ ...pose });
             this.appendLog('sim: takeoff');
             executed.push('takeoff');
@@ -412,28 +421,51 @@ export class CrazyflieSimService {
   }
 
   private applyMove(pose: CrazyfliePose, direction: string, distance: number): void {
-    switch (direction) {
-      case 'forward':
-        pose.x -= distance;
-        break;
-      case 'back':
-        pose.x += distance;
-        break;
-      case 'left':
-        pose.z += distance;
-        break;
-      case 'right':
-        pose.z -= distance;
-        break;
-      case 'up':
-        pose.y += distance;
-        break;
-      case 'down':
-        pose.y = Math.max(this.getLandingReferenceY(), pose.y - distance);
-        break;
-      default:
-        break;
-    }
+    const vectors: Record<string, number[]> = {
+      forward: [distance, 0, 0], back: [-distance, 0, 0],
+      left: [0, distance, 0], right: [0, -distance, 0],
+      up: [0, 0, distance], down: [0, 0, -distance],
+    };
+    const [x, y, z] = vectors[direction];
+    this.translateBody(pose, x, y, z);
+    pose.y = Math.max(this.getLandingReferenceY(), pose.y);
+  }
+
+  private translateBody(pose: CrazyfliePose, x: number, y: number, z: number): void {
+    pose.x += -Math.cos(pose.yaw) * x + Math.sin(pose.yaw) * y;
+    pose.z += Math.sin(pose.yaw) * x + Math.cos(pose.yaw) * y;
+    pose.y += z;
+  }
+
+  private async animateMotion(pose: CrazyfliePose, command: MotionCommand): Promise<void> {
+    const start = { ...pose };
+    const values = command.values;
+    const duration = motionDurationSeconds(command, start.y - this.getLandingReferenceY());
+    const radians = Math.PI / 180;
+    let elapsed = 0;
+    do {
+      if (this.cancelRequested || !(await this.waitForRunPermission())) return;
+      const slice = Math.min(40, Math.max(0, duration * 1000 - elapsed));
+      if (slice) await this.sleep(slice / this.speed$.value);
+      if (this.cancelRequested) return;
+      elapsed += slice;
+      const t = duration > 0 ? Math.min(1, elapsed / (duration * 1000)) : 1;
+      Object.assign(pose, start);
+      switch (command.kind) {
+        case 'takeoff': pose.y = this.getLandingReferenceY() + values[0] * t; break;
+        case 'land': pose.y = start.y + (this.getLandingReferenceY() - start.y) * t; break;
+        case 'move': this.translateBody(pose, values[0] * t, values[1] * t, values[2] * t); break;
+        case 'turn': pose.yaw = start.yaw + values[0] * radians * t; break;
+        case 'circle': {
+          const angle = values[1] * radians * t;
+          const radius = values[0] * Math.sign(values[1]);
+          this.translateBody(pose, radius * Math.sin(angle), radius * (1 - Math.cos(angle)), 0);
+          pose.yaw = start.yaw + angle;
+          break;
+        }
+      }
+      this.pose$.next({ ...pose });
+    } while (elapsed < duration * 1000);
   }
 
   private async movePoseOverTime(pose: CrazyfliePose, direction: string, distance: number): Promise<void> {
@@ -475,6 +507,8 @@ export class CrazyflieSimService {
 
   private commandLabel(command: CrazyflieSimCommand): string {
     switch (command.type) {
+      case 'motion':
+        return `motion:${command.value.kind}:${command.value.values.join(':')}`;
       case 'takeoff':
         return 'takeoff';
       case 'land':
@@ -525,6 +559,11 @@ export class CrazyflieSimService {
     for (const raw of String(code || '').split(/\r?\n/)) {
       const line = raw.trim();
       if (!line || line.startsWith('//') || line.startsWith('#')) {
+        continue;
+      }
+      const motion = parseMotionCall(line);
+      if (motion) {
+        commands.push({ type: 'motion', value: motion });
         continue;
       }
 
@@ -655,6 +694,13 @@ export class CrazyflieSimService {
 
   private normalizePrintValue(value: string): string {
     const text = String(value || '').trim();
+    if (text.startsWith('"') && text.endsWith('"')) {
+      const parsed: unknown = JSON.parse(text);
+      if (typeof parsed !== 'string') {
+        throw new Error('Crazyflie：打印内容必须是文字');
+      }
+      return parsed;
+    }
     if (text.length >= 2 && ((text.startsWith("'") && text.endsWith("'")) || (text.startsWith('"') && text.endsWith('"')))) {
       return text.slice(1, -1).replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\'/g, "'").replace(/\\\"/g, '"').replace(/\\\\/g, '\\');
     }

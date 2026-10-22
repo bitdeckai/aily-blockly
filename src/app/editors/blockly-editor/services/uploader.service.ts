@@ -20,6 +20,9 @@ import { AppDataResourceLockService } from '../../../services/appdata-resource-l
 import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
 import { CrazyflieTelemetryService } from '../../../services/crazyflie-telemetry.service';
 import { CrazyflieConnectionService } from '../../../services/crazyflie-connection.service';
+import { compileCrazyflieFlow } from '../components/blockly/generators/crazyflie/compile-flow';
+import type { Block } from 'blockly';
+import { motionBlocks, motionFlowTimeoutMs } from '../components/blockly/generators/crazyflie/motion-blocks';
 
 @Injectable()
 export class _UploaderService {
@@ -187,8 +190,9 @@ export class _UploaderService {
     this._builderService.isUploading = false;
   }
 
-  private async uploadCrazyflieFlow(crazyflieCode: string): Promise<ActionState> {
+  private async uploadCrazyflieFlow(crazyflieCode: string, plannedBlocks?: Block[]): Promise<ActionState> {
     const title = 'Crazyflie 链路测试';
+    const timeoutMs = motionFlowTimeoutMs(crazyflieCode);
     this.crazyflieConnectionService.setChecking();
     this.crazyflieTelemetryService.clear();
     this.noticeService.update({
@@ -211,9 +215,9 @@ export class _UploaderService {
       return { state: 'error', text: '未找到 Crazyflie 测试接口' };
     }
 
-    const hasRunFlowCmd = /cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
+    const hasRunFlowCmd = /cf_motion\s*\(|cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
     const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
-    const executionBlocks = hasRunFlowCmd ? this.getCrazyflieExecutionBlocksInOrder() : [];
+    const executionBlocks = hasRunFlowCmd ? (plannedBlocks || this.getCrazyflieExecutionBlocksInOrder()) : [];
     let currentTelemetry: any = null;
     let currentNoticeText = '正在检测 Crazyradio / Crazyflie 链路...';
     let receivedRealtimeLog = false;
@@ -283,7 +287,7 @@ export class _UploaderService {
     let result: any;
     try {
       result = hasRunFlowCmd
-        ? await api.runFlow({ code: crazyflieCode, timeoutMs: 60000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex })
+        ? await api.runFlow({ code: crazyflieCode, timeoutMs, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex })
         : await api.testLink({ timeoutMs: 5000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex });
     } catch (error: any) {
       this.crazyflieConnectionService.setResult(false, error?.message || 'Crazyflie 链路检测异常');
@@ -374,6 +378,7 @@ export class _UploaderService {
     }
 
     const executableTypes = new Set([
+      ...motionBlocks.map(spec => spec.type),
       'cf_link_config',
       'cf_test_link',
       'cf_crazyflie_link',
@@ -500,8 +505,10 @@ export class _UploaderService {
     }
 
     const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
-    const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
-    const executionBlocks = this.getCrazyflieExecutionBlocksInOrder();
+    const preparedFlow = this.prepareCrazyflieFlow(mpyGenerator);
+    if (!('code' in preparedFlow)) return preparedFlow;
+    const crazyflieCode = preparedFlow.code;
+    const executionBlocks = preparedFlow.executionBlocks;
 
     this.noticeService.update({
       title,
@@ -575,8 +582,10 @@ export class _UploaderService {
       return { state: 'warn', text: '当前项目不是 Crazyflie，无法进行实飞' };
     }
     const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
-    const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
-    return await this.uploadCrazyflieFlow(crazyflieCode);
+    const preparedFlow = this.prepareCrazyflieFlow(mpyGenerator);
+    if (!('code' in preparedFlow)) return preparedFlow;
+    const crazyflieCode = preparedFlow.code;
+    return await this.uploadCrazyflieFlow(crazyflieCode, preparedFlow.executionBlocks);
   }
 
   private async runCrazyflieSimAndReal(): Promise<ActionState> {
@@ -587,7 +596,9 @@ export class _UploaderService {
     }
 
     const mpyGenerator = (window as any)['MPY'] || (window as any)['MicropPython'] || arduinoGenerator;
-    const crazyflieCode = mpyGenerator.workspaceToCode(this.blocklyService.workspace);
+    const preparedFlow = this.prepareCrazyflieFlow(mpyGenerator);
+    if (!('code' in preparedFlow)) return preparedFlow;
+    const crazyflieCode = preparedFlow.code;
 
     let simRun: ActionState;
     try {
@@ -603,7 +614,21 @@ export class _UploaderService {
     }
 
     this.logService.update({ detail: '[Crazyflie] 仿真通过，开始实飞', state: 'warn' });
-    return await this.uploadCrazyflieFlow(crazyflieCode);
+    return await this.uploadCrazyflieFlow(crazyflieCode, preparedFlow.executionBlocks);
+  }
+
+  private prepareCrazyflieFlow(generator: Parameters<typeof compileCrazyflieFlow>[1]): { code: string; executionBlocks: Block[] } | ActionState {
+    try {
+      const executionBlocks: Block[] = [];
+      const code = compileCrazyflieFlow(this.blocklyService.workspace, generator, block => executionBlocks.push(block));
+      motionFlowTimeoutMs(code);
+      return { code, executionBlocks: executionBlocks.length ? executionBlocks : this.getCrazyflieExecutionBlocksInOrder() };
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      this.noticeService.update({ title: 'Crazyflie 流程检查失败', text, state: 'error' });
+      this.logService.update({ detail: `[Crazyflie] ${text}`, state: 'error' });
+      return { state: 'error', text };
+    }
   }
 
   async upload(): Promise<ActionState> {
@@ -1746,4 +1771,3 @@ export class _UploaderService {
     }
   }
 }
-

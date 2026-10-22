@@ -1,4 +1,4 @@
-import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild, effect } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, ViewChild, effect } from '@angular/core';
 import * as Blockly from 'blockly';
 import { Subject, combineLatest } from 'rxjs';
 
@@ -97,6 +97,7 @@ import { BlocklyWorkspacePagesComponent } from './components/blockly-workspace-p
 import { CodeViewerIpcService } from '../../services/code-viewer-ipc.service';
 import { CrazyflieSimService } from '../../../../services/crazyflie-sim.service';
 import { CrazyflieSimPanelComponent } from './components/crazyflie-sim-panel/crazyflie-sim-panel.component';
+import { crazyflieGenerator } from './generators/crazyflie/basic-blocks';
 
 // 全局关闭 Blockly 文本输入字段的拼写检查，避免 block 内 input 出现红色波浪线
 (Blockly.FieldTextInput.prototype as unknown as { spellcheck_: boolean }).spellcheck_ = false;
@@ -232,7 +233,7 @@ class ExternalToolboxDeleteArea extends Blockly.DeleteArea {
   templateUrl: './blockly.component.html',
   styleUrl: './blockly.component.scss',
 })
-export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
+export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy {
   @ViewChild(BlocklyWorkspacePagesComponent, { static: true }) workspacePaneComponent!: BlocklyWorkspacePagesComponent;
   @ViewChild('layoutElement', { static: true }) private layoutElementRef!: ElementRef<HTMLDivElement>;
   @ViewChild('toolboxPane', { static: true }) private toolboxPaneRef!: ElementRef<HTMLDivElement>;
@@ -245,9 +246,10 @@ export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
   private toolboxResizeAnimationFrame: number | null = null;
   private workspaceResizeAnimationFrame: number | null = null;
   private isToolboxResizing = false;
-  showSimPanel = true;
+  showSimPanel = false;
 
   @Input() devmode;
+  @Input() isCrazyflieProject = false;
   generator;
 
   // RxJS debounce optimization
@@ -425,9 +427,12 @@ export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
       });
   }
 
+  ngOnChanges(): void {
+    this.initDevMode();
+  }
+
   ngOnInit(): void {
     this.initAiWritingSubscription();
-    this.initDevMode();
     this.initPrompt();
     this.initCodeGenerationDebounce();
     this.initMinimapSyncDebounce();
@@ -1110,9 +1115,10 @@ export class BlocklyComponent implements OnInit, AfterViewInit, OnDestroy {
         this.generator = arduinoGenerator;
         break;
       case 'micropython':
-        window['MicropPython'] = <any>micropythonGenerator;
-        window['MPY'] = <any>micropythonGenerator;
-        this.generator = micropythonGenerator;
+        this.generator = this.isCrazyflieProject
+          ? crazyflieGenerator : micropythonGenerator;
+        window['MicropPython'] = this.generator;
+        window['MPY'] = this.generator;
         break;
       default:
         break;

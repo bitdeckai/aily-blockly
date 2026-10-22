@@ -8,6 +8,8 @@ import { ElectronService } from '../../../services/electron.service';
 import { BlockCodeMapping, CodeLineRange } from '../components/blockly/generators/arduino/arduino';
 import { convertBlockTreeToAbs, convertAbiToAbsWithLineMap } from '../../../tools/aily-chat/public-api';
 import { BlockSearcher } from '../components/blockly/plugins/toolbox-search/src/block_searcher';
+import { createCrazyflieBasicToolbox, registerCrazyflieBasicBlocks, crazyflieGenerator } from '../components/blockly/generators/crazyflie/basic-blocks';
+import { createCrazyflieMotionToolbox, registerCrazyflieMotionBlocks } from '../components/blockly/generators/crazyflie/motion-blocks';
 
 export interface BlocklyWorkspaceViewState {
   scale: number;
@@ -1060,6 +1062,15 @@ export class BlocklyService {
       }
       return block;
     });
+  }
+
+  loadCrazyflieBasicBlocks(): void {
+    const categories = createCrazyflieBasicToolbox(this.translateService.currentLang?.toLowerCase().startsWith('zh'));
+    registerCrazyflieBasicBlocks();
+    categories.forEach(category => this.loadLibToolbox(category));
+    const chinese = this.crazyflieBlockLanguage === 'zh';
+    registerCrazyflieMotionBlocks(crazyflieGenerator, chinese);
+    this.loadLibToolbox(createCrazyflieMotionToolbox(chinese));
   }
 
   loadLibBlocksJS(filePath) {

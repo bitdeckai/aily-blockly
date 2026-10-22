@@ -1,6 +1,7 @@
 @if (devmode) {
 <blockly-main
   [devmode]="devmode"
+  [isCrazyflieProject]="isCrazyflieProject"
   (libraryManagerRequested)="openProjectManager()"></blockly-main>
 }
 @if (developerMode) {

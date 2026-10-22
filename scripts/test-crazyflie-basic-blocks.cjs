@@ -1,0 +1,527 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { spawnSync } = require('node:child_process');
+const { test, afterEach } = require('node:test');
+const ts = require('typescript');
+const Blockly = require('blockly');
+const zh = require('blockly/msg/zh-hans');
+
+require.extensions['.ts'] = (module, filename) => {
+  const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: filename,
+  });
+  module._compile(outputText, filename);
+};
+const root = path.resolve(__dirname, '..');
+const source = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly', 'generators', 'crazyflie');
+const { createCrazyflieBasicToolbox, registerCrazyflieBasicBlocks, crazyflieGenerator } =
+  require(path.join(source, 'basic-blocks.ts'));
+const { compileCrazyflieFlow } = require(path.join(source, 'compile-flow.ts'));
+const {
+  registerCrazyflieMotionBlocks, createCrazyflieMotionToolbox, parseMotionCall, validateMotionCommand,
+  motionDurationSeconds, motionFlowTimeoutMs,
+} = require(path.join(source, 'motion-blocks.ts'));
+
+Blockly.setLocale(zh);
+const categories = createCrazyflieBasicToolbox(true);
+registerCrazyflieBasicBlocks();
+registerCrazyflieMotionBlocks(crazyflieGenerator, true);
+Blockly.defineBlocksWithJsonArray(JSON.parse(fs.readFileSync(path.join(root, 'child', 'boards',
+  'board-crazyflie', 'template', 'node_modules', '@aily-project', 'lib-crazyflie-motion', 'block.json'), 'utf8')));
+vm.runInNewContext(fs.readFileSync(path.join(root, 'child', 'boards', 'board-crazyflie', 'template',
+  'node_modules', '@aily-project', 'lib-crazyflie-motion', 'generator.js'), 'utf8'), {
+  window: { MPY: crazyflieGenerator },
+});
+
+const workspaces = [];
+function workspace(blocks, variables = []) {
+  const result = new Blockly.Workspace();
+  workspaces.push(result);
+  Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks }, variables }, result);
+  return result;
+}
+const value = n => ({ block: { type: 'math_number', fields: { NUM: n } } });
+const string = text => ({ block: { type: 'text', fields: { TEXT: text } } });
+const variable = () => ({ block: { type: 'variables_get', fields: { VAR: { id: 'n' } } } });
+const print = input => ({ type: 'text_print', inputs: { TEXT: input } });
+const flight = type => ({ type });
+const chain = (...blocks) => blocks.reduceRight((next, block) =>
+  next ? { ...block, next: { block: next } } : block, null);
+const compile = ws => compileCrazyflieFlow(ws, crazyflieGenerator);
+
+afterEach(() => {
+  workspaces.splice(0).forEach(ws => ws.dispose());
+});
+
+test('six categories contain defined blocks with Python generators', () => {
+  assert.deepEqual(categories.map(category => category.name), ['逻辑', '循环', '数学', '文字', '时间', '变量']);
+  assert.equal(categories.at(-1).custom, 'VARIABLE');
+  for (const category of categories) {
+    for (const info of category.contents) {
+      const ws = workspace([{ type: info.type, inputs: info.inputs }]);
+      assert.doesNotThrow(() => crazyflieGenerator.workspaceToCode(ws), info.type);
+    }
+  }
+  assert.deepEqual(createCrazyflieBasicToolbox(false).map(category => category.name),
+    ['Logic', 'Loops', 'Math', 'Text', 'Time', 'Variables']);
+});
+
+test('legacy straight-line flight still generates valid Python', () => {
+  const ws = workspace([chain(flight('cf_takeoff'), flight('cf_land'))]);
+  const code = compile(ws);
+  assert.match(code, /cf_takeoff\(\)/);
+  assert.match(code, /cf_land\(\)/);
+  assert.doesNotMatch(code, /while True/);
+});
+
+test('repeat expands flight calls and preserves repeated highlight targets', () => {
+  const ws = workspace([{
+    type: 'controls_repeat_ext', inputs: {
+      TIMES: value(3), DO: { block: flight('cf_move_forward') },
+    },
+  }]);
+  const ids = [];
+  const code = compileCrazyflieFlow(ws, crazyflieGenerator, block => ids.push(block.id));
+  assert.equal((code.match(/cf_move\('forward', 0.5\)/g) || []).length, 3);
+  assert.equal(ids.length, 3);
+  assert.equal(new Set(ids).size, 1);
+  assert.doesNotMatch(code, /for |range\(/);
+});
+
+test('variables, arithmetic, conditions and print resolve before flight', () => {
+  const ws = workspace([chain(
+    { type: 'variables_set', fields: { VAR: { id: 'n' } }, inputs: { VALUE: value(2) } },
+    { type: 'math_change', fields: { VAR: { id: 'n' } }, inputs: { DELTA: value(3) } },
+    {
+      type: 'controls_if', inputs: {
+        IF0: { block: { type: 'logic_compare', fields: { OP: 'EQ' }, inputs: { A: variable(), B: value(5) } } },
+        DO0: { block: chain(print(variable()), flight('cf_land')) },
+      },
+    },
+  )], [{ name: 'n', id: 'n' }]);
+  const code = compile(ws);
+  assert.match(crazyflieGenerator.workspaceToCode(ws), /n = 2/);
+  assert.match(code, /cf_print\("5"\)/);
+  assert.match(code, /cf_land\(\)/);
+  assert.doesNotMatch(code, /if | = /);
+});
+
+test('false branch does not execute flight commands', () => {
+  const ws = workspace([{
+    type: 'controls_if', extraState: { hasElse: true }, inputs: {
+      IF0: { block: { type: 'logic_boolean', fields: { BOOL: 'FALSE' } } },
+      DO0: { block: flight('cf_takeoff') },
+      ELSE: { block: print(string('stayed on ground')) },
+    },
+  }]);
+  assert.equal(compile(ws).trim(), 'cf_print("stayed on ground")');
+});
+
+test('counting loop handles descending ranges', () => {
+  const ws = workspace([{
+    type: 'controls_for', fields: { VAR: { id: 'n' } }, inputs: {
+      FROM: value(3), TO: value(1), BY: value(1), DO: { block: print(variable()) },
+    },
+  }], [{ name: 'n', id: 'n' }]);
+  assert.deepEqual(compile(ws).trim().split('\n'), ['cf_print("3")', 'cf_print("2")', 'cf_print("1")']);
+});
+
+test('while loops update variables and stop at their condition', () => {
+  const ws = workspace([chain(
+    { type: 'variables_set', fields: { VAR: { id: 'n' } }, inputs: { VALUE: value(0) } },
+    {
+      type: 'controls_whileUntil', fields: { MODE: 'WHILE' }, inputs: {
+        BOOL: { block: { type: 'logic_compare', fields: { OP: 'LT' }, inputs: { A: variable(), B: value(2) } } },
+        DO: { block: chain(print(variable()), {
+          type: 'math_change', fields: { VAR: { id: 'n' } }, inputs: { DELTA: value(1) },
+        }) },
+      },
+    },
+  )], [{ name: 'n', id: 'n' }]);
+  assert.deepEqual(compile(ws).trim().split('\n'), ['cf_print("0")', 'cf_print("1")']);
+});
+
+test('break ends only the enclosing loop', () => {
+  const ws = workspace([chain({
+    type: 'controls_repeat_ext', inputs: {
+      TIMES: value(5),
+      DO: { block: chain(print(string('once')), { type: 'controls_flow_statements', fields: { FLOW: 'BREAK' } }) },
+    },
+  }, print(string('after')))]);
+  assert.deepEqual(compile(ws).trim().split('\n'), ['cf_print("once")', 'cf_print("after")']);
+});
+
+test('text operations and delay accept calculated input values', () => {
+  const ws = workspace([chain(
+    print({ block: { type: 'text_join', extraState: { itemCount: 2 }, inputs: { ADD0: string('高度：'), ADD1: value(3) } } }),
+    {
+      type: 'cf_core_delay', inputs: {
+        SECONDS: { block: { type: 'math_arithmetic', fields: { OP: 'DIVIDE' }, inputs: { A: value(1), B: value(2) } } },
+      },
+    },
+  )]);
+  assert.equal(compile(ws).trim(), 'cf_print("高度：3")\ncf_delay(0.500000)');
+});
+
+test('disabled stacks are skipped without dropping enabled following blocks', () => {
+  const ws = workspace([chain(
+    { type: 'text_print', inputs: { TEXT: string('skip') } },
+    print(string('keep')),
+  )]);
+  ws.getTopBlocks(false)[0].setDisabledReason(true, 'test');
+  assert.equal(compile(ws).trim(), 'cf_print("keep")');
+});
+
+test('unbounded loops, zero steps and invalid arithmetic fail before any flight', () => {
+  const ws = workspace([chain(flight('cf_takeoff'), {
+    type: 'controls_whileUntil', fields: { MODE: 'WHILE' },
+    inputs: { BOOL: { block: { type: 'logic_boolean', fields: { BOOL: 'TRUE' } } } },
+  })]);
+  assert.throws(() => compile(ws), /10000/);
+  const zeroStep = workspace([{
+    type: 'controls_for', inputs: { FROM: value(1), TO: value(2), BY: value(0) },
+  }]);
+  assert.throws(() => compile(zeroStep), /步长/);
+  const divide = workspace([print({
+    block: { type: 'math_arithmetic', fields: { OP: 'DIVIDE' }, inputs: { A: value(1), B: value(0) } },
+  })]);
+  assert.throws(() => compile(divide), /有限数值/);
+});
+
+test('live sensor conditions are explicitly rejected instead of executing both branches', () => {
+  const ws = workspace([{
+    type: 'controls_if', inputs: {
+      IF0: { block: { type: 'cf_mr_has_obstacle' } }, DO0: { block: flight('cf_takeoff') },
+    },
+  }]);
+  assert.throws(() => compile(ws), /实时传感器/);
+});
+
+test('saved basic blocks and variables can be reloaded', () => {
+  const original = workspace([chain(
+    { type: 'variables_set', fields: { VAR: { id: 'n' } }, inputs: { VALUE: value(7) } },
+    print(variable()),
+  )], [{ name: 'n', id: 'n' }]);
+  const expected = compile(original);
+  const restored = workspace([]);
+  Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(original), restored);
+  assert.equal(compile(restored), expected);
+});
+
+test('the 10000-step expansion limit accepts the boundary and rejects the next step', () => {
+  const atLimit = workspace([{ type: 'controls_repeat_ext', inputs: { TIMES: value(9998) } }]);
+  assert.equal(compile(atLimit), '');
+  atLimit.getTopBlocks(false)[0].getInputTargetBlock('TIMES').setFieldValue(9999, 'NUM');
+  assert.throws(() => compile(atLimit), /10000/);
+});
+
+test('the real-flight parser accepts the compiled plan and preserves Unicode printing', () => {
+  const ws = workspace([chain(
+    {
+      type: 'controls_repeat_ext', inputs: {
+        TIMES: value(2),
+        DO: { block: chain(print(string('高度：3\\n')), { type: 'cf_core_delay', inputs: { SECONDS: value(0.5) } }) },
+      },
+    },
+    flight('cf_land'),
+  )]);
+  const code = compile(ws);
+  const python = process.platform === 'win32' ? 'py' : 'python3';
+  const args = process.platform === 'win32' ? ['-3'] : [];
+  const result = spawnSync(python, [...args, '-B', '-c', `
+import ast, json, runpy, sys
+code = sys.stdin.buffer.read().decode('utf-8')
+ast.parse(code)
+from pathlib import Path
+ns = runpy.run_path(str(Path('child') / 'scripts' / 'crazyflie_run_flow.py'), run_name='flow_test')
+commands = ns['parse_commands'](code)
+assert [command for command, value in commands] == ['print', 'delay', 'print', 'delay', 'land']
+assert commands[1][1] == 0.5
+assert ns['_normalize_print_value'](commands[0][1]) == '\\u9ad8\\u5ea6\\uff1a3\\\\n'
+print(json.dumps(commands, ensure_ascii=True))
+`], { cwd: root, input: code, encoding: 'utf8' });
+  assert.equal(result.error, undefined, 'Python 3 is required for the flight-parser regression test');
+  assert.equal(result.status, 0, result.stderr);
+});
+
+function simulator() {
+  const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'app', 'services',
+    'crazyflie-sim.service.ts'), 'utf8'), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true,
+    },
+  });
+  const exports = {};
+  vm.runInNewContext(outputText, {
+    exports,
+    require: name => name === '@angular/core' ? { Injectable: () => type => type }
+      : name.endsWith('/motion-blocks') ? require(path.join(source, 'motion-blocks.ts')) : require(name),
+    setTimeout, clearTimeout, console,
+  });
+  return new exports.CrazyflieSimService({ setDeckDetected() {} });
+}
+
+test('simulation executes the expanded branch and decodes printed text exactly', async () => {
+  const sim = simulator();
+  const ws = workspace([{
+    type: 'controls_repeat_ext', inputs: {
+      TIMES: value(2), DO: { block: print(string('高度：3\\n')) },
+    },
+  }]);
+  const result = await sim.runCode(compile(ws));
+  assert.equal(result.success, true, result.message);
+  assert.equal(sim.logs$.value.filter(line => line.includes('高度：3\\n')).length, 2);
+});
+
+test('eight motion block templates generate valid commands and preserve saved inputs', () => {
+  const toolbox = createCrazyflieMotionToolbox(true);
+  assert.equal(toolbox.contents.length, 8);
+  for (const info of toolbox.contents) {
+    const ws = workspace([{ type: info.type, inputs: info.inputs }]);
+    assert.ok(parseMotionCall(crazyflieGenerator.workspaceToCode(ws).trim()), info.type);
+    const restored = workspace([]);
+    Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
+    assert.equal(crazyflieGenerator.workspaceToCode(restored), crazyflieGenerator.workspaceToCode(ws));
+  }
+});
+
+test('motion inputs accept variables and arithmetic, and repeated calls retain highlight order', () => {
+  const ws = workspace([chain(
+    { type: 'variables_set', fields: { VAR: { id: 'n' } }, inputs: { VALUE: value(0.4) } },
+    flight('cf_crazyflie_link'),
+    { type: 'cf_takeoff_at', inputs: { HEIGHT: value(0.6), SPEED: value(0.2) } },
+    {
+      type: 'controls_repeat_ext', inputs: {
+        TIMES: value(2), DO: { block: {
+          type: 'cf_move_at_speed', fields: { DIRECTION: 'right' }, inputs: {
+            DISTANCE: variable(),
+            SPEED: { block: { type: 'math_arithmetic', fields: { OP: 'DIVIDE' }, inputs: { A: value(1), B: value(5) } } },
+          },
+        } },
+      },
+    },
+    { type: 'cf_land_at_speed', inputs: { SPEED: value(0.1) } },
+  )], [{ name: 'n', id: 'n' }]);
+  const targets = [];
+  const code = compileCrazyflieFlow(ws, crazyflieGenerator, block => targets.push(block.type));
+  const commands = code.split('\n').filter(line => line.startsWith('cf_motion')).map(parseMotionCall);
+  assert.deepEqual(commands, [
+    { kind: 'takeoff', values: [0.6, 0.2] },
+    { kind: 'move', values: [0, -0.4, 0, 0.2] },
+    { kind: 'move', values: [0, -0.4, 0, 0.2] },
+    { kind: 'land', values: [0.1] },
+  ]);
+  assert.deepEqual(targets, ['cf_crazyflie_link', 'cf_takeoff_at', 'cf_move_at_speed', 'cf_move_at_speed', 'cf_land_at_speed']);
+  assert.match(crazyflieGenerator.workspaceToCode(ws), /cf_motion\("move", \[0, -\(n\), 0, 1 \/ 5\]\)/);
+});
+
+test('new motion sequence requires connection and explicit takeoff before airborne commands', () => {
+  const ws = workspace([{ type: 'cf_hover' }]);
+  assert.throws(() => compile(ws), /连接/);
+  const groundMove = workspace([chain(flight('cf_crazyflie_link'), { type: 'cf_move_xyz' })]);
+  assert.throws(() => compile(groundMove), /起飞/);
+  const duplicate = workspace([chain(flight('cf_crazyflie_link'), { type: 'cf_takeoff_at' }, { type: 'cf_takeoff_at' })]);
+  assert.throws(() => compile(duplicate), /重复起飞/);
+});
+
+test('motion validation rejects bad arity, unknown operations, nonfinite values and nonpositive speeds', () => {
+  for (const [kind, values] of [
+    ['stop_motors', []], ['turn', [90]], ['move', [1, 0, 0, 0]],
+    ['takeoff', [0, 0.2]], ['circle', [-1, 90, 0.2]], ['turn', [90, -1]],
+    ['hover', [-1]], ['land', [NaN]], ['move', [Infinity, 0, 0, 1]],
+  ]) {
+    assert.throws(() => validateMotionCommand(kind, values));
+  }
+  assert.deepEqual(parseMotionCall('cf_motion("move", [1e-7, -0.2, 0, 0.3])'),
+    { kind: 'move', values: [1e-7, -0.2, 0, 0.3] });
+  assert.throws(() => parseMotionCall('cf_motion("turn", [90, 0])'));
+  assert.throws(() => parseMotionCall('cf_motion("takeoff", [1e308, 1e-308])'));
+});
+
+test('motion and hover durations extend IPC timeout including the requested landing speed', () => {
+  const code = [
+    'cf_crazyflie_link()', 'cf_motion("takeoff", [1, 0.2])',
+    'cf_motion("move", [0, 0, 0.5, 0.1])', 'cf_motion("hover", [60])',
+    'cf_delay(2)', 'cf_motion("land", [0.1])',
+  ].join('\n');
+  assert.equal(motionFlowTimeoutMs(code), 147000);
+  assert.equal(motionDurationSeconds({ kind: 'circle', values: [0.5, 360, 0.5] }), 2 * Math.PI);
+  assert.throws(() => motionFlowTimeoutMs('cf_motion("hover", [1e20])'), /计时器/);
+});
+
+test('turns change heading, legacy forward follows heading and arcs trace the correct body frame', async () => {
+  const sim = simulator();
+  sim.sleep = async () => {};
+  const start = { ...sim.pose$.value };
+  const result = await sim.runCode([
+    'cf_crazyflie_link()',
+    'cf_motion("takeoff", [0.5, 0.2])',
+    'cf_motion("turn", [90, 45])',
+    "cf_move('forward', 0.3)",
+    'cf_motion("circle", [0.5, -90, 0.2])',
+    'cf_motion("hover", [0])',
+  ].join('\n'));
+  assert.equal(result.success, true, result.message);
+  const pose = sim.pose$.value;
+  assert.ok(Math.abs(pose.x - (start.x - 0.5)) < 1e-9);
+  assert.ok(Math.abs(pose.z - (start.z + 0.8)) < 1e-9);
+  assert.ok(Math.abs(pose.y - (start.y + 0.5)) < 1e-9);
+  assert.ok(Math.abs(pose.yaw) < 1e-9);
+});
+
+test('full circles return to the origin and XYZ motion supports simultaneous vertical translation', async () => {
+  const sim = simulator();
+  sim.sleep = async () => {};
+  const start = { ...sim.pose$.value };
+  const result = await sim.runCode([
+    'cf_crazyflie_link()', 'cf_motion("takeoff", [0.5, 0.2])',
+    'cf_motion("circle", [0.5, 360, 0.5])',
+    'cf_motion("move", [0.2, 0.3, 0.1, 0.2])',
+    'cf_motion("land", [0.1])',
+  ].join('\n'));
+  assert.equal(result.success, true, result.message);
+  const pose = sim.pose$.value;
+  assert.ok(Math.abs(pose.x - (start.x - 0.2)) < 1e-9);
+  assert.ok(Math.abs(pose.z - (start.z + 0.3)) < 1e-9);
+  assert.equal(pose.y, start.y);
+  assert.ok(Math.abs(pose.yaw - 2 * Math.PI) < 1e-9);
+});
+
+test('legacy takeoff can precede new motion and uses the cflib default height above the takeoff surface', async () => {
+  const sim = simulator();
+  sim.sleep = async () => {};
+  const ground = sim.pose$.value.y;
+  const result = await sim.runCode('cf_crazyflie_link()\ncf_takeoff()\ncf_motion("hover", [0])');
+  assert.equal(result.success, true, result.message);
+  assert.ok(Math.abs(sim.pose$.value.y - ground - 0.3) < 1e-9);
+});
+
+test('motion simulation respects speed, hover duration and cancellation', async () => {
+  const sim = simulator();
+  const durations = [];
+  sim.sleep = async ms => { durations.push(ms); };
+  sim.speed$.next(2);
+  const result = await sim.runCode([
+    'cf_crazyflie_link()', 'cf_motion("takeoff", [0.4, 0.2])', 'cf_motion("hover", [1])',
+  ].join('\n'));
+  assert.equal(result.success, true);
+  assert.ok(Math.abs(durations.reduce((a, b) => a + b, 0) - (75 + 1000 + 500)) < 1e-8);
+  const cancelled = simulator();
+  cancelled.sleep = async () => { cancelled.cancelRun(); };
+  const before = { ...cancelled.pose$.value };
+  const stopped = await cancelled.runCode('cf_crazyflie_link()\ncf_motion("takeoff", [0.4, 0.2])');
+  assert.equal(stopped.success, false);
+  assert.deepEqual({ ...cancelled.pose$.value }, before);
+});
+
+test('Python runner dispatches every motion API and cleans up without implicit takeoff', () => {
+  const python = process.platform === 'win32' ? 'py' : 'python3';
+  const args = process.platform === 'win32' ? ['-3'] : [];
+  const result = spawnSync(python, [...args, '-B', '-c', `
+import runpy
+from pathlib import Path
+ns = runpy.run_path(str(Path('child') / 'scripts' / 'crazyflie_run_flow.py'), run_name='motion_test')
+calls = []
+class Commander:
+    def __init__(self, cf): calls.append(('created',))
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: calls.append((name, args, kwargs))
+wait = lambda seconds: calls.append(('wait', seconds))
+session = ns['explicit_motion_session']
+execute = ns['execute_motion']
+with session(None, Commander) as mc:
+    assert calls == [('created',)], calls
+    for kind, values in [
+        ('takeoff', [0.6, 0.2]), ('move', [0.1, -0.2, 0.3, 0.4]),
+        ('turn', [90, 45]), ('turn', [-90, 30]),
+        ('circle', [0.5, 180, 0.2]), ('circle', [0.3, -90, 0.1]),
+        ('hover', [2]), ('move', [0, 0, 0, 0.2]), ('land', [0.1])
+    ]:
+        raw = 'cf_motion("' + kind + '", ' + str(values) + ')'
+        command = ns['parse_commands'](raw)
+        assert command == [('motion', {'kind': kind, 'values': values})], command
+        execute(mc, command[0][1], wait)
+assert calls[1] == ('take_off', (), {'height': 0.6, 'velocity': 0.2})
+assert calls[2] == ('move_distance', (0.1, -0.2, 0.3), {'velocity': 0.4})
+assert calls[3] == ('turn_left', (90,), {'rate': 45})
+assert calls[4] == ('turn_right', (90,), {'rate': 30})
+assert calls[5] == ('circle_left', (0.5,), {'velocity': 0.2, 'angle_degrees': 180})
+assert calls[6] == ('circle_right', (0.3,), {'velocity': 0.1, 'angle_degrees': 90})
+assert calls[7:10] == [('stop', (), {}), ('wait', 2), ('stop', (), {})]
+assert calls[10] == ('land', (), {'velocity': 0.1})
+assert calls[-1] == ('land', (), {})
+try:
+    with session(None, Commander) as mc:
+        raise RuntimeError('test failure')
+except RuntimeError:
+    pass
+assert calls[-1] == ('land', (), {})
+for raw in ['cf_motion("move", [1,0,0,0])', 'cf_motion("hover", [-1])',
+            'cf_motion("circle", [0,90,1])', 'cf_motion("turn", [90])',
+            'cf_motion("takeoff", [True,1])', 'cf_motion("unknown", [])']:
+    try:
+        ns['parse_commands'](raw)
+    except (ValueError, SyntaxError):
+        pass
+    else:
+        raise AssertionError(raw)
+valid = ns['parse_commands']('cf_crazyflie_link()\\ncf_motion("takeoff", [0.5,0.2])\\ncf_motion("hover", [1])\\ncf_motion("land", [0.2])')
+ns['validate_motion_sequence'](valid)
+try:
+    ns['validate_motion_sequence'](valid[1:])
+except ValueError:
+    pass
+else:
+    raise AssertionError('missing connection accepted')
+import sys, types
+modules = {}
+for name in ['cflib', 'cflib.crtp', 'cflib.crazyflie', 'cflib.crazyflie.syncCrazyflie',
+             'cflib.crazyflie.log', 'cflib.crazyflie.syncLogger', 'cflib.positioning',
+             'cflib.positioning.motion_commander', 'cflib.crtp.radiodriver',
+             'cflib.utils', 'cflib.utils.multiranger']:
+    module = types.ModuleType(name)
+    modules[name] = module
+    sys.modules[name] = module
+    if '.' in name:
+        parent, attr = name.rsplit('.', 1)
+        setattr(modules[parent], attr, module)
+class Connection:
+    def __init__(self, uri):
+        self.cf = types.SimpleNamespace(platform=types.SimpleNamespace(send_arming_request=lambda value: None))
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+class LogConfig:
+    def __init__(self, *args): raise RuntimeError('no telemetry in mock')
+modules['cflib.crtp'].init_drivers = lambda **kwargs: None
+modules['cflib.crazyflie.syncCrazyflie'].SyncCrazyflie = Connection
+modules['cflib.crazyflie.log'].LogConfig = LogConfig
+modules['cflib.crazyflie.syncLogger'].SyncLogger = object
+modules['cflib.positioning.motion_commander'].MotionCommander = Commander
+modules['cflib.crtp.radiodriver'].RadioDriver = lambda: types.SimpleNamespace(get_status=lambda: 'mock radio')
+modules['cflib.utils.multiranger'].Multiranger = object
+clock = [0]
+def now():
+    clock[0] += 1
+    return clock[0]
+ns['run_flow'].__globals__['time'] = types.SimpleNamespace(time=now, sleep=lambda value: None)
+calls.clear()
+result = ns['run_flow']('radio://mock', valid, 'E7E7E7E7E7')
+assert result['success'], result
+assert calls == [
+    ('created',), ('take_off', (), {'height': 0.5, 'velocity': 0.2}),
+    ('stop', (), {}), ('land', (), {'velocity': 0.2}), ('land', (), {})
+], calls
+assert len(result['executed']) == 4, result
+legacy = ns['parse_commands']('cf_crazyflie_link()\\ncf_takeoff()\\ncf_motion("hover", [0])\\ncf_land()')
+calls.clear()
+result = ns['run_flow']('radio://mock', legacy, 'E7E7E7E7E7')
+assert result['success'], result
+assert calls[1] == ('take_off', (), {}), calls
+print('motion API dispatch, sequence validation and cleanup passed')
+`], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+});

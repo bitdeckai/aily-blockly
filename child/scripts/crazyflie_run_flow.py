@@ -1,14 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import argparse
+import ast
 import base64
 import json
+import math
 import os
 import re
 import sys
 import time
 from threading import Event
 from pathlib import Path
+from contextlib import contextmanager
 
 
 MOVE_DISTANCE = {
@@ -22,6 +25,98 @@ MOVE_DISTANCE = {
 
 DEFAULT_URI = "radio://0/80/2M"
 DEFAULT_ADDRESS_HEX = "E7E7E7E7E7"
+
+def parse_motion_call(line):
+    if not re.match(r"^cf_motion\b", line):
+        return None
+    expression = ast.parse(line.rstrip(";"), mode="eval").body
+    if (not isinstance(expression, ast.Call) or not isinstance(expression.func, ast.Name)
+            or expression.func.id != "cf_motion" or len(expression.args) != 2 or expression.keywords):
+        raise ValueError("Invalid cf_motion call")
+    kind, values = [ast.literal_eval(arg) for arg in expression.args]
+    lengths = {"takeoff": 2, "land": 1, "move": 4, "turn": 2, "circle": 3, "hover": 1}
+    if (not isinstance(kind, str) or kind not in lengths or not isinstance(values, list)
+            or len(values) != lengths[kind]
+            or any(type(value) not in (int, float) or not math.isfinite(value) for value in values)):
+        raise ValueError("Invalid cf_motion kind or numeric parameters")
+    positive = {"takeoff": [0, 1], "land": [0], "move": [3], "turn": [1], "circle": [0, 2], "hover": []}
+    if any(values[index] <= 0 for index in positive[kind]) or (kind == "hover" and values[0] < 0):
+        raise ValueError("Motion height, radius and speed must be positive; hover time must be non-negative")
+    duration = (values[0] / values[1] if kind == "takeoff"
+                else math.hypot(*values[:3]) / values[3] if kind == "move"
+                else abs(values[0]) / values[1] if kind == "turn"
+                else values[0] * math.radians(abs(values[1])) / values[2] if kind == "circle"
+                else values[0] if kind == "hover" else 0)
+    if not math.isfinite(duration):
+        raise ValueError("Motion duration is out of numeric range")
+    return {"kind": kind, "values": values}
+
+
+def validate_motion_sequence(commands):
+    def contains_motion(items):
+        return any(cmd == "motion" or (cmd == "if_mr_obstacle" and any(
+            contains_motion((arg or {}).get(branch, [])) for branch in ("then", "else")))
+                   for cmd, arg in items)
+    if not contains_motion(commands):
+        return
+    connected = False
+    flying = False
+    for cmd, arg in commands:
+        if cmd == "crazyflie_link":
+            connected = True
+        if cmd == "if_mr_obstacle":
+            raise ValueError("Extended motion cannot be mixed with legacy live sensor branches")
+        kind = arg["kind"] if cmd == "motion" else cmd
+        if kind not in {"takeoff", "land", "move", "turn", "circle", "hover"}:
+            continue
+        if not connected:
+            raise ValueError("CRAZYFLIE_LINK_REQUIRED: Connect before motion")
+        if kind == "takeoff":
+            if flying:
+                raise ValueError("Already flying: duplicate takeoff")
+            flying = True
+        else:
+            if not flying:
+                raise ValueError("Take off before moving, turning, hovering or landing")
+            if kind == "land":
+                flying = False
+
+
+def execute_motion(mc, command, wait):
+    kind, values = command["kind"], command["values"]
+    if kind == "takeoff":
+        mc.take_off(height=values[0], velocity=values[1])
+    elif kind == "land":
+        mc.land(velocity=values[0])
+    elif kind == "move":
+        if any(values[:3]):
+            mc.move_distance(*values[:3], velocity=values[3])
+        else:
+            mc.stop()
+    elif kind == "turn":
+        angle, rate = values
+        turn = mc.turn_left if angle >= 0 else mc.turn_right
+        turn(abs(angle), rate=rate)
+    elif kind == "circle":
+        radius, angle, speed = values
+        circle = mc.circle_left if angle >= 0 else mc.circle_right
+        circle(radius, velocity=speed, angle_degrees=abs(angle))
+    elif kind == "hover":
+        mc.stop()
+        wait(values[0])
+    else:
+        raise ValueError(f"Unsupported motion: {kind}")
+
+
+@contextmanager
+def explicit_motion_session(scf, commander_factory):
+    # MotionCommander.__enter__ takes off immediately. Do not use it: connection
+    # and other blocks before the takeoff block must run on the ground.
+    mc = commander_factory(scf)
+    try:
+        yield mc
+    finally:
+        mc.land()
 
 
 def handle_range_measurement(range_value):
@@ -87,6 +182,9 @@ def _append_cflib_path(explicit_path: str | None):
 
 def parse_commands(code: str):
     def parse_statement(line: str):
+        motion = parse_motion_call(line)
+        if motion is not None:
+            return ("motion", motion)
         m = re.match(r"^cf_set_link\s*\(\s*['\"](.*?)['\"]\s*,\s*['\"](.*?)['\"]\s*\)\s*;?$", line)
         if m:
             return ("set_link", {"uri": m.group(1), "address": m.group(2)})
@@ -326,9 +424,9 @@ def _normalize_print_value(raw):
     text = str(raw).strip()
     if len(text) >= 2 and ((text[0] == "'" and text[-1] == "'") or (text[0] == '"' and text[-1] == '"')):
         try:
-            return bytes(text[1:-1], "utf-8").decode("unicode_escape")
-        except Exception:
-            return text[1:-1]
+            return ast.literal_eval(text)
+        except (SyntaxError, ValueError) as error:
+            raise ValueError("Invalid Crazyflie print string literal") from error
     return text
 
 
@@ -412,6 +510,7 @@ def test_link(cflib_module, radio_driver_cls, address_hex: str | None):
 
 
 def run_flow(uri: str, commands, address_hex: str | None):
+    validate_motion_sequence(commands)
     import cflib.crtp
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
     from cflib.crazyflie.log import LogConfig
@@ -656,7 +755,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
     links = []
     scan_error = None
 
-    has_motion_cmd = contains_command(commands, {"takeoff", "move", "land"})
+    has_motion_cmd = contains_command(commands, {"takeoff", "move", "land", "motion"})
     has_flow_detect_cmd = contains_command(commands, {"detect_flow_v2"})
     has_mr_cmd = contains_command(commands, {"detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle"})
     has_led_cmd = contains_command(commands, {"detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off"})
@@ -668,7 +767,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     requires_crazyflie_link_cmd = contains_command(commands, {
         "test_crazyflie_link",
-        "takeoff", "move", "land",
+        "takeoff", "move", "land", "motion",
         "detect_flow_v2",
         "detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle",
         "detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off",
@@ -836,7 +935,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
     def require_link_gate(cmd_name: str):
         if cmd_name in {
             "test_crazyflie_link",
-            "takeoff", "move", "land",
+            "takeoff", "move", "land", "motion",
             "detect_flow_v2",
             "detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle",
             "detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off",
@@ -1421,9 +1520,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
             scf.cf.platform.send_arming_request(True)
             interruptible_sleep(1.0, ensure_link_ok)
 
-            with MotionCommander(scf) as mc:
-                # MotionCommander enters hover/takeoff context automatically.
-                interruptible_sleep(1.0, ensure_link_ok)
+            with explicit_motion_session(scf, MotionCommander) as mc:
                 for cmd, arg in commands:
                     ensure_link_ok()
                     if cmd == "set_link":
@@ -1451,10 +1548,19 @@ def run_flow(uri: str, commands, address_hex: str | None):
                         strict_crazyflie_link_test_or_raise(scf)
                         executed.append("test_crazyflie_link")
                         emit_live_telemetry(scf)
+                    elif cmd == "motion":
+                        require_link_gate("motion")
+                        step_index += 1
+                        label = f"motion:{arg['kind']}:{':'.join(str(value) for value in arg['values'])}"
+                        _emit_step(step_index, total_steps, label)
+                        execute_motion(mc, arg, lambda seconds: interruptible_sleep(seconds, ensure_link_ok))
+                        executed.append(label)
+                        ensure_link_ok()
                     elif cmd == "takeoff":
                         require_link_gate("takeoff")
                         step_index += 1
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        mc.take_off()
                         executed.append("takeoff")
                         interruptible_sleep(0.5, ensure_link_ok)
                     elif cmd == "move":
@@ -1498,8 +1604,8 @@ def run_flow(uri: str, commands, address_hex: str | None):
                         require_link_gate("land")
                         step_index += 1
                         _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                        mc.land()
                         executed.append("land")
-                        break
                     elif cmd == "spin_motors":
                         require_link_gate("spin_motors")
                         step_index += 1
