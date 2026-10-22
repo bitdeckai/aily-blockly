@@ -1,6 +1,10 @@
 <div class="sim-panel">
   <div class="sim-panel__toolbar">
     <div class="sim-panel__title">3D 模拟器</div>
+    <label class="attitude-switch">
+      <input type="checkbox" [checked]="attitudeActive" [disabled]="attitudePending" (change)="toggleAttitude()">
+      显示真实姿态
+    </label>
     <div class="sim-panel__status" [class.running]="running" [class.loading]="!sceneReady && !running">
       {{ running ? '运行中' : (sceneReady ? '已就绪' : '加载中') }}
     </div>
@@ -46,10 +50,13 @@
 
   <div class="sim-panel__canvas-wrap">
     <div class="sim-hud">
-      <span>X {{ telemetry.xCm }} cm</span>
+      <span>{{ attitudeActive ? '模拟位置 X' : 'X' }} {{ telemetry.xCm }} cm</span>
       <span>Y {{ telemetry.yCm }} cm</span>
       <span>高度 {{ telemetry.altitudeCm }} cm</span>
-      <span>航向 {{ telemetry.yawDeg }}°</span>
+      <span *ngIf="!attitudeActive">模拟航向 {{ telemetry.yawDeg }}°</span>
+      <span *ngIf="attitudeActive && attitudeReception.sample as sample">
+        Roll {{ sample.roll | number:'1.1-1' }}° · Pitch {{ sample.pitch | number:'1.1-1' }}° · Yaw {{ sample.yaw | number:'1.1-1' }}°
+      </span>
       <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel }}</span>
       <span *ngIf="measureStatus" class="sim-hud__measure">{{ measureStatus }}</span>
     </div>
@@ -77,6 +84,19 @@
   </div>
 
   <div class="sim-panel__footer">
+    <details class="attitude-settings">
+      <summary>姿态连接设置 · {{ attitudeStatus }}</summary>
+      <div class="attitude-settings__inputs">
+        <label>URI <input [value]="attitudeUri" [disabled]="attitudeActive || attitudePending" (input)="attitudeUri = $any($event.target).value"></label>
+        <label>地址 <input [value]="attitudeAddress" [disabled]="attitudeActive || attitudePending" (input)="attitudeAddress = $any($event.target).value"></label>
+      </div>
+      <div>仅同步真实姿态，位置与轨迹仍为模拟。监测不发送电机或飞行指令；请关闭其他占用 Crazyradio 的客户端。</div>
+    </details>
+    <div *ngIf="attitudeActive" class="attitude-metrics" [class.attitude-metrics--stale]="attitudeMetrics.stale" role="status">
+      {{ attitudeStatus }} · 接收 {{ attitudeMetrics.hz | number:'1.0-1' }} Hz ·
+      {{ attitudeMetrics.ageMs === null ? '等待数据' : ('距上次接收 ' + (attitudeMetrics.ageMs | number:'1.0-0') + ' ms') }}
+      {{ attitudeMetrics.stale ? '（暂无新数据，保持末次姿态）' : '' }}
+    </div>
     <div class="sim-panel__step">{{ stepText }}</div>
     <div class="sim-panel__logs">
       @for (log of logs; track $index) {

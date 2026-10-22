@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, NgZone, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   AmbientLight,
@@ -53,6 +53,7 @@ import { CrazyflieSimService } from '../../../../../../services/crazyflie-sim.se
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
 import { BlocklyService } from '../../../../services/blockly.service';
 import { NzMessageService } from 'ng-zorro-antd/message';
+import { AttitudeReception, attitudeQuaternion, getAttitudeApi } from '../../../../../../services/crazyflie-attitude';
 
 @Component({
   selector: 'app-crazyflie-sim-panel',
@@ -82,6 +83,16 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   detectedDeckLabels: string[] = [];
   axesVisible = true;
   selectedView = 'iso';
+  attitudeActive = false;
+  attitudePending = false;
+  attitudeUri = 'radio://0/80/2M';
+  attitudeAddress = 'E7E7E7E7E7';
+  attitudeStatus = '未开启';
+  attitudeReception = new AttitudeReception();
+  attitudeMetrics = this.attitudeReception.metrics(performance.now());
+  private disposeAttitude: (() => void) | null = null;
+  private destroyed = false;
+  private lastAttitudeMetricsTs = 0;
   private flightAxes: Group | null = null;
   private aircraftYaw = 0;
   private readonly flightDirections = [
@@ -158,6 +169,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     private connectionService: CrazyflieConnectionService,
     private blocklyService: BlocklyService,
     private message: NzMessageService,
+    private zone: NgZone,
   ) {}
 
   ngOnInit(): void {
@@ -175,6 +187,16 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   ngOnDestroy(): void {
+    this.destroyed = true;
+    this.disposeAttitude?.();
+    this.disposeAttitude = null;
+    if (this.attitudeActive || this.attitudePending) {
+      void getAttitudeApi()?.stopAttitude().then(result => {
+        if (!result.success) this.message.error(result.message || '停止姿态监测失败');
+      }).catch((error: unknown) => {
+        this.message.error(error instanceof Error ? error.message : String(error));
+      });
+    }
     this.subscriptions.forEach((sub) => sub.unsubscribe());
     this.subscriptions = [];
     this.flightAxes?.children.forEach((axis) => {
@@ -208,6 +230,68 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   setPreset(preset: 'classroom' | 'home'): void {
     this.simService.setRoomPreset(preset);
+  }
+
+  async toggleAttitude(): Promise<void> {
+    if (this.attitudePending) return;
+    const api = getAttitudeApi();
+    if (!api) {
+      this.message.error('未找到真机姿态接口，请重启应用');
+      return;
+    }
+    this.attitudePending = true;
+    try {
+      if (this.attitudeActive) {
+        const result = await api.stopAttitude();
+        if (!result.success) throw new Error(result.message || '停止姿态监测失败');
+        this.attitudeActive = false;
+        this.attitudeStatus = '未开启';
+        this.disposeAttitude?.();
+        this.disposeAttitude = null;
+      } else {
+        this.attitudeReception = new AttitudeReception();
+        this.attitudeMetrics = this.attitudeReception.metrics(performance.now());
+        this.attitudeStatus = '正在连接真机…';
+        this.disposeAttitude = api.onAttitude(event => this.zone.run(() => {
+          if (this.destroyed) return;
+          if (event.type === 'sample') {
+            if (this.attitudeReception.receive(event, performance.now())) {
+              this.aircraftYaw = MathUtils.degToRad(event.yaw);
+              this.attitudeStatus = '真实姿态（位置仍为模拟）';
+            }
+          } else if (event.type === 'error') {
+            this.attitudeStatus = `姿态数据异常：${event.message}`;
+            this.message.error(this.attitudeStatus);
+          } else if (event.type === 'state') {
+            this.attitudeReception = new AttitudeReception();
+            this.attitudeStatus = event.state === 'flow' ? '使用流程连接，等待姿态数据…' : '正在连接真机…';
+          } else {
+            this.attitudeStatus = '姿态连接已停止';
+          }
+        }));
+        const result = await api.startAttitude({ uri: this.attitudeUri.trim(), addressHex: this.attitudeAddress.trim() });
+        if (!result.success) {
+          this.disposeAttitude();
+          this.disposeAttitude = null;
+          throw new Error(result.message || '开启姿态监测失败');
+        }
+        if (this.destroyed) {
+          const stopped = await api.stopAttitude();
+          if (!stopped.success) throw new Error(stopped.message || '停止姿态监测失败');
+        } else {
+          this.attitudeActive = true;
+        }
+      }
+    } catch (error: unknown) {
+      this.attitudeStatus = error instanceof Error ? error.message : String(error);
+      this.message.error(this.attitudeStatus);
+      if (!this.attitudeActive) {
+        this.disposeAttitude?.();
+        this.disposeAttitude = null;
+      }
+    } finally {
+      this.attitudePending = false;
+    }
   }
 
   async onFloorPlanSelected(event: Event): Promise<void> {
@@ -535,7 +619,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     context.clearRect(0, 0, 112, 112);
     const inverseCamera = this.camera.quaternion.clone().invert();
     const directions = this.flightDirections.map((axis) => ({ ...axis,
-      projected: axis.direction.clone().applyAxisAngle(new Vector3(0, 1, 0), this.aircraftYaw).applyQuaternion(inverseCamera),
+      projected: axis.direction.clone()
+        .applyQuaternion(this.flightAxes?.quaternion || attitudeQuaternion(0, 0, MathUtils.radToDeg(this.aircraftYaw)))
+        .applyQuaternion(inverseCamera),
     })).sort((left, right) => left.projected.z - right.projected.z);
     context.lineWidth = 3;
     context.font = 'bold 14px sans-serif';
@@ -1080,7 +1166,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.subscriptions.push(
       this.simService.pose$.subscribe((pose) => {
-        this.aircraftYaw = pose.yaw;
+        if (!this.attitudeActive) this.aircraftYaw = pose.yaw;
         this.targetPosition.set(pose.x, pose.y, pose.z);
         this.telemetry = {
           xCm: Math.round(pose.x * 100),
@@ -2409,26 +2495,26 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       const deskSurfaceY = 0.71001;
       const helipadBase = new Mesh(
         new BoxGeometry(0.3, 0.024, 0.3),
-        new MeshStandardMaterial({ color: '#101214', roughness: 0.82, metalness: 0.08 }),
+        new MeshStandardMaterial({ color: '#7896a6', roughness: 0.82, metalness: 0.08 }),
       );
       helipadBase.position.set(helipadX, deskSurfaceY + 0.012, helipadZ);
       group.add(helipadBase);
 
       const helipadDeckPlate = new Mesh(
         new BoxGeometry(0.284, 0.008, 0.284),
-        new MeshStandardMaterial({ color: '#b86616', roughness: 0.72, metalness: 0.02 }),
+        new MeshStandardMaterial({ color: '#edf4f7', roughness: 0.72, metalness: 0.02 }),
       );
       helipadDeckPlate.position.set(helipadX, deskSurfaceY + 0.028, helipadZ);
       group.add(helipadDeckPlate);
 
       const helipadTop = new Mesh(
         new CylinderGeometry(0.126, 0.126, 0.006, 48),
-        new MeshStandardMaterial({ color: '#080a0b', roughness: 0.78, metalness: 0.08 }),
+        new MeshStandardMaterial({ color: '#b9dfed', roughness: 0.78, metalness: 0.08 }),
       );
       helipadTop.position.set(helipadX, deskSurfaceY + 0.035, helipadZ);
       group.add(helipadTop);
 
-      const safetyDashMaterial = new MeshStandardMaterial({ color: '#e1c63c', roughness: 0.64, metalness: 0.04, emissive: '#372f08', emissiveIntensity: 0.1 });
+      const safetyDashMaterial = new MeshStandardMaterial({ color: '#287598', roughness: 0.64, metalness: 0.04 });
       const safetyDashCount = 16;
       for (let dashIndex = 0; dashIndex < safetyDashCount; dashIndex += 1) {
         const angle = (dashIndex / safetyDashCount) * Math.PI * 2;
@@ -2439,7 +2525,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         group.add(dash);
       }
 
-      const hMarkMaterial = new MeshStandardMaterial({ color: '#e6e3d8', roughness: 0.74, metalness: 0.01 });
+      const hMarkMaterial = new MeshStandardMaterial({ color: '#287598', roughness: 0.74, metalness: 0.01 });
       const hBarLeft = new Mesh(new BoxGeometry(0.014, 0.004, 0.095), hMarkMaterial);
       hBarLeft.position.set(helipadX - 0.034, deskSurfaceY + 0.040, helipadZ);
       group.add(hBarLeft);
@@ -2534,6 +2620,23 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.droneGroup.position.x = MathUtils.lerp(this.droneGroup.position.x, this.targetPosition.x, 0.16);
       this.droneGroup.position.y = MathUtils.lerp(this.droneGroup.position.y, this.targetPosition.y, 0.16);
       this.droneGroup.position.z = MathUtils.lerp(this.droneGroup.position.z, this.targetPosition.z, 0.16);
+      const sample = this.attitudeActive ? this.attitudeReception.sample : null;
+      if (sample) {
+        this.droneGroup.quaternion.slerp(
+          attitudeQuaternion(sample.roll, sample.pitch, sample.yaw, this.defaultDroneYawOffset),
+          1 - Math.exp(-Math.max(0, deltaSec) / 0.035),
+        );
+      } else if (!this.attitudeActive) {
+        this.aircraftYaw = this.simService.pose$.value.yaw;
+        this.droneGroup.quaternion.slerp(
+          attitudeQuaternion(0, 0, MathUtils.radToDeg(this.aircraftYaw), this.defaultDroneYawOffset),
+          1 - Math.exp(-Math.max(0, deltaSec) / 0.035),
+        );
+      }
+      if (this.attitudeActive && now - this.lastAttitudeMetricsTs >= 200) {
+        this.lastAttitudeMetricsTs = now;
+        this.zone.run(() => { this.attitudeMetrics = this.attitudeReception.metrics(now); });
+      }
       this.updatePropellerAnimation(deltaSec);
       if (this.running && !this.paused) {
         this.updateFlightPath(this.droneGroup.position);
@@ -2542,7 +2645,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
       if (this.flightAxes) {
         this.flightAxes.position.copy(this.droneGroup.position);
-        this.flightAxes.rotation.y = this.aircraftYaw;
+        this.flightAxes.quaternion.copy(this.droneGroup.quaternion)
+          .multiply(attitudeQuaternion(0, 0, 0, -this.defaultDroneYawOffset));
       }
       this.drawOrientationCompass();
 

@@ -720,6 +720,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * @param {number} [options.timeoutMs] - 超时
      */
     runFlow: (options) => ipcRenderer.invoke("crazyflie-run-flow", options || {}),
+    startAttitude: (options) => ipcRenderer.invoke("crazyflie-start-attitude", options || {}),
+    stopAttitude: () => ipcRenderer.invoke("crazyflie-stop-attitude"),
+    onAttitude: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("crazyflie-attitude", listener);
+      return () => ipcRenderer.removeListener("crazyflie-attitude", listener);
+    },
     /**
      * 订阅 Crazyflie 流程实时日志
      * @param {(payload: {source: 'stdout' | 'stderr', line: string}) => void} callback

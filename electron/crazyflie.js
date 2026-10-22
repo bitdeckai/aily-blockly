@@ -2,6 +2,7 @@ const { ipcMain } = require("electron");
 const { execFile, spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { startAttitudeMonitor } = require("./crazyflie-attitude");
 
 const DEFAULT_CRAZYFLIE_URI = "radio://0/80/2M";
 const DEFAULT_CRAZYFLIE_ADDRESS_HEX = "E7E7E7E7E7";
@@ -333,6 +334,10 @@ function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArg
       if (!text) {
         return;
       }
+      if (!text.startsWith("__ATTITUDE__:")) {
+        if (source === "stdout") stdout += text + "\n";
+        else stderr += text + "\n";
+      }
       if (typeof onLine === "function") {
         onLine({ source, line: text });
       }
@@ -356,13 +361,11 @@ function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArg
 
     child.stdout.on("data", (chunk) => {
       const text = String(chunk || "");
-      stdout += text;
       flushLines("stdout", text, false);
     });
 
     child.stderr.on("data", (chunk) => {
       const text = String(chunk || "");
-      stderr += text;
       flushLines("stderr", text, false);
     });
 
@@ -397,7 +400,7 @@ function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArg
   });
 }
 
-async function runFlowStream(event, options = {}) {
+async function runFlowStream(event, options = {}, onAttitude = () => {}) {
   const timeoutMs = Number(options.timeoutMs || 45000);
   const scriptPath = resolveChildPath("scripts", "crazyflie_run_flow.py");
   const libPathHint = getCrazyflieLibPathHint();
@@ -422,9 +425,19 @@ async function runFlowStream(event, options = {}) {
         scriptPath,
         timeoutMs,
         libPathHint,
-        [...connection.args, "--code-base64", codeBase64],
+        [...connection.args, "--code-base64", codeBase64, "--attitude"],
         false,
         ({ source, line }) => {
+          if (line.startsWith("__ATTITUDE__:")) {
+            const payload = parseJsonOutput(line.slice("__ATTITUDE__:".length));
+            if (payload?.type === "sample"
+                && [payload.timestampMs, payload.roll, payload.pitch, payload.yaw].every(Number.isFinite)) {
+              onAttitude(payload);
+            } else {
+              onAttitude({ type: "error", message: payload?.message || "Invalid flow attitude sample" });
+            }
+            return;
+          }
           const parsed = parseJsonOutput(line);
           if (parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, "success")) {
             return;
@@ -550,9 +563,105 @@ async function listRadios() {
 }
 
 function registerCrazyflieHandlers() {
+  let session = null;
+  let radioOperation = false;
+  let operationSenderId = null;
+  let monitorShutdown = null;
+
+  const sendAttitude = payload => {
+    if (session && !session.sender.isDestroyed()) {
+      session.sender.send("crazyflie-attitude", payload);
+    }
+  };
+  const stopIdleMonitor = async () => {
+    const monitor = session?.monitor;
+    if (monitor && !monitorShutdown) {
+      monitorShutdown = monitor.stop().finally(() => { monitorShutdown = null; });
+    }
+    if (monitorShutdown) await monitorShutdown;
+  };
+  const startIdleMonitor = () => {
+    if (!session || radioOperation || session.monitor || session.sender.isDestroyed()) return;
+    const owner = session;
+    const pythonCmd = getPythonCandidates()[0];
+    if (!pythonCmd) {
+      sendAttitude({ type: "error", message: "Cannot find Python for attitude monitoring" });
+      return;
+    }
+    sendAttitude({ type: "state", state: "connecting" });
+    owner.monitor = startAttitudeMonitor({
+      sender: owner.sender,
+      pythonCmd,
+      scriptPath: resolveChildPath("scripts", "crazyflie_attitude.py"),
+      libPathHint: getCrazyflieLibPathHint(),
+      connectionArgs: buildConnectionArgs(owner.options).args,
+      onEvent: payload => {
+        if (session === owner && payload.type !== "stopped") sendAttitude(payload);
+      },
+      onClose: () => { owner.monitor = null; },
+    });
+  };
+  const removeSession = async () => {
+    const owner = session;
+    session = null;
+    if (!owner) return;
+    owner.sender.removeListener("destroyed", owner.onDestroyed);
+    owner.sender.removeListener("render-process-gone", owner.onDestroyed);
+    owner.sender.removeListener("did-start-navigation", owner.onNavigation);
+    if (owner.monitor && !monitorShutdown) {
+      monitorShutdown = owner.monitor.stop().finally(() => { monitorShutdown = null; });
+    }
+    if (monitorShutdown) await monitorShutdown;
+  };
+  const withRadio = async (event, options, run) => {
+    if (radioOperation || (session && session.sender.id !== event.sender.id)) {
+      return { success: false, radioStatus: "busy", message: "Crazyradio is busy in another operation or window", links: [], executed: [] };
+    }
+    radioOperation = true;
+    operationSenderId = event.sender.id;
+    try {
+      sendAttitude({ type: "state", state: "flow" });
+      await stopIdleMonitor();
+      if (session) session.options = buildConnectionArgs(options);
+      return await run();
+    } finally {
+      radioOperation = false;
+      operationSenderId = null;
+      startIdleMonitor();
+    }
+  };
+
+  ipcMain.handle("crazyflie-start-attitude", (event, options = {}) => {
+    if (session || monitorShutdown || (radioOperation && operationSenderId !== event.sender.id)) {
+      return { success: false, message: "Attitude monitoring is already active or Crazyradio belongs to another window" };
+    }
+    if (!/^radio:\/\/\d+\/\d+\/(?:250K|1M|2M)(?:\/[0-9a-fA-F]{10})?$/.test(String(options.uri || ""))
+        || !/^[0-9a-fA-F]{10}$/.test(String(options.addressHex || ""))) {
+      return { success: false, message: "Invalid Crazyflie radio URI or address" };
+    }
+    const onDestroyed = () => { void removeSession(); };
+    const onNavigation = (_event, _url, _inPlace, isMainFrame) => {
+      if (isMainFrame) void removeSession();
+    };
+    session = { sender: event.sender, options, monitor: null, onDestroyed, onNavigation };
+    event.sender.once("destroyed", onDestroyed);
+    event.sender.once("render-process-gone", onDestroyed);
+    event.sender.on("did-start-navigation", onNavigation);
+    if (radioOperation) sendAttitude({ type: "state", state: "flow" });
+    else startIdleMonitor();
+    return { success: true };
+  });
+  ipcMain.handle("crazyflie-stop-attitude", async event => {
+    if (session && session.sender.id !== event.sender.id) {
+      return { success: false, message: "Only the monitoring window can stop attitude display" };
+    }
+    await removeSession();
+    return { success: true };
+  });
+
   ipcMain.handle("crazyflie-test-link", async (_event, options) => {
     try {
-      return await testLink(options || {});
+      return await withRadio(_event, options || {}, () => testLink(options || {}));
     } catch (error) {
       return {
         success: false,
@@ -566,7 +675,7 @@ function registerCrazyflieHandlers() {
 
   ipcMain.handle("crazyflie-run-flow", async (event, options) => {
     try {
-      return await runFlowStream(event, options || {});
+      return await withRadio(event, options || {}, () => runFlowStream(event, options || {}, sendAttitude));
     } catch (error) {
       return {
         success: false,

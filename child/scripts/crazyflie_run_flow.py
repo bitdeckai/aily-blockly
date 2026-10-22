@@ -11,7 +11,7 @@ import sys
 import time
 from threading import Event
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 
 
 MOVE_DISTANCE = {
@@ -509,7 +509,7 @@ def test_link(cflib_module, radio_driver_cls, address_hex: str | None):
     return radio_status, links, scan_error, normalized_address
 
 
-def run_flow(uri: str, commands, address_hex: str | None):
+def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
     validate_motion_sequence(commands)
     import cflib.crtp
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
@@ -518,6 +518,18 @@ def run_flow(uri: str, commands, address_hex: str | None):
     from cflib.positioning.motion_commander import MotionCommander
     from cflib.crtp.radiodriver import RadioDriver
     from cflib.utils.multiranger import Multiranger
+
+    @contextmanager
+    def open_connection(connection_uri):
+        with SyncCrazyflie(connection_uri) as scf:
+            if attitude:
+                from crazyflie_attitude import attitude_logging
+                def emit(sample):
+                    print(f"__ATTITUDE__:{json.dumps(sample)}", flush=True)
+                with attitude_logging(scf, emit):
+                    yield scf
+            else:
+                yield scf
 
     TEST_LINK_STEP_DWELL_SEC = 0.12
 
@@ -853,7 +865,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
             links = [active_uri]
         else:
             try:
-                with SyncCrazyflie(active_uri) as scf_tmp:
+                with open_connection(active_uri) as scf_tmp:
                     ok, err = run_propeller_test_like_cfclient(scf_tmp)
                 links = [active_uri]
             except Exception as exc:
@@ -869,7 +881,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
             raise RuntimeError(f"CRAZYFLIE_LINK_FAILED: uri={active_uri}, address={active_address}, radioStatus={radio_status}")
         if existing_scf is not None:
             return
-        with SyncCrazyflie(active_uri):
+        with open_connection(active_uri):
             pass
 
     def _normalize_pct(value):
@@ -920,7 +932,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
         try:
             if existing_scf is not None:
                 return _sample_with_scf(existing_scf)
-            with SyncCrazyflie(active_uri) as scf_tmp:
+            with open_connection(active_uri) as scf_tmp:
                 return _sample_with_scf(scf_tmp)
         except Exception:
             return None
@@ -945,44 +957,48 @@ def run_flow(uri: str, commands, address_hex: str | None):
             raise RuntimeError(f"CRAZYFLIE_LINK_REQUIRED: Run 'Crazyflie link' block before {cmd_name}")
 
     if not has_motion_cmd and not has_flow_detect_cmd and not has_mr_cmd and not has_led_cmd and not has_buzzer_cmd and not has_motor_cmd:
-        for cmd, arg in commands:
-            if cmd == "set_link":
-                step_index += 1
-                _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                set_active_link(arg)
-                executed.append(f"set_link:{active_uri}:{active_address}")
-            elif cmd == "crazyflie_link":
-                step_index += 1
-                _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                strict_crazyflie_connect_or_raise()
-                link_gate_open = True
-                executed.append("crazyflie_link")
-                emit_live_telemetry()
-            elif cmd == "test_link":
-                step_index += 1
-                _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                strict_radio_test_or_raise()
-                executed.append("test_link")
-                time.sleep(TEST_LINK_STEP_DWELL_SEC)
-            elif cmd == "test_crazyflie_link":
-                require_link_gate("test_crazyflie_link")
-                step_index += 1
-                _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                strict_crazyflie_link_test_or_raise()
-                executed.append("test_crazyflie_link")
-                emit_live_telemetry()
-            elif cmd == "delay":
-                step_index += 1
-                _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                wait_sec = max(0.0, float(arg))
-                executed.append(f"delay:{wait_sec}")
-                time.sleep(wait_sec)
-            elif cmd == "print":
-                step_index += 1
-                _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                msg = _normalize_print_value(arg)
-                executed.append(f"print:{msg}")
-                print(msg, flush=True)
+        with ExitStack() as connections:
+            shared_scf = None
+            for cmd, arg in commands:
+                if cmd == "set_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    set_active_link(arg)
+                    executed.append(f"set_link:{active_uri}:{active_address}")
+                elif cmd == "crazyflie_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    if attitude and shared_scf is None:
+                        shared_scf = connections.enter_context(open_connection(active_uri))
+                    strict_crazyflie_connect_or_raise(shared_scf)
+                    link_gate_open = True
+                    executed.append("crazyflie_link")
+                    emit_live_telemetry(shared_scf)
+                elif cmd == "test_link":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_radio_test_or_raise()
+                    executed.append("test_link")
+                    time.sleep(TEST_LINK_STEP_DWELL_SEC)
+                elif cmd == "test_crazyflie_link":
+                    require_link_gate("test_crazyflie_link")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    strict_crazyflie_link_test_or_raise(shared_scf)
+                    executed.append("test_crazyflie_link")
+                    emit_live_telemetry(shared_scf)
+                elif cmd == "delay":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    wait_sec = max(0.0, float(arg))
+                    executed.append(f"delay:{wait_sec}")
+                    time.sleep(wait_sec)
+                elif cmd == "print":
+                    step_index += 1
+                    _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                    msg = _normalize_print_value(arg)
+                    executed.append(f"print:{msg}")
+                    print(msg, flush=True)
 
         ok = len(links) > 0
         return {
@@ -998,7 +1014,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and has_motor_cmd and not has_flow_detect_cmd and not has_mr_cmd and not has_led_cmd and not has_buzzer_cmd:
         overall_success = True
-        with SyncCrazyflie(active_uri) as scf:
+        with open_connection(active_uri) as scf:
             for cmd, arg in commands:
                 if cmd == "set_link":
                     step_index += 1
@@ -1065,7 +1081,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and (has_flow_detect_cmd or has_mr_cmd or has_led_cmd or has_buzzer_cmd):
         overall_success = True
-        with SyncCrazyflie(active_uri) as scf:
+        with open_connection(active_uri) as scf:
             for cmd, arg in commands:
                 if cmd == "set_link":
                     step_index += 1
@@ -1284,7 +1300,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and has_mr_cmd:
         detected_all = True
-        with SyncCrazyflie(active_uri) as scf:
+        with open_connection(active_uri) as scf:
             for cmd, arg in commands:
                 if cmd == "set_link":
                     step_index += 1
@@ -1439,7 +1455,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
 
     if not has_motion_cmd and has_flow_detect_cmd:
         detected_all = True
-        with SyncCrazyflie(active_uri) as scf:
+        with open_connection(active_uri) as scf:
             for cmd, arg in commands:
                 if cmd == "set_link":
                     step_index += 1
@@ -1513,7 +1529,7 @@ def run_flow(uri: str, commands, address_hex: str | None):
         }
 
     try:
-        with SyncCrazyflie(active_uri) as scf:
+        with open_connection(active_uri) as scf:
             ensure_link_ok = attach_link_watchdog(scf)
             ensure_link_ok()
 
@@ -1737,6 +1753,7 @@ def main():
     parser.add_argument("--uri", default=DEFAULT_URI)
     parser.add_argument("--address-hex", default=DEFAULT_ADDRESS_HEX)
     parser.add_argument("--lib-path", default=None)
+    parser.add_argument("--attitude", action="store_true", help="Stream attitude using flow connections")
     args = parser.parse_args()
 
     loaded_from = _append_cflib_path(args.lib_path)
@@ -1761,7 +1778,7 @@ def main():
             }, ensure_ascii=False))
             return 2
 
-        result = run_flow(args.uri, commands, args.address_hex)
+        result = run_flow(args.uri, commands, args.address_hex, attitude=args.attitude)
         result["loadedFrom"] = loaded_from
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("success") else 2

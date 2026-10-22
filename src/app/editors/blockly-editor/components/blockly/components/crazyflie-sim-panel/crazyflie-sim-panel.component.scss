@@ -54,6 +54,49 @@
   padding: 0 12px 10px;
 }
 
+.attitude-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--aily-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.attitude-settings {
+  margin-bottom: 6px;
+  color: var(--aily-text-secondary);
+  font-size: 11px;
+
+  summary {
+    cursor: pointer;
+  }
+}
+
+.attitude-settings__inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0;
+
+  input {
+    width: 150px;
+    border: 1px solid var(--aily-border-input);
+    background: var(--aily-bg-tertiary);
+    color: var(--aily-text-primary);
+  }
+}
+
+.attitude-metrics {
+  margin-bottom: 6px;
+  color: var(--aily-text-secondary);
+  font-size: 11px;
+
+  &--stale {
+    color: #e2ad55;
+  }
+}
+
 .sim-btn {
   border: 1px solid color-mix(in srgb, var(--aily-border-input) 85%, transparent);
   border-radius: 6px;
