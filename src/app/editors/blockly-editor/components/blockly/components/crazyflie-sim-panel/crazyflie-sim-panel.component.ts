@@ -1952,6 +1952,224 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return texture;
   }
 
+  private createClassroomGround(room: { width: number; depth: number }): Group {
+    const ground = new Group();
+    ground.name = 'Classroom outdoor ground';
+    const width = Math.max(60, room.width + 40);
+    const depth = Math.max(60, room.depth + 40);
+    const soil = new Mesh(
+      new BoxGeometry(width, 0.3, depth),
+      new MeshStandardMaterial({ color: '#927b58', roughness: 1 }),
+    );
+    soil.position.y = -0.17;
+    ground.add(soil);
+
+    const strips = [
+      { width, depth: (depth - room.depth) / 2, x: 0, z: -(depth + room.depth) / 4 },
+      { width, depth: (depth - room.depth) / 2, x: 0, z: (depth + room.depth) / 4 },
+      { width: (width - room.width) / 2, depth: room.depth, x: -(width + room.width) / 4, z: 0 },
+      { width: (width - room.width) / 2, depth: room.depth, x: (width + room.width) / 4, z: 0 },
+    ];
+    for (const strip of strips) {
+      const grass = new Mesh(
+        new PlaneGeometry(strip.width, strip.depth),
+        new MeshStandardMaterial({ color: '#91ad73', roughness: 1 }),
+      );
+      grass.name = 'Outdoor grass';
+      grass.rotation.x = -Math.PI / 2;
+      grass.position.set(strip.x, 0.004, strip.z);
+      grass.receiveShadow = true;
+      ground.add(grass);
+    }
+    return ground;
+  }
+
+  private createParkingLot(room: { width: number }): Group {
+    const parking = new Group();
+    parking.name = 'Outdoor parking lot';
+    parking.position.set(-room.width / 2 - 11, 0, 0);
+    const asphalt = new Mesh(
+      new BoxGeometry(18, 0.08, 24),
+      new MeshStandardMaterial({ color: '#555d65', roughness: 0.98 }),
+    );
+    asphalt.position.y = 0.05;
+    asphalt.receiveShadow = true;
+    parking.add(asphalt);
+
+    const stripeMaterial = new MeshStandardMaterial({ color: '#f4f0df', roughness: 0.9 });
+    const curbMaterial = new MeshStandardMaterial({ color: '#c6c9c6', roughness: 0.95 });
+    for (const side of [-1, 1]) {
+      const curb = new Mesh(new BoxGeometry(0.2, 0.18, 24), curbMaterial);
+      curb.position.set(side * 8.8, 0.18, 0);
+      parking.add(curb);
+      for (let index = 0; index <= 8; index += 1) {
+        const divider = new Mesh(new BoxGeometry(5, 0.006, 0.08), stripeMaterial);
+        divider.name = 'Parking bay divider';
+        divider.position.set(side * 5.5, 0.094, -10 + index * 2.5);
+        parking.add(divider);
+      }
+      const backLine = new Mesh(new BoxGeometry(0.08, 0.006, 20), stripeMaterial);
+      backLine.position.set(side * 8, 0.094, 0);
+      parking.add(backLine);
+      for (let index = 0; index < 8; index += 1) {
+        const stop = new Mesh(new BoxGeometry(0.16, 0.12, 1.6), curbMaterial);
+        stop.name = 'Parking wheel stop';
+        stop.position.set(side * 7.5, 0.15, -8.75 + index * 2.5);
+        parking.add(stop);
+      }
+    }
+
+    const arrowMaterial = new MeshStandardMaterial({ color: '#f4cf63', roughness: 0.9 });
+    for (const direction of [-1, 1]) {
+      const arrow = new Group();
+      arrow.name = 'Parking lane direction';
+      arrow.position.set(-direction * 1.4, 0.094, direction * 6);
+      arrow.rotation.y = direction === 1 ? 0 : Math.PI;
+      const shaft = new Mesh(new BoxGeometry(0.12, 0.006, 1.4), arrowMaterial);
+      arrow.add(shaft);
+      for (const side of [-1, 1]) {
+        const head = new Mesh(new BoxGeometry(0.12, 0.006, 0.75), arrowMaterial);
+        head.position.set(side * 0.24, 0, 0.46);
+        head.rotation.y = -side * Math.PI / 4;
+        arrow.add(head);
+      }
+      parking.add(arrow);
+    }
+    return parking;
+  }
+
+  private createBasketballCourt(room: { width: number }): Group {
+    const court = new Group();
+    court.name = 'Outdoor basketball court';
+    court.position.set(room.width / 2 + 10.5, 0, 0);
+    const surface = new Mesh(
+      new BoxGeometry(17, 0.08, 30),
+      new MeshStandardMaterial({ color: '#b36b50', roughness: 0.95 }),
+    );
+    surface.position.y = 0.05;
+    surface.receiveShadow = true;
+    court.add(surface);
+    const playingArea = new Mesh(
+      new PlaneGeometry(15, 28),
+      new MeshStandardMaterial({ color: '#548b88', roughness: 0.95 }),
+    );
+    playingArea.rotation.x = -Math.PI / 2;
+    playingArea.position.y = 0.091;
+    court.add(playingArea);
+
+    const lineMaterial = new LineBasicMaterial({ color: '#fff5df' });
+    const addLine = (points: Vector3[]) => {
+      const line = new Line(new BufferGeometry().setFromPoints(points), lineMaterial);
+      court.add(line);
+    };
+    const point = (x: number, z: number) => new Vector3(x, 0.096, z);
+    const arc = (x: number, z: number, radius: number, start: number, end: number) => {
+      const points = Array.from({ length: 65 }, (_, index) => {
+        const angle = start + (end - start) * index / 64;
+        return point(x + Math.cos(angle) * radius, z + Math.sin(angle) * radius);
+      });
+      addLine(points);
+    };
+    addLine([point(-7.5, -14), point(7.5, -14), point(7.5, 14), point(-7.5, 14), point(-7.5, -14)]);
+    addLine([point(-7.5, 0), point(7.5, 0)]);
+    arc(0, 0, 1.8, 0, Math.PI * 2);
+
+    for (const side of [-1, 1]) {
+      const end = side * 14;
+      const freeThrow = side * 8.2;
+      const key = new Mesh(
+        new PlaneGeometry(4.9, 5.8),
+        new MeshStandardMaterial({ color: '#ba785b', roughness: 0.95 }),
+      );
+      key.rotation.x = -Math.PI / 2;
+      key.position.set(0, 0.093, side * 11.1);
+      court.add(key);
+      addLine([point(-2.45, end), point(-2.45, freeThrow), point(2.45, freeThrow), point(2.45, end)]);
+      arc(0, freeThrow, 1.8, 0, Math.PI * 2);
+      const basketZ = side * 12.425;
+      const cornerAngle = Math.acos(6.6 / 6.75);
+      arc(0, basketZ, 6.75,
+        side === 1 ? -Math.PI + cornerAngle : cornerAngle,
+        side === 1 ? -cornerAngle : Math.PI - cornerAngle);
+      const cornerZ = basketZ - side * Math.sin(cornerAngle) * 6.75;
+      for (const x of [-6.6, 6.6]) addLine([point(x, end), point(x, cornerZ)]);
+
+      const hoop = new Group();
+      hoop.name = 'Basketball hoop';
+      const steel = new MeshStandardMaterial({ color: '#566a78', roughness: 0.55, metalness: 0.5 });
+      const post = new Mesh(new CylinderGeometry(0.09, 0.12, 3.7, 10), steel);
+      post.position.set(0, 1.94, side * 14.6);
+      hoop.add(post);
+      const arm = new Mesh(new BoxGeometry(0.12, 0.12, 1.4), steel);
+      arm.position.set(0, 3.6, side * 13.9);
+      hoop.add(arm);
+      const board = new Mesh(
+        new BoxGeometry(1.8, 1.05, 0.06),
+        new MeshStandardMaterial({ color: '#f1f3ed', roughness: 0.65 }),
+      );
+      board.position.set(0, 3.665, side * 13.2);
+      hoop.add(board);
+      const target = [
+        new Vector3(-0.295, 3.14, side * 13.16),
+        new Vector3(-0.295, 3.59, side * 13.16),
+        new Vector3(0.295, 3.59, side * 13.16),
+        new Vector3(0.295, 3.14, side * 13.16),
+        new Vector3(-0.295, 3.14, side * 13.16),
+      ];
+      hoop.add(new Line(new BufferGeometry().setFromPoints(target),
+        new LineBasicMaterial({ color: '#b44e32' })));
+      const rim = new Mesh(
+        new TorusGeometry(0.225, 0.018, 8, 32),
+        new MeshStandardMaterial({ color: '#e66b29', roughness: 0.6 }),
+      );
+      rim.rotation.x = Math.PI / 2;
+      rim.position.set(0, 3.14, side * 12.9);
+      hoop.add(rim);
+      court.add(hoop);
+    }
+    return court;
+  }
+
+  private createClassroomTrees(room: { width: number; depth: number }): Group {
+    const outdoors = new Group();
+    outdoors.name = 'Classroom outdoor trees';
+    for (const side of [-1, 1]) {
+      for (let index = 0; index < 3; index += 1) {
+        const tree = new Group();
+        tree.name = 'Outdoor tree';
+        tree.position.set(
+          (index - 1) * room.width * 0.3,
+          0,
+          side * (room.depth / 2 + 2.2),
+        );
+        const height = 3.0 + index * 0.25;
+        const trunk = new Mesh(
+          new CylinderGeometry(0.065, 0.12, height * 0.65, 8),
+          new MeshStandardMaterial({ color: '#856047', roughness: 0.95 }),
+        );
+        trunk.position.y = height * 0.325;
+        tree.add(trunk);
+
+        const crowns = [
+          { x: -0.3, y: height * 0.65, z: 0.05, radius: 0.65, color: '#568749' },
+          { x: 0.32, y: height * 0.7, z: -0.08, radius: 0.62, color: '#699a52' },
+          { x: 0, y: height * 0.84, z: 0, radius: 0.7, color: '#77a65b' },
+        ];
+        for (const crown of crowns) {
+          const foliage = new Mesh(
+            new SphereGeometry(crown.radius, 12, 8),
+            new MeshStandardMaterial({ color: crown.color, roughness: 1 }),
+          );
+          foliage.position.set(crown.x, crown.y, crown.z);
+          foliage.scale.y = 1.1;
+          tree.add(foliage);
+        }
+        outdoors.add(tree);
+      }
+    }
+    return outdoors;
+  }
+
   private rebuildPresetInterior(preset: 'classroom' | 'home' | 'custom', room: { width: number; depth: number; height: number }): void {
     if (!this.scene) {
       return;
@@ -2047,6 +2265,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
 
     if (preset === 'classroom') {
+      group.add(this.createClassroomGround(room));
+      group.add(this.createClassroomTrees(room));
+      group.add(this.createBasketballCourt(room));
+      group.add(this.createParkingLot(room));
       const trimMat = new MeshStandardMaterial({ color: '#83b8e5', roughness: 0.58, metalness: 0.04 });
       void this.loadParquetryFloor(group, room);
 

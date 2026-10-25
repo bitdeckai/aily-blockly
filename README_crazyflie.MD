@@ -247,6 +247,10 @@ Crazyflie 新旧项目打开后均自动提供“飞行运动 / Flight motion”
 
 ### 模型资源
 
+- 教室侧面室外空地设有篮球场：28 × 15 米彩色比赛区、外围缓冲区、中线、中圈、罚球区、三分线和两端篮架。篮球场不改变室内布局或飞行范围。
+- 教室另一侧设有 18 × 24 米停车场：沥青地面、两排共 16 个停车位、挡车器、侧边路缘及 6 米宽双向车道，两端留出入口。停车场避开教室、树木和篮球场，仅为静态场景，不改变飞行范围。
+- 教室室外陆地至少为 60 × 60 米，包含浅绿色草地和土壤基底；室外草地避开教室内部地板。陆地仅作为场景背景，不扩大模拟飞行范围，也不改变起降位置；随教室场景切换一同释放。
+- 教室两侧窗外各放置三棵轻量几何树，树干和树冠均位于室外，与墙面保持距离；不改变室内摆设、飞行范围和起降位置。切换场景时随教室资源一同释放，无需额外下载树木模型。
 - Three.js 使用 `public/models/crazyflie/cf2_assembly.dae` 和 `ccw_prop.dae`，来自本地 Webots R2025a 的 Crazyflie 模型目录；网格文件头标注 `Copyright (c) 2022 Bitcraze` 和 MIT License，许可正文保存在同目录 `LICENSE.txt`。
 - 机体按原始米制比例加载，保留 DAE 中的独立装配部件；模拟器的“爆炸图”滑块只移动部件展示，不改变飞行坐标。四个独立桨叶仍随电机状态旋转。
 - deck 检测状态由 `CrazyflieConnectionService.detectedDecks$` 提供，支持 Flow v2、Multiranger、LED-ring 和 Buzzer。外壳尚未随模型包提供；补充 GLB/GLTF 后，通过 `CrazyflieSimPanelComponent.registerDeckShellAsset(deck, url)` 注册即可按检测状态装卸。

@@ -478,6 +478,100 @@ function panelHarness() {
   };
 }
 
+test('classroom outdoor ground spans at least 60 meters without covering the indoor floor', () => {
+  const h = panelHarness();
+  const { Box3 } = require('three');
+  for (const room of [{ width: 8.2, depth: 6.2 }, { width: 30, depth: 25 }]) {
+    const ground = h.panel.createClassroomGround(room);
+    const bounds = new Box3().setFromObject(ground);
+    assert.ok(bounds.max.x - bounds.min.x >= 60);
+    assert.ok(bounds.max.z - bounds.min.z >= 60);
+    const grass = ground.children.filter(node => node.name === 'Outdoor grass');
+    assert.equal(grass.length, 4);
+    let area = 0;
+    for (const patch of grass) {
+      const box = new Box3().setFromObject(patch);
+      assert.ok(box.max.x <= -room.width / 2 + 1e-5 || box.min.x >= room.width / 2 - 1e-5
+        || box.max.z <= -room.depth / 2 + 1e-5 || box.min.z >= room.depth / 2 - 1e-5);
+      assert.ok(box.min.y > 0 && patch.receiveShadow);
+      area += patch.geometry.parameters.width * patch.geometry.parameters.height;
+    }
+    near(area, (bounds.max.x - bounds.min.x) * (bounds.max.z - bounds.min.z) - room.width * room.depth);
+    ground.traverse(node => {
+      node.geometry?.dispose();
+      node.material?.dispose();
+    });
+  }
+});
+
+test('parking lot has sixteen bays and an open six-meter lane, clear of other classroom scenery', () => {
+  const h = panelHarness();
+  const { Box3 } = require('three');
+  for (const room of [{ width: 8.2, depth: 6.2 }, { width: 30, depth: 25 }]) {
+    const parking = h.panel.createParkingLot(room);
+    const bounds = new Box3().setFromObject(parking);
+    const ground = h.panel.createClassroomGround(room);
+    assert.ok(new Box3().setFromObject(ground).containsBox(new Box3(
+      new Vector3(bounds.min.x, 0, bounds.min.z), new Vector3(bounds.max.x, 0, bounds.max.z))));
+    assert.ok(bounds.max.x < -room.width / 2 - 1);
+    const trees = h.panel.createClassroomTrees(room);
+    const court = h.panel.createBasketballCourt(room);
+    assert.equal(bounds.intersectsBox(new Box3().setFromObject(trees)), false);
+    assert.equal(bounds.intersectsBox(new Box3().setFromObject(court)), false);
+    const dividers = parking.children.filter(node => node.name === 'Parking bay divider');
+    assert.equal(dividers.length, 18);
+    for (const divider of dividers) {
+      const local = new Box3().setFromObject(divider);
+      assert.ok(local.max.x <= parking.position.x - 3 + 1e-6
+        || local.min.x >= parking.position.x + 3 - 1e-6);
+    }
+    assert.equal(parking.children.filter(node => node.name === 'Parking wheel stop').length, 16);
+    assert.equal(parking.children.filter(node => node.name === 'Parking lane direction').length, 2);
+    for (const group of [parking, ground, trees, court]) group.traverse(node => {
+      node.geometry?.dispose();
+      node.material?.dispose();
+    });
+  }
+});
+
+test('basketball court fits outside classroom and trees, within the outdoor ground, with two hoops', () => {
+  const h = panelHarness();
+  const { Box3 } = require('three');
+  const room = { width: 8.2, depth: 6.2 };
+  const court = h.panel.createBasketballCourt(room);
+  const bounds = new Box3().setFromObject(court);
+  assert.ok(bounds.min.x > room.width / 2 + 1);
+  assert.ok(bounds.max.x < 30 && bounds.min.z > -30 && bounds.max.z < 30);
+  assert.equal(court.children.filter(node => node.name === 'Basketball hoop').length, 2);
+  assert.ok(court.children.filter(node => node.type === 'Line').length >= 10);
+  const trees = h.panel.createClassroomTrees(room);
+  assert.equal(bounds.intersectsBox(new Box3().setFromObject(trees)), false);
+  for (const group of [court, trees]) group.traverse(node => {
+    node.geometry?.dispose();
+    node.material?.dispose();
+  });
+});
+
+test('classroom trees stay outside both window walls and fit on the existing ground', () => {
+  const h = panelHarness();
+  const { Box3 } = require('three');
+  const room = { width: 8.2, depth: 6.2 };
+  const trees = h.panel.createClassroomTrees(room);
+  assert.equal(trees.children.length, 6);
+  for (const tree of trees.children) {
+    const bounds = new Box3().setFromObject(tree);
+    assert.ok(bounds.min.z > room.depth / 2 + 1 || bounds.max.z < -room.depth / 2 - 1,
+      'trunks and crowns must stay clear of the classroom walls and windows');
+    assert.ok(bounds.min.x > -10 && bounds.max.x < 10 && bounds.min.z > -10 && bounds.max.z < 10);
+    assert.ok(bounds.min.y >= -1e-6 && bounds.max.y >= 3 && bounds.max.y <= 4);
+    assert.equal(tree.children.length, 4);
+  }
+  trees.traverse(node => {
+    node.geometry?.dispose();
+    node.material?.dispose();
+  });
+});
+
 test('the actual panel render loop follows live Roll/Pitch/Yaw, holds stale orientation and returns to simulation', () => {
   const h = panelHarness();
   h.panel.attitudeActive = true;
