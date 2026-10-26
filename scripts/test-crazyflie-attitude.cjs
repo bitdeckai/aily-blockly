@@ -431,6 +431,18 @@ test('Electron hands idle monitoring to the flow connection, forwards attitude w
   assert.equal(sender.listenerCount('destroyed'), 0);
 });
 
+test('classroom uses natural wood finishes without loose books or extra cabinets', () => {
+  const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
+    'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts');
+  const source = fs.readFileSync(filename, 'utf8');
+  assert.match(source, /createLightClassroomTexture\(map, '#dfb270', 0\.42\)/);
+  assert.match(source, /createLightClassroomTexture\(map, '#d7a968', 0\.28\)/);
+  assert.match(source, /this\.applyVarnishedPineFinish\(lecternPanels\)/);
+  assert.doesNotMatch(source, /applyVarnishedPineFinish\(podiumGroup\)/);
+  assert.doesNotMatch(source, /loadClassroomProtoAsset\('school_furniture\/protos\/Book\.proto'\)/);
+  assert.doesNotMatch(source, /Webots school book|cabinetGroup|lowShelfGroup/);
+});
+
 function panelHarness() {
   const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts');
@@ -450,6 +462,7 @@ function panelHarness() {
       if (name.endsWith('/crazyflie-attitude')) return helper.exports;
       if (name.endsWith('/GLTFLoader.js')) return { GLTFLoader: class {} };
       if (name.endsWith('/ColladaLoader.js')) return { ColladaLoader: class {} };
+      if (name.endsWith('/RoundedBoxGeometry.js')) return require(name);
       if (name.endsWith('/OrbitControls.js')) return {};
       return {};
     },
@@ -477,6 +490,99 @@ function panelHarness() {
     get rendered() { return rendered; },
   };
 }
+
+test('school chairs have rounded wood panels, a continuous steel back and four floor-contacting rubber feet', () => {
+  const { Box3 } = require('three');
+  const chair = panelHarness().panel.createClassroomChair();
+  assert.equal(chair.getObjectByName('Chair wood seat').geometry.type, 'RoundedBoxGeometry');
+  assert.equal(chair.getObjectByName('Chair wood back').geometry.type, 'RoundedBoxGeometry');
+  assert.equal(chair.getObjectByName('Chair bent steel back frame').geometry.type, 'TubeGeometry');
+  const feet = chair.children.filter(part => part.name === 'Chair rubber foot');
+  assert.equal(feet.length, 4);
+  for (const foot of feet) near(new Box3().setFromObject(foot).min.y, 0.012);
+  assert.equal(chair.children.filter(part => part.name === 'Chair steel leg').length, 4);
+  const bounds = new Box3().setFromObject(chair);
+  assert.ok(bounds.max.y > 0.75 && bounds.max.y < 0.8);
+  assert.ok(bounds.max.z - bounds.min.z < 0.4, 'chair must fit inside each 0.86m column');
+  chair.traverse(node => { node.geometry?.dispose(); node.material?.dispose(); });
+});
+
+test('closed desk drawer stays below the existing tabletop and clear of the student chair', () => {
+  const { Box3 } = require('three');
+  const drawer = panelHarness().panel.createClassroomDeskDrawer();
+  const bounds = new Box3().setFromObject(drawer);
+  assert.ok(bounds.max.y < 0.69 && bounds.min.y > 0.58);
+  assert.ok(bounds.min.z > -0.3 && bounds.max.z < 0.3);
+  assert.ok(bounds.max.x < 0.24, 'drawer handle must clear the chair seat front');
+  assert.equal(drawer.getObjectByName('Drawer wood front').geometry.type, 'RoundedBoxGeometry');
+  assert.ok(drawer.getObjectByName('Drawer handle').material.metalness > 0.5);
+  drawer.traverse(node => { node.geometry?.dispose(); node.material?.dispose(); });
+});
+
+test('lectern has textured-panel attachment, rounded edges and a sloped reading surface at the original height', () => {
+  const { Box3 } = require('three');
+  const lectern = panelHarness().panel.createClassroomLectern();
+  const panels = lectern.getObjectByName('Lectern wood panels');
+  assert.equal(panels.children.length, 5);
+  assert.ok(panels.children.some(part => part.rotation.x < -0.2));
+  lectern.traverse(node => {
+    if (!node.isMesh) return;
+    assert.equal(node.geometry.type, 'RoundedBoxGeometry');
+    assert.ok(node.castShadow && node.receiveShadow);
+    node.geometry.dispose();
+    node.material.dispose();
+  });
+  const bounds = new Box3().setFromObject(lectern);
+  assert.ok(bounds.max.y > 1.1 && bounds.max.y < 1.2);
+});
+
+test('classroom daylight has bounded shadows for small and large rooms and disposes shadow resources', () => {
+  const { DirectionalLight } = require('three');
+  for (const room of [{ width: 8.2, depth: 6.2, height: 3 }, { width: 30, depth: 25, height: 5 }]) {
+    const panel = panelHarness().panel;
+    const lights = panel.createClassroomLighting(room);
+    const sun = lights.children.find(light => light instanceof DirectionalLight && light.castShadow);
+    assert.equal(sun.shadow.mapSize.x, 2048);
+    assert.ok(sun.shadow.camera.right > Math.hypot(room.width, room.depth) / 2);
+    assert.ok(sun.shadow.camera.far > sun.position.length() + room.height);
+    assert.ok(sun.shadow.normalBias > 0);
+    let disposed = 0;
+    sun.shadow.dispose = () => disposed++;
+    panel.scene = new Group();
+    panel.scene.add(lights);
+    panel.presetInteriorRoot = lights;
+    panel.disposePresetInterior();
+    assert.equal(disposed, 1);
+    assert.equal(panel.scene.children.length, 0);
+  }
+});
+
+test('school props have small hanging backpacks and a hollow set square, marked ruler and compass', () => {
+  const { Box3 } = require('three');
+  const panel = panelHarness().panel;
+  const bag = panel.createSchoolBackpack('#526c89');
+  assert.equal(bag.children.filter(part => part.name === 'Backpack shoulder strap').length, 2);
+  const bounds = new Box3().setFromObject(bag);
+  assert.ok(bounds.min.x > -0.13 && bounds.max.x < 0.11);
+  assert.ok(bounds.max.z - bounds.min.z < 0.25, 'backpack stays within the chair width');
+  bag.position.set(0.4 + 0.245, 0.56, 0);
+  const hanging = new Box3().setFromObject(bag);
+  assert.ok(hanging.max.x < 0.98 - 0.2, 'hanging backpack must not touch the next desk');
+  assert.ok(hanging.min.y > 0.4, 'backpack must not sit on the floor');
+  const tools = panel.createClassroomTeachingTools();
+  const triangle = tools.getObjectByName('Teaching set square');
+  assert.equal(triangle.geometry.type, 'ExtrudeGeometry');
+  assert.equal(triangle.geometry.parameters.shapes.holes.length, 1);
+  assert.ok(tools.getObjectByName('Teaching ruler'));
+  assert.ok(tools.getObjectByName('Teaching compass'));
+  assert.equal(tools.children.filter(part => part.geometry?.parameters.height === 0.003).length, 21);
+  for (const prop of [bag, tools]) prop.traverse(node => {
+    if (!node.isMesh) return;
+    assert.ok(node.castShadow && node.receiveShadow);
+    node.geometry.dispose();
+    node.material.dispose();
+  });
+});
 
 test('classroom outdoor ground spans at least 60 meters without covering the indoor floor', () => {
   const h = panelHarness();
@@ -527,7 +633,54 @@ test('parking lot has sixteen bays and an open six-meter lane, clear of other cl
     }
     assert.equal(parking.children.filter(node => node.name === 'Parking wheel stop').length, 16);
     assert.equal(parking.children.filter(node => node.name === 'Parking lane direction').length, 2);
+    const cars = parking.children.filter(node => node.name === 'Parked car');
+    assert.equal(cars.length, 5);
+    for (const car of cars) {
+      const carBounds = new Box3().setFromObject(car);
+      assert.ok(carBounds.max.x <= parking.position.x - 3 || carBounds.min.x >= parking.position.x + 3,
+        'parked vehicles must leave the entire six-meter lane clear');
+      assert.ok(carBounds.min.z >= car.position.z - 1.25 && carBounds.max.z <= car.position.z + 1.25,
+        'cars must fit within individual parking bays');
+      assert.ok(Math.abs(carBounds.min.y - 0.09) < 1e-6, 'tires must touch the asphalt surface');
+      assert.equal(car.children.filter(node => node.name === 'Car tire').length, 4);
+    }
+    assert.equal(parking.children.filter(node => node.name === 'Parking lamp post').length, 4);
+    assert.equal(parking.children.filter(node => node.name === 'Parking entry bollard').length, 4);
+    assert.equal(parking.children.filter(node => node.name === 'Parking pedestrian crossing').length, 16);
     for (const group of [parking, ground, trees, court]) group.traverse(node => {
+      node.geometry?.dispose();
+      node.material?.dispose();
+    });
+  }
+});
+
+test('spectator stand has four ascending tiers, a clear central aisle and clearance from the court', () => {
+  const h = panelHarness();
+  const { Box3 } = require('three');
+  for (const room of [{ width: 8.2, depth: 6.2 }, { width: 30, depth: 25 }]) {
+    const stand = h.panel.createBleachers(room);
+    const bounds = new Box3().setFromObject(stand);
+    const ground = h.panel.createClassroomGround(room);
+    const groundBounds = new Box3().setFromObject(ground);
+    assert.ok(bounds.min.x >= groundBounds.min.x && bounds.max.x <= groundBounds.max.x);
+    assert.ok(bounds.min.z >= groundBounds.min.z && bounds.max.z <= groundBounds.max.z);
+    const court = h.panel.createBasketballCourt(room);
+    assert.ok(bounds.min.z - new Box3().setFromObject(court).max.z >= 1.9);
+    const tiers = stand.children.filter(node => node.name === 'Spectator tier');
+    assert.equal(tiers.length, 8);
+    tiers.forEach((tier, index) => near(tier.geometry.parameters.height, (Math.floor(index / 2) + 1) * 0.35));
+    assert.equal(stand.children.filter(node => node.name === 'Central aisle step').length, 4);
+    const benches = stand.children.filter(node => node.name === 'Spectator bench');
+    assert.equal(benches.length, 8);
+    for (const bench of benches) {
+      assert.ok(Math.abs(bench.position.x) - bench.geometry.parameters.width / 2 >= 0.6);
+    }
+    const trees = h.panel.createClassroomTrees(room);
+    const parking = h.panel.createParkingLot(room);
+    for (const other of [trees, parking]) {
+      assert.equal(bounds.intersectsBox(new Box3().setFromObject(other)), false);
+    }
+    for (const group of [stand, ground, court, trees, parking]) group.traverse(node => {
       node.geometry?.dispose();
       node.material?.dispose();
     });
@@ -544,6 +697,18 @@ test('basketball court fits outside classroom and trees, within the outdoor grou
   assert.ok(bounds.max.x < 30 && bounds.min.z > -30 && bounds.max.z < 30);
   assert.equal(court.children.filter(node => node.name === 'Basketball hoop').length, 2);
   assert.ok(court.children.filter(node => node.type === 'Line').length >= 10);
+  const equipment = court.getObjectByName('Basketball sideline equipment');
+  assert.equal(equipment.children.filter(node => node.name === 'Court sideline bench').length, 2);
+  assert.equal(equipment.children.filter(node => node.name === 'Basketball training cone').length, 4);
+  const cart = equipment.getObjectByName('Basketball ball cart');
+  assert.equal(cart.children.filter(node => node.name === 'Basketball').length, 3);
+  assert.ok(equipment.children.some(node => node.name === 'Basketball'));
+  for (const prop of equipment.children) {
+    const propBounds = new Box3().setFromObject(prop);
+    assert.ok(propBounds.max.x < court.position.x - 7.5 || propBounds.min.x > court.position.x + 7.5,
+      'all props must stay outside the fifteen-meter-wide playing area');
+    assert.ok(propBounds.min.z >= -15 && propBounds.max.z <= 15, 'props must not extend towards the spectator aisle');
+  }
   const trees = h.panel.createClassroomTrees(room);
   assert.equal(bounds.intersectsBox(new Box3().setFromObject(trees)), false);
   for (const group of [court, trees]) group.traverse(node => {

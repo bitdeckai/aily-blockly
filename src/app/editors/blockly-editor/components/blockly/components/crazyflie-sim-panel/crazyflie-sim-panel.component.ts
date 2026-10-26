@@ -1,6 +1,7 @@
 import { AfterViewInit, Component, ElementRef, NgZone, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
+  ACESFilmicToneMapping,
   AmbientLight,
   ArrowHelper,
   Box3,
@@ -10,30 +11,37 @@ import {
   CatmullRomCurve3,
   Color,
   CylinderGeometry,
+  CurvePath,
   DirectionalLight,
   Float32BufferAttribute,
   GridHelper,
   HemisphereLight,
   EdgesGeometry,
+  ExtrudeGeometry,
   Group,
   InstancedMesh,
   LineBasicMaterial,
   LineDashedMaterial,
   Line,
+  LineCurve3,
   LineSegments,
   MathUtils,
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
+  NoToneMapping,
   Object3D,
   Plane,
   PerspectiveCamera,
   PlaneGeometry,
+  Path,
   PCFSoftShadowMap,
+  QuadraticBezierCurve3,
   RepeatWrapping,
   Raycaster,
   Scene,
+  Shape,
   SphereGeometry,
   Spherical,
   SRGBColorSpace,
@@ -48,6 +56,7 @@ import * as Blockly from 'blockly';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Subscription } from 'rxjs';
 import { CrazyflieSimService } from '../../../../../../services/crazyflie-sim.service';
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
@@ -104,6 +113,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private scene: Scene | null = null;
   private camera: PerspectiveCamera | null = null;
   private renderer: WebGLRenderer | null = null;
+  private defaultLighting: Group | null = null;
   private controls: OrbitControls | null = null;
   private animationFrameId: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -690,7 +700,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     directionalLight.shadow.camera.far = 18;
     const fillLight = new DirectionalLight('#fff6ea', 0.55);
     fillLight.position.set(-4, 4, -2);
-    this.scene.add(ambientLight, hemiLight, directionalLight, fillLight);
+    this.defaultLighting = new Group();
+    this.defaultLighting.add(ambientLight, hemiLight, directionalLight, fillLight);
+    this.scene.add(this.defaultLighting);
 
     const floorGeometry = new PlaneGeometry(20, 20);
     const floorMaterial = new MeshStandardMaterial({ color: '#d4d9e1', roughness: 0.92, metalness: 0.01 });
@@ -1408,7 +1420,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
             textureLoader.loadAsync(textureUrl('desk_normal.jpg')),
           ]);
           map.colorSpace = SRGBColorSpace;
-          const lightMap = this.createLightClassroomTexture(map, '#d39451', 0.28);
+          const lightMap = this.createLightClassroomTexture(map, '#dfb270', 0.42);
           const context = lightMap.image.getContext('2d')!;
           const maskCanvas = document.createElement('canvas');
           maskCanvas.width = lightMap.image.width;
@@ -1489,12 +1501,13 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         texture.wrapT = RepeatWrapping;
         texture.repeat.set(room.width * 2, room.depth * 2);
       });
-      const lightMap = this.createLightClassroomTexture(map, '#e6c99c', 0.15);
+      const lightMap = this.createLightClassroomTexture(map, '#d7a968', 0.28);
       lightMap.repeat.copy(map.repeat);
       map.dispose();
       material.map = lightMap;
       material.roughnessMap = roughnessMap;
       material.normalMap = normalMap;
+      material.normalScale.set(0.3, 0.3);
       material.aoMap = null;
       material.color.set('#ffffff');
       material.needsUpdate = true;
@@ -1593,7 +1606,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
             texture.wrapT = RepeatWrapping;
             texture.repeat.set(3, 3);
           });
-          const lightMap = this.createLightClassroomTexture(map, '#dba567', 0.32);
+          const lightMap = this.createLightClassroomTexture(map, '#dfb270', 0.42);
           lightMap.repeat.copy(map.repeat);
           map.dispose();
           return new MeshStandardMaterial({
@@ -1602,7 +1615,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
             roughnessMap,
             normalMap,
             aoMap,
-            roughness: 1,
+            roughness: 0.7,
+            normalScale: new Vector2(0.3, 0.3),
+            aoMapIntensity: 0.35,
             metalness: 0,
             side: 2,
           });
@@ -1616,7 +1631,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
     return this.varnishedPineMaterialPromise;
   }
-  private applyVarnishedPineFinish(root: Object3D): void {
+  private applyVarnishedPineFinish(root: Object3D, tint = '#ffffff'): void {
     void this.loadVarnishedPineMaterial().then((template) => {
       if (!this.presetInteriorRoot || !this.presetInteriorRoot.children.includes(root)) {
         let isInCurrentPreset = false;
@@ -1631,7 +1646,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       }
 
       const material = template.clone();
-      material.color.set('#ffffff');
+      material.color.set(tint);
       root.traverse((node) => {
         const mesh = node as Mesh;
         if (!mesh.isMesh) {
@@ -2035,7 +2050,150 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       }
       parking.add(arrow);
     }
+    const parkedBays = [
+      { side: -1, bay: 0, color: '#8fa9bb' },
+      { side: -1, bay: 3, color: '#eee6d9' },
+      { side: -1, bay: 6, color: '#a55947' },
+      { side: 1, bay: 2, color: '#556e63' },
+      { side: 1, bay: 5, color: '#e1c38b' },
+    ];
+    for (const { side, bay, color } of parkedBays) {
+      const car = this.createParkedCar(color);
+      car.position.set(side * 5.5, 0.07, -8.75 + bay * 2.5);
+      car.rotation.y = side === 1 ? 0 : Math.PI;
+      parking.add(car);
+    }
+    for (const side of [-1, 1]) {
+      for (const end of [-1, 1]) {
+        const pole = new Mesh(new CylinderGeometry(0.055, 0.085, 3.7, 10), curbMaterial);
+        pole.name = 'Parking lamp post';
+        pole.position.set(side * 8.5, 1.94, end * 11.25);
+        parking.add(pole);
+        const lamp = new Mesh(new BoxGeometry(0.65, 0.1, 0.3), curbMaterial);
+        lamp.position.set(side * 8.3, 3.82, end * 11.25);
+        parking.add(lamp);
+        const lens = new Mesh(new PlaneGeometry(0.52, 0.22),
+          new MeshStandardMaterial({ color: '#fff2cd', emissive: '#fff2cd', emissiveIntensity: 0.25 }));
+        lens.rotation.x = Math.PI / 2;
+        lens.position.set(side * 8.3, 3.765, end * 11.25);
+        parking.add(lens);
+        const bollard = new Mesh(new CylinderGeometry(0.08, 0.08, 0.7, 10), arrowMaterial);
+        bollard.name = 'Parking entry bollard';
+        bollard.position.set(side * 3.25, 0.44, end * 11.3);
+        parking.add(bollard);
+      }
+      for (let stripe = 0; stripe < 8; stripe += 1) {
+        const crossing = new Mesh(new BoxGeometry(0.45, 0.006, 1.1), stripeMaterial);
+        crossing.name = 'Parking pedestrian crossing';
+        crossing.position.set(-2.45 + stripe * 0.7, 0.094, side * 10.4);
+        parking.add(crossing);
+      }
+    }
     return parking;
+  }
+
+  private createParkedCar(color: string): Group {
+    const car = new Group();
+    car.name = 'Parked car';
+    const paint = new MeshStandardMaterial({ color, roughness: 0.32, metalness: 0.3 });
+    const glass = new MeshStandardMaterial({ color: '#334c5a', roughness: 0.2, metalness: 0.35 });
+    const rubber = new MeshStandardMaterial({ color: '#303437', roughness: 0.95 });
+    const alloy = new MeshStandardMaterial({ color: '#b8c1c5', roughness: 0.3, metalness: 0.75 });
+    const body = new Mesh(new RoundedBoxGeometry(4.15, 0.65, 1.72, 2, 0.16), paint);
+    body.position.y = 0.67;
+    car.add(body);
+    const cabin = new Mesh(new RoundedBoxGeometry(2.1, 0.63, 1.5, 2, 0.16), glass);
+    cabin.position.set(-0.05, 1.16, 0);
+    car.add(cabin);
+    const roof = new Mesh(new RoundedBoxGeometry(1.72, 0.075, 1.42, 2, 0.035), paint);
+    roof.position.set(-0.05, 1.49, 0);
+    car.add(roof);
+    for (const side of [-1, 1]) {
+      const pillar = new Mesh(new BoxGeometry(0.08, 0.56, 0.035), paint);
+      pillar.position.set(0.05, 1.17, side * 0.75);
+      car.add(pillar);
+      const mirror = new Mesh(new RoundedBoxGeometry(0.18, 0.12, 0.16, 2, 0.045), paint);
+      mirror.position.set(-0.8, 1.04, side * 0.87);
+      car.add(mirror);
+      for (const axle of [-1, 1]) {
+        const tire = new Mesh(new CylinderGeometry(0.3, 0.3, 0.19, 16), rubber);
+        tire.name = 'Car tire';
+        tire.rotation.x = Math.PI / 2;
+        tire.position.set(axle * 1.3, 0.32, side * 0.82);
+        car.add(tire);
+        const rim = new Mesh(new CylinderGeometry(0.18, 0.18, 0.012, 12), alloy);
+        rim.rotation.x = Math.PI / 2;
+        rim.position.set(axle * 1.3, 0.32, side * 0.923);
+        car.add(rim);
+      }
+      for (const end of [-1, 1]) {
+        const headlight = new Mesh(new RoundedBoxGeometry(0.025, 0.14, 0.38, 2, 0.008),
+          new MeshStandardMaterial({ color: end === -1 ? '#f6ebc9' : '#a84336', roughness: 0.3 }));
+        headlight.position.set(end * 2.066, 0.75, side * 0.55);
+        car.add(headlight);
+      }
+    }
+    for (const end of [-1, 1]) {
+      const bumper = new Mesh(new BoxGeometry(0.025, 0.14, 1.4), rubber);
+      bumper.position.set(end * 2.07, 0.49, 0);
+      car.add(bumper);
+      const plate = new Mesh(new BoxGeometry(0.03, 0.1, 0.34), alloy);
+      plate.position.set(end * 2.087, 0.64, 0);
+      car.add(plate);
+    }
+    car.traverse((node) => {
+      if (node instanceof Mesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    return car;
+  }
+
+  private createBleachers(room: { width: number }): Group {
+    const stand = new Group();
+    stand.name = 'Basketball spectator stand';
+    stand.position.set(room.width / 2 + 10.5, 0, 17);
+    const concrete = new MeshStandardMaterial({ color: '#bcc3c7', roughness: 0.95 });
+    const seatMaterial = new MeshStandardMaterial({ color: '#4287aa', roughness: 0.75 });
+    const steel = new MeshStandardMaterial({ color: '#667986', roughness: 0.5, metalness: 0.55 });
+    for (let row = 0; row < 4; row += 1) {
+      const height = (row + 1) * 0.35;
+      for (const side of [-1, 1]) {
+        const tier = new Mesh(new BoxGeometry(6.4, height, 0.9), concrete);
+        tier.name = 'Spectator tier';
+        tier.position.set(side * 3.8, 0.004 + height / 2, row * 0.9 + 0.45);
+        tier.receiveShadow = true;
+        stand.add(tier);
+        const bench = new Mesh(new BoxGeometry(5.8, 0.08, 0.4), seatMaterial);
+        bench.name = 'Spectator bench';
+        bench.position.set(side * 3.6, height + 0.2, row * 0.9 + 0.55);
+        stand.add(bench);
+        for (const x of [-2.4, 2.4]) {
+          const leg = new Mesh(new BoxGeometry(0.08, 0.16, 0.28), steel);
+          leg.position.set(side * 3.6 + x, height + 0.084, row * 0.9 + 0.55);
+          stand.add(leg);
+        }
+      }
+      const step = new Mesh(new BoxGeometry(1.2, 0.175, 0.45), concrete);
+      step.name = 'Central aisle step';
+      step.position.set(0, height - 0.0835, row * 0.9 + 0.225);
+      stand.add(step);
+      const landing = new Mesh(new BoxGeometry(1.2, height, 0.45), concrete);
+      landing.position.set(0, 0.004 + height / 2, row * 0.9 + 0.675);
+      stand.add(landing);
+    }
+    for (const x of [-6.9, -3.45, 0, 3.45, 6.9]) {
+      const post = new Mesh(new BoxGeometry(0.06, 1.1, 0.06), steel);
+      post.position.set(x, 1.954, 3.55);
+      stand.add(post);
+    }
+    for (const y of [1.95, 2.48]) {
+      const rail = new Mesh(new BoxGeometry(13.86, 0.06, 0.06), steel);
+      rail.position.set(0, y, 3.55);
+      stand.add(rail);
+    }
+    return stand;
   }
 
   private createBasketballCourt(room: { width: number }): Group {
@@ -2127,7 +2285,88 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       hoop.add(rim);
       court.add(hoop);
     }
+    const props = new Group();
+    props.name = 'Basketball sideline equipment';
+    const steel = new MeshStandardMaterial({ color: '#5d717a', roughness: 0.48, metalness: 0.5 });
+    const wood = new MeshStandardMaterial({ color: '#b38b5b', roughness: 0.78 });
+    for (const z of [-6, 6]) {
+      const bench = new Group();
+      bench.name = 'Court sideline bench';
+      bench.position.set(-8.05, 0.09, z);
+      const seat = new Mesh(new RoundedBoxGeometry(0.42, 0.055, 2.4, 2, 0.018), wood);
+      seat.position.y = 0.43;
+      bench.add(seat);
+      for (const end of [-1, 1]) {
+        const support = new Mesh(new BoxGeometry(0.34, 0.4, 0.065), steel);
+        support.position.set(0, 0.2, end * 0.9);
+        bench.add(support);
+      }
+      props.add(bench);
+    }
+    const coneMaterial = new MeshStandardMaterial({ color: '#da793b', roughness: 0.85 });
+    for (const z of [-10.5, -7.5, -4.5, -1.5]) {
+      const cone = new Group();
+      cone.name = 'Basketball training cone';
+      cone.position.set(8.05, 0.094, z);
+      const base = new Mesh(new BoxGeometry(0.22, 0.025, 0.22), coneMaterial);
+      base.position.y = 0.0125;
+      const tip = new Mesh(new CylinderGeometry(0.015, 0.085, 0.27, 12), coneMaterial);
+      tip.position.y = 0.16;
+      cone.add(base, tip);
+      props.add(cone);
+    }
+    const cart = new Group();
+    cart.name = 'Basketball ball cart';
+    cart.position.set(8.05, 0.094, 9.5);
+    const tray = new Mesh(new BoxGeometry(0.52, 0.035, 0.9), steel);
+    tray.position.y = 0.28;
+    cart.add(tray);
+    for (const x of [-0.25, 0.25]) {
+      for (const z of [-0.43, 0.43]) {
+        const upright = new Mesh(new CylinderGeometry(0.012, 0.012, 0.6, 8), steel);
+        upright.position.set(x, 0.34, z);
+        cart.add(upright);
+        const wheel = new Mesh(new SphereGeometry(0.05, 8, 6),
+          new MeshStandardMaterial({ color: '#353d43', roughness: 0.95 }));
+        wheel.position.set(x, 0.05, z);
+        cart.add(wheel);
+      }
+      const rail = new Mesh(new BoxGeometry(0.025, 0.025, 0.9), steel);
+      rail.position.set(x, 0.58, 0);
+      cart.add(rail);
+    }
+    for (const z of [-0.27, 0, 0.27]) {
+      const ball = this.createBasketball();
+      ball.position.set(0, 0.42, z);
+      cart.add(ball);
+    }
+    props.add(cart);
+    const spareBall = this.createBasketball();
+    spareBall.position.set(-8.05, 0.214, 8.1);
+    props.add(spareBall);
+    props.traverse((node) => {
+      if (node instanceof Mesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    court.add(props);
     return court;
+  }
+
+  private createBasketball(): Group {
+    const ball = new Group();
+    ball.name = 'Basketball';
+    ball.add(new Mesh(new SphereGeometry(0.12, 20, 12),
+      new MeshStandardMaterial({ color: '#b9652f', roughness: 0.95 })));
+    const seamMaterial = new MeshStandardMaterial({ color: '#3e3028', roughness: 1 });
+    for (let axis = 0; axis < 3; axis += 1) {
+      const seam = new Mesh(new TorusGeometry(0.12, 0.002, 4, 32), seamMaterial);
+      if (axis === 1) seam.rotation.x = Math.PI / 2;
+      if (axis === 2) seam.rotation.y = Math.PI / 2;
+      ball.add(seam);
+    }
+    return ball;
   }
 
   private createClassroomTrees(room: { width: number; depth: number }): Group {
@@ -2170,6 +2409,240 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return outdoors;
   }
 
+  private createClassroomLighting(room: { width: number; depth: number; height: number }): Group {
+    const lights = new Group();
+    lights.name = 'Classroom daylight';
+    lights.add(
+      new AmbientLight('#fff7eb', 0.35),
+      new HemisphereLight('#e5f0ff', '#9a8166', 0.85),
+    );
+    const sunlight = new DirectionalLight('#fff3dd', 2.4);
+    sunlight.position.set(room.width * 0.3, room.height + 4, -room.depth / 2 - 3);
+    sunlight.target.position.set(0, 0.4, 0);
+    sunlight.castShadow = true;
+    sunlight.shadow.mapSize.set(2048, 2048);
+    const extent = Math.hypot(room.width, room.depth) / 2 + 1;
+    Object.assign(sunlight.shadow.camera, {
+      left: -extent, right: extent, top: extent, bottom: -extent,
+      near: 0.1, far: sunlight.position.length() + extent + room.height,
+    });
+    sunlight.shadow.bias = -0.00015;
+    sunlight.shadow.normalBias = 0.008;
+    lights.add(sunlight, sunlight.target);
+    const fill = new DirectionalLight('#dbeaff', 0.45);
+    fill.position.set(-room.width / 2, room.height, room.depth / 2);
+    lights.add(fill);
+    return lights;
+  }
+
+  private createClassroomChair(): Group {
+    const chair = new Group();
+    chair.name = 'School chair';
+    const wood = new MeshStandardMaterial({ color: '#c39560', roughness: 0.7 });
+    const steel = new MeshStandardMaterial({ color: '#b9c7cd', roughness: 0.32, metalness: 0.65 });
+    const rubber = new MeshStandardMaterial({ color: '#454b4e', roughness: 0.95 });
+    const seat = new Mesh(new RoundedBoxGeometry(0.32, 0.032, 0.33, 2, 0.012), wood);
+    seat.name = 'Chair wood seat';
+    seat.position.y = 0.45;
+    chair.add(seat);
+    const back = new Mesh(new RoundedBoxGeometry(0.026, 0.19, 0.31, 2, 0.01), wood);
+    back.name = 'Chair wood back';
+    back.position.set(0.154, 0.65, 0);
+    back.rotation.z = -0.08;
+    chair.add(back);
+
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const foot = new Vector3(sx * 0.14, 0.032, sz * 0.135);
+        const top = new Vector3(sx * 0.115, 0.434, sz * 0.12);
+        const leg = new Mesh(new CylinderGeometry(0.011, 0.012, foot.distanceTo(top), 10), steel);
+        leg.name = 'Chair steel leg';
+        leg.position.copy(foot).add(top).multiplyScalar(0.5);
+        leg.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), top.sub(foot).normalize());
+        chair.add(leg);
+        const cap = new Mesh(new CylinderGeometry(0.014, 0.014, 0.04, 10), rubber);
+        cap.name = 'Chair rubber foot';
+        cap.position.set(foot.x, 0.032, foot.z);
+        chair.add(cap);
+      }
+    }
+    for (const side of [-1, 1]) {
+      const brace = new Mesh(new CylinderGeometry(0.009, 0.009, 0.26, 10), steel);
+      brace.name = 'Chair side brace';
+      brace.rotation.z = Math.PI / 2;
+      brace.position.set(0, 0.23, side * 0.128);
+      chair.add(brace);
+    }
+    const framePath = new CurvePath<Vector3>();
+    framePath.add(new LineCurve3(new Vector3(0.13, 0.43, -0.17), new Vector3(0.16, 0.72, -0.17)));
+    framePath.add(new QuadraticBezierCurve3(
+      new Vector3(0.16, 0.72, -0.17), new Vector3(0.165, 0.765, -0.17), new Vector3(0.165, 0.765, -0.125)));
+    framePath.add(new LineCurve3(new Vector3(0.165, 0.765, -0.125), new Vector3(0.165, 0.765, 0.125)));
+    framePath.add(new QuadraticBezierCurve3(
+      new Vector3(0.165, 0.765, 0.125), new Vector3(0.165, 0.765, 0.17), new Vector3(0.16, 0.72, 0.17)));
+    framePath.add(new LineCurve3(new Vector3(0.16, 0.72, 0.17), new Vector3(0.13, 0.43, 0.17)));
+    const frame = new Mesh(new TubeGeometry(framePath, 32, 0.012, 8, false), steel);
+    frame.name = 'Chair bent steel back frame';
+    chair.add(frame);
+    const plate = new Mesh(new RoundedBoxGeometry(0.003, 0.026, 0.064, 1, 0.001), steel);
+    plate.name = 'Chair nameplate';
+    plate.position.set(0.139, 0.66, 0);
+    chair.add(plate);
+    return chair;
+  }
+
+  private createClassroomDeskDrawer(): Group {
+    const drawer = new Group();
+    drawer.name = 'School desk drawer';
+    const wood = new MeshStandardMaterial({ color: '#c39560', roughness: 0.7 });
+    const body = new Mesh(new BoxGeometry(0.31, 0.085, 0.47), wood);
+    body.name = 'Drawer wood body';
+    body.position.set(0.025, 0.643, 0);
+    drawer.add(body);
+    const seam = new Mesh(new BoxGeometry(0.006, 0.09, 0.49),
+      new MeshStandardMaterial({ color: '#675442', roughness: 0.9 }));
+    seam.name = 'Drawer reveal';
+    seam.position.set(0.183, 0.643, 0);
+    drawer.add(seam);
+    const front = new Mesh(new RoundedBoxGeometry(0.018, 0.087, 0.476, 2, 0.005), wood);
+    front.name = 'Drawer wood front';
+    front.position.set(0.19, 0.643, 0);
+    drawer.add(front);
+    const handle = new Mesh(new RoundedBoxGeometry(0.018, 0.012, 0.095, 2, 0.004),
+      new MeshStandardMaterial({ color: '#a8b6bd', roughness: 0.35, metalness: 0.65 }));
+    handle.name = 'Drawer handle';
+    handle.position.set(0.208, 0.643, 0);
+    drawer.add(handle);
+    return drawer;
+  }
+
+  private createClassroomLectern(): Group {
+    const lectern = new Group();
+    lectern.name = 'Classroom lectern';
+    const panels = new Group();
+    panels.name = 'Lectern wood panels';
+    const wood = new MeshStandardMaterial({ color: '#c39560', roughness: 0.7 });
+    const edge = new MeshStandardMaterial({ color: '#a77b4e', roughness: 0.75 });
+    const front = new Mesh(new RoundedBoxGeometry(0.46, 0.9, 0.035, 2, 0.008), wood);
+    front.position.set(0, 0.51, 0.18);
+    panels.add(front);
+    for (const side of [-1, 1]) {
+      const panel = new Mesh(new RoundedBoxGeometry(0.035, 0.9, 0.36, 2, 0.008), wood);
+      panel.position.set(side * 0.21, 0.51, 0);
+      panels.add(panel);
+    }
+    const top = new Mesh(new RoundedBoxGeometry(0.62, 0.055, 0.5, 2, 0.015), wood);
+    top.position.y = 0.98;
+    panels.add(top);
+    const surface = new Mesh(new RoundedBoxGeometry(0.58, 0.035, 0.42, 2, 0.01), wood);
+    surface.position.set(0, 1.08, -0.035);
+    surface.rotation.x = -0.22;
+    panels.add(surface);
+    const base = new Mesh(new RoundedBoxGeometry(0.58, 0.09, 0.46, 2, 0.015), edge);
+    base.position.y = 0.045;
+    const stop = new Mesh(new RoundedBoxGeometry(0.58, 0.05, 0.025, 2, 0.008), edge);
+    stop.position.set(0, 1.12, -0.22);
+    stop.rotation.x = -0.22;
+    lectern.add(panels, base, stop);
+    lectern.traverse((node) => {
+      if (node instanceof Mesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    return lectern;
+  }
+
+  private createSchoolBackpack(color: string): Group {
+    const bag = new Group();
+    bag.name = 'School backpack';
+    const fabric = new MeshStandardMaterial({ color, roughness: 0.96 });
+    const trim = new MeshStandardMaterial({ color: '#343d42', roughness: 0.95 });
+    const body = new Mesh(new RoundedBoxGeometry(0.135, 0.28, 0.23, 2, 0.045), fabric);
+    bag.add(body);
+    const pocket = new Mesh(new RoundedBoxGeometry(0.045, 0.14, 0.19, 2, 0.018), fabric);
+    pocket.position.set(0.077, -0.045, 0);
+    bag.add(pocket);
+    const zipper = new Mesh(new BoxGeometry(0.006, 0.006, 0.15), trim);
+    zipper.position.set(0.101, 0.016, 0);
+    bag.add(zipper);
+    const handle = new Mesh(new TorusGeometry(0.034, 0.005, 6, 12, Math.PI), trim);
+    handle.rotation.y = Math.PI / 2;
+    handle.position.y = 0.138;
+    bag.add(handle);
+    for (const side of [-1, 1]) {
+      const strap = new Mesh(new TubeGeometry(new CatmullRomCurve3([
+        new Vector3(-0.045, -0.09, side * 0.073),
+        new Vector3(-0.105, 0.04, side * 0.073),
+        new Vector3(-0.09, 0.15, side * 0.073),
+        new Vector3(-0.04, 0.1, side * 0.073),
+      ]), 12, 0.009, 5, false), trim);
+      strap.name = 'Backpack shoulder strap';
+      bag.add(strap);
+    }
+    bag.traverse((node) => {
+      if (node instanceof Mesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    return bag;
+  }
+
+  private createClassroomTeachingTools(): Group {
+    const tools = new Group();
+    tools.name = 'Classroom mathematical tools';
+    const wood = new MeshStandardMaterial({ color: '#d6b77d', roughness: 0.85 });
+    const markings = new MeshStandardMaterial({ color: '#594e3b', roughness: 0.9 });
+    const outline = new Shape();
+    outline.moveTo(-0.25, -0.23);
+    outline.lineTo(0.21, -0.23);
+    outline.lineTo(-0.25, 0.23);
+    outline.closePath();
+    const hole = new Path();
+    hole.moveTo(-0.19, -0.17);
+    hole.lineTo(-0.19, 0.085);
+    hole.lineTo(0.065, -0.17);
+    hole.closePath();
+    outline.holes.push(hole);
+    const triangle = new Mesh(new ExtrudeGeometry(outline, { depth: 0.018, bevelEnabled: false }), wood);
+    triangle.name = 'Teaching set square';
+    tools.add(triangle);
+    const ruler = new Mesh(new RoundedBoxGeometry(0.055, 0.68, 0.018, 2, 0.005), wood);
+    ruler.name = 'Teaching ruler';
+    ruler.position.set(0.33, 0.02, 0.012);
+    tools.add(ruler);
+    for (let mark = 0; mark <= 20; mark += 1) {
+      const tick = new Mesh(new BoxGeometry(mark % 5 === 0 ? 0.027 : 0.015, 0.003, 0.002), markings);
+      tick.position.set(0.318, -0.28 + mark * 0.03, 0.023);
+      tools.add(tick);
+    }
+    const compass = new Group();
+    compass.name = 'Teaching compass';
+    compass.position.set(0.03, 0.43, 0.018);
+    for (const side of [-1, 1]) {
+      const arm = new Group();
+      arm.rotation.z = side * 0.27;
+      const leg = new Mesh(new BoxGeometry(0.023, 0.28, 0.016), wood);
+      leg.position.y = -0.14;
+      const tip = new Mesh(new CylinderGeometry(0.008, 0, 0.055, 8), markings);
+      tip.position.y = -0.3075;
+      arm.add(leg, tip);
+      compass.add(arm);
+    }
+    const hinge = new Mesh(new CylinderGeometry(0.025, 0.025, 0.024, 12), markings);
+    hinge.rotation.x = Math.PI / 2;
+    compass.add(hinge);
+    tools.add(compass);
+    tools.traverse((node) => {
+      if (node instanceof Mesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+    return tools;
+  }
+
   private rebuildPresetInterior(preset: 'classroom' | 'home' | 'custom', room: { width: number; depth: number; height: number }): void {
     if (!this.scene) {
       return;
@@ -2177,11 +2650,20 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.disposePresetInterior();
 
+    if (this.defaultLighting) {
+      this.defaultLighting.visible = preset !== 'classroom';
+    }
+    if (this.renderer) {
+      this.renderer.toneMapping = preset === 'classroom' ? ACESFilmicToneMapping : NoToneMapping;
+    }
     if (preset === 'custom') {
       return;
     }
 
     const group = new Group();
+    if (preset === 'classroom') {
+      group.add(this.createClassroomLighting(room));
+    }
     const wallColor = preset === 'classroom' ? '#f7f5ed' : '#5a5148';
     const accentColor = preset === 'classroom' ? '#7fb3df' : '#c89266';
 
@@ -2222,6 +2704,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         normalMap.wrapT = RepeatWrapping;
         normalMap.repeat.set(room.width / 2, room.height / 2);
         wallMat.normalMap = normalMap;
+        wallMat.normalScale.set(0.18, 0.18);
         wallMat.needsUpdate = true;
       }).catch((error) => console.error('Failed to load Webots classroom wall material:', error));
     }
@@ -2268,7 +2751,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       group.add(this.createClassroomGround(room));
       group.add(this.createClassroomTrees(room));
       group.add(this.createBasketballCourt(room));
+      group.add(this.createBleachers(room));
       group.add(this.createParkingLot(room));
+      const teachingTools = this.createClassroomTeachingTools();
+      teachingTools.position.set(-room.width / 2 + 0.065, 1.6, room.depth / 2 - 0.65);
+      teachingTools.rotation.y = Math.PI / 2;
+      group.add(teachingTools);
       const trimMat = new MeshStandardMaterial({ color: '#83b8e5', roughness: 0.58, metalness: 0.04 });
       void this.loadParquetryFloor(group, room);
 
@@ -2449,36 +2937,14 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         }
       }
 
-      const podiumGroup = new Group();
+      const podiumGroup = this.createClassroomLectern();
       podiumGroup.position.set(-room.width / 2 + 1.36, 0, 1.02);
       podiumGroup.rotation.y = Math.PI / 2;
-      const podiumWood = new MeshStandardMaterial({ color: '#9b6945', roughness: 0.54, metalness: 0.02 });
-      const podiumEdge = new MeshStandardMaterial({ color: '#5f4232', roughness: 0.48, metalness: 0.03 });
-      const podiumPanel = new Mesh(new BoxGeometry(0.46, 0.9, 0.035), podiumWood);
-      podiumPanel.position.set(0, 0.51, 0.18);
-      podiumGroup.add(podiumPanel);
-      const podiumSide = new Mesh(new BoxGeometry(0.035, 0.9, 0.36), podiumWood);
-      podiumSide.position.set(0.21, 0.51, 0);
-      podiumGroup.add(podiumSide);
-      const podiumSideBack = podiumSide.clone();
-      podiumSideBack.position.x = -0.21;
-      podiumGroup.add(podiumSideBack);
-      const podiumBase = new Mesh(new BoxGeometry(0.58, 0.09, 0.46), podiumEdge);
-      podiumBase.position.y = 0.045;
-      podiumGroup.add(podiumBase);
-      const podiumTop = new Mesh(new BoxGeometry(0.62, 0.055, 0.5), podiumWood);
-      podiumTop.position.y = 0.98;
-      podiumGroup.add(podiumTop);
-      const lecternSurface = new Mesh(new BoxGeometry(0.58, 0.035, 0.42), podiumWood);
-      lecternSurface.position.set(0, 1.08, -0.035);
-      lecternSurface.rotation.x = -0.22;
-      podiumGroup.add(lecternSurface);
-      const bookStop = new Mesh(new BoxGeometry(0.58, 0.07, 0.035), podiumEdge);
-      bookStop.position.set(0, 1.12, -0.22);
-      bookStop.rotation.x = -0.22;
-      podiumGroup.add(bookStop);
       group.add(podiumGroup);
-      this.applyVarnishedPineFinish(podiumGroup);
+      const lecternPanels = podiumGroup.getObjectByName('Lectern wood panels');
+      if (lecternPanels) {
+        this.applyVarnishedPineFinish(lecternPanels);
+      }
 
       const wallClock = new Mesh(
         new CylinderGeometry(0.12, 0.12, 0.02, 24),
@@ -2507,7 +2973,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         { y: 0.56, height: 0.72, width: 0.53 },
         { y: 1.48, height: 0.72, width: 0.53 },
       ]) {
-        const inset = new Mesh(new BoxGeometry(panel.width, panel.height, 0.014), podiumWood);
+        const inset = new Mesh(new BoxGeometry(panel.width, panel.height, 0.014), doorMaterial);
         inset.position.set(-room.width * 0.26, panel.y, room.depth / 2 - 0.072);
         doorGroup.add(inset);
       }
@@ -2521,72 +2987,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       group.add(doorGroup);
       this.applyVarnishedPineFinish(doorGroup);
 
-      const cabinetGroup = new Group();
-      const cabinetMaterial = new MeshStandardMaterial({ color: '#a87b55', roughness: 0.6, metalness: 0.01 });
-      const cabinetX = -room.width / 2 + 0.32;
-      const cabinetZ = -0.2;
-      for (const side of [-1, 1]) {
-        const panel = new Mesh(new BoxGeometry(0.48, 1.08, 0.045), cabinetMaterial);
-        panel.position.set(cabinetX, 0.55, cabinetZ + side * 0.86);
-        cabinetGroup.add(panel);
-      }
-      for (const y of [0.06, 1.08]) {
-        const shelf = new Mesh(new BoxGeometry(0.5, 0.045, 1.8), cabinetMaterial);
-        shelf.position.set(cabinetX, y, cabinetZ);
-        cabinetGroup.add(shelf);
-      }
-      for (let shelfIndex = 1; shelfIndex <= 3; shelfIndex += 1) {
-        const shelf = new Mesh(new BoxGeometry(0.44, 0.026, 1.7), cabinetMaterial);
-        shelf.position.set(cabinetX, shelfIndex * 0.26, cabinetZ);
-        cabinetGroup.add(shelf);
-      }
-      const cabinetDoorMaterial = new MeshStandardMaterial({ color: '#bb8d65', roughness: 0.55, metalness: 0.01 });
-      for (const side of [-1, 1]) {
-        const panel = new Mesh(new BoxGeometry(0.025, 0.94, 0.85), cabinetDoorMaterial);
-        panel.position.set(cabinetX + 0.25, 0.57, cabinetZ + side * 0.43);
-        cabinetGroup.add(panel);
-        const handle = new Mesh(new BoxGeometry(0.025, 0.12, 0.025), doorHandleMaterial);
-        handle.position.set(cabinetX + 0.28, 0.57, cabinetZ + side * 0.09);
-        cabinetGroup.add(handle);
-      }
-      group.add(cabinetGroup);
-      this.applyVarnishedPineFinish(cabinetGroup);
-
-      const lowShelfGroup = new Group();
-      const lowShelfMaterial = new MeshStandardMaterial({ color: '#9a704e', roughness: 0.6, metalness: 0.02 });
-      for (const y of [0.08, 0.32, 0.56]) {
-        const board = new Mesh(new BoxGeometry(1.1, 0.035, 0.34), lowShelfMaterial);
-        board.position.y = y;
-        lowShelfGroup.add(board);
-      }
-      for (const x of [-0.52, 0.52]) {
-        const upright = new Mesh(new BoxGeometry(0.045, 0.55, 0.32), lowShelfMaterial);
-        upright.position.set(x, 0.3, 0);
-        lowShelfGroup.add(upright);
-      }
-      lowShelfGroup.position.set(room.width * 0.34, 0, room.depth * 0.3);
-      group.add(lowShelfGroup);
-      this.applyVarnishedPineFinish(lowShelfGroup);
-
-      for (let i = 0; i < 4; i += 1) {
-        const book = new Mesh(
-          new BoxGeometry(0.08, 0.2 + i * 0.02, 0.18),
-          new MeshStandardMaterial({ color: ['#8fb8df', '#e7a97e', '#92c997', '#d9c07f'][i], roughness: 0.7, metalness: 0.01 }),
-        );
-        book.position.set(room.width * 0.08 + i * 0.11, 0.52, room.depth * 0.3);
-        group.add(book);
-      }
-
       const aisle = new Mesh(
         new BoxGeometry(room.width * 0.62, 0.01, 0.74),
         new MeshStandardMaterial({ color: '#d5d9e0', roughness: 0.8, metalness: 0.01 }),
       );
       aisle.position.set(0.35, 0.006, 0);
       group.add(aisle);
-
-      const deskTopMat = new MeshStandardMaterial({ color: '#edcfa8', roughness: 0.79, metalness: 0.01 });
-      const deskBaseMat = new MeshStandardMaterial({ color: '#dfbe95', roughness: 0.84, metalness: 0.01 });
-      const chairMat = new MeshStandardMaterial({ color: '#d8b489', roughness: 0.8, metalness: 0.01 });
 
       // 36-student standard matrix: 6 columns x 6 rows.
       // Desk size: 60cm x 40cm, row spacing >= 90cm, center aisle >= 60cm.
@@ -2613,31 +3019,20 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       const helipadZ = colCenters[helipadDeskCol];
 
       const chairOffsetX = deskD / 2 + 0.2;
-      const classroomMetalMaterial = new MeshStandardMaterial({ color: '#c3cbd0', roughness: 0.32, metalness: 0.5 });
-      const chairSeatInstances = new InstancedMesh(
-        new BoxGeometry(0.25, 0.035, 0.25),
-        new MeshStandardMaterial({ color: '#cc9255', roughness: 0.55, metalness: 0.01 }),
-        rows * cols,
-      );
-      const chairBackInstances = new InstancedMesh(
-        new BoxGeometry(0.025, 0.29, 0.25),
-        chairSeatInstances.material,
-        rows * cols,
-      );
-      const chairLegInstances = new InstancedMesh(
-        new CylinderGeometry(0.009, 0.012, 0.42, 10),
-        classroomMetalMaterial,
-        rows * cols * 4,
-      );
-      const chairBackPostInstances = new InstancedMesh(
-        new CylinderGeometry(0.009, 0.009, 0.29, 10),
-        classroomMetalMaterial,
-        rows * cols * 2,
-      );
+      const backpackSeats = [
+        { row: 0, col: 0, color: '#526c89' },
+        { row: 1, col: 4, color: '#9e6652' },
+        { row: 2, col: 1, color: '#6b7860' },
+        { row: 3, col: 5, color: '#b29258' },
+        { row: 4, col: 0, color: '#796b86' },
+        { row: 5, col: 4, color: '#527b79' },
+      ];
+      for (const { row, col, color } of backpackSeats) {
+        const backpack = this.createSchoolBackpack(color);
+        backpack.position.set(firstRowX + row * rowSpacing + chairOffsetX + 0.245, 0.56, colCenters[col]);
+        group.add(backpack);
+      }
       const instanceTransform = new Object3D();
-      let chairIndex = 0;
-      let chairLegIndex = 0;
-      let chairPostIndex = 0;
       const placeInstance = (instances: InstancedMesh, index: number, x: number, y: number, z: number, scaleX = 1, scaleY = 1, scaleZ = 1) => {
         instanceTransform.position.set(x, y, z);
         instanceTransform.rotation.set(0, 0, 0);
@@ -2646,31 +3041,36 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         instances.setMatrixAt(index, instanceTransform.matrix);
       };
 
-      for (let r = 0; r < rows; r += 1) {
-        const x = firstRowX + r * rowSpacing;
-        for (let c = 0; c < cols; c += 1) {
-          const z = colCenters[c];
-          const chairX = x + chairOffsetX;
-          const chairSeatY = 0.45;
-          placeInstance(chairSeatInstances, chairIndex, chairX, chairSeatY, z);
-          placeInstance(chairBackInstances, chairIndex, chairX + 0.105, 0.60, z);
-          chairIndex += 1;
-          const chairLegY = 0.22;
-          [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([sx, sz]) => {
-            placeInstance(chairLegInstances, chairLegIndex++, chairX + sx * 0.095, chairLegY, z + sz * 0.095);
-          });
-          [-1, 1].forEach((side) => {
-            placeInstance(chairBackPostInstances, chairPostIndex++, chairX + 0.105, 0.60, z + side * 0.105);
-          });
+      for (const [template, offsetX] of [
+        [this.createClassroomChair(), chairOffsetX],
+        [this.createClassroomDeskDrawer(), 0],
+      ] as const) {
+        for (const part of template.children) {
+          if (!(part instanceof Mesh)) {
+            continue;
+          }
+          part.updateMatrix();
+          const instances = new InstancedMesh(part.geometry, part.material, rows * cols);
+          instances.name = part.name;
+          let index = 0;
+          for (let r = 0; r < rows; r += 1) {
+            for (let c = 0; c < cols; c += 1) {
+              instanceTransform.position.set(firstRowX + r * rowSpacing + offsetX, 0, colCenters[c]);
+              instanceTransform.rotation.set(0, 0, 0);
+              instanceTransform.scale.set(1, 1, 1);
+              instanceTransform.updateMatrix();
+              instances.setMatrixAt(index++, instanceTransform.matrix.clone().multiply(part.matrix));
+            }
+          }
+          instances.instanceMatrix.needsUpdate = true;
+          instances.castShadow = true;
+          instances.receiveShadow = true;
+          group.add(instances);
+          if (part.name.includes('wood')) {
+            this.applyVarnishedPineFinish(instances);
+          }
         }
       }
-
-      [chairSeatInstances, chairBackInstances, chairLegInstances, chairBackPostInstances].forEach((instances) => {
-        instances.instanceMatrix.needsUpdate = true;
-        instances.castShadow = true;
-        instances.receiveShadow = true;
-        group.add(instances);
-      });
 
       void this.loadClassroomDeskAsset().then(({ geometry, material }) => {
         if (this.presetInteriorRoot !== group) {
@@ -2691,28 +3091,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         desks.receiveShadow = true;
         group.add(desks);
       }).catch((error) => console.error('Failed to load Webots classroom desk asset:', error));
-
-      const bookDeskPlacements: Array<{ row: number; col: number; xOffset: number; zOffset: number; yaw: number }> = [
-        { row: 0, col: 0, xOffset: -0.08, zOffset: 0.08, yaw: 0 },
-        { row: 1, col: 4, xOffset: 0.06, zOffset: -0.08, yaw: 0.12 },
-        { row: 2, col: 1, xOffset: -0.05, zOffset: -0.06, yaw: -0.1 },
-        { row: 4, col: 4, xOffset: 0.04, zOffset: 0.07, yaw: 0.08 },
-        { row: 5, col: 0, xOffset: -0.07, zOffset: -0.05, yaw: -0.12 },
-      ];
-      void this.loadClassroomProtoAsset('school_furniture/protos/Book.proto').then((bookAsset) => {
-        if (this.presetInteriorRoot !== group) {
-          return;
-        }
-        bookDeskPlacements.forEach(({ row, col, xOffset, zOffset, yaw }) => {
-          const book = bookAsset.clone(true);
-          const deskX = firstRowX + row * rowSpacing;
-          const deskZ = colCenters[col];
-          book.name = 'Webots school book';
-          book.position.set(deskX + xOffset, deskSurfaceY + 0.011, deskZ + zOffset);
-          book.rotation.set(0, yaw, Math.PI / 2);
-          group.add(book);
-        });
-      }).catch((error) => console.error('Failed to load Webots classroom books:', error));
 
       const deskSurfaceY = 0.71001;
       const helipadBase = new Mesh(
@@ -2785,6 +3163,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.scene.remove(this.presetInteriorRoot);
     this.presetInteriorRoot.traverse((node: any) => {
+      if (node instanceof DirectionalLight) {
+        node.shadow.dispose();
+      }
       if (node.userData?.sharedClassroomAsset) {
         return;
       }
