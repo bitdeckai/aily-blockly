@@ -19,6 +19,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
   padding: 10px 12px 8px;
 }
 
@@ -118,29 +120,15 @@
   }
 }
 
-.speed-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px;
+.sim-scene-select {
+  height: 27px;
+  padding: 0 6px;
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--aily-border-input) 85%, transparent);
   background: color-mix(in srgb, var(--aily-bg-tertiary) 90%, transparent);
   color: var(--aily-text-secondary);
   font-size: 12px;
 
-  input {
-    width: 90px;
-  }
-
-  span {
-    min-width: 30px;
-    text-align: right;
-  }
-}
-
-.explosion-control input {
-  width: 72px;
 }
 
 .sim-panel__canvas-wrap {
@@ -181,7 +169,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  flex-basis: 100%;
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .sim-icon-btn {
@@ -291,13 +280,16 @@
 }
 
 .sim-panel__footer {
-  padding: 10px 12px;
+  padding: 8px 12px;
 }
 
 .sim-panel__step {
   font-size: 12px;
   color: var(--aily-text-secondary);
   margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sim-panel__logs {

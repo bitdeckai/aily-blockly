@@ -30,6 +30,10 @@ npm i
 npm run electron
 ```
 
+后台启动 Electron 时应将标准输出和标准错误重定向到日志文件，避免启动终端退出后留下已关闭的输出管道。主进程遇到 `EPIPE` 时会停用控制台日志输出，但仍将原始异常和后续日志写入应用数据目录下的 `logs\app.log`，避免递归报错影响项目打开等操作。
+
+日志回归测试：`node --test scripts\test-electron-logger.cjs`。
+
 **electron打包**
 ```
 npm run build

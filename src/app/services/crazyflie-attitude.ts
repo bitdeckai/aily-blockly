@@ -8,8 +8,14 @@ export interface AttitudeSample {
   yaw: number;
 }
 
+export interface FlightPoseSample extends AttitudeSample {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export type AttitudeEvent = AttitudeSample | { type: 'error'; message: string }
-  | { type: 'stopped' } | { type: 'state'; state: 'connecting' | 'flow' };
+  | { type: 'stopped' } | { type: 'reference' } | { type: 'state'; state: 'connecting' | 'flow' };
 export interface AttitudeApi {
   startAttitude(options: { uri: string; addressHex: string }): Promise<{ success: boolean; message?: string }>;
   stopAttitude(): Promise<{ success: boolean; message?: string }>;
@@ -23,6 +29,29 @@ export function isAttitudeSample(value: unknown): value is AttitudeSample {
     && 'pitch' in value && typeof value.pitch === 'number' && Number.isFinite(value.pitch)
     && 'yaw' in value && typeof value.yaw === 'number' && Number.isFinite(value.yaw)
     && 'timestampMs' in value && typeof value.timestampMs === 'number' && Number.isFinite(value.timestampMs);
+}
+
+export function isFlightPoseSample(value: unknown): value is FlightPoseSample {
+  return isAttitudeSample(value)
+    && 'x' in value && typeof value.x === 'number' && Number.isFinite(value.x)
+    && 'y' in value && typeof value.y === 'number' && Number.isFinite(value.y)
+    && 'z' in value && typeof value.z === 'number' && Number.isFinite(value.z);
+}
+
+export function relativeFlightPose(sample: FlightPoseSample, reference: FlightPoseSample,
+  origin: { x: number; y: number; z: number; yaw: number }) {
+  const heading = MathUtils.degToRad(reference.yaw);
+  const dx = sample.x - reference.x;
+  const dy = sample.y - reference.y;
+  const forward = dx * Math.cos(heading) + dy * Math.sin(heading);
+  const left = -dx * Math.sin(heading) + dy * Math.cos(heading);
+  const relativeYaw = MathUtils.euclideanModulo(sample.yaw - reference.yaw + 180, 360) - 180;
+  return {
+    x: origin.x - forward * Math.cos(origin.yaw) + left * Math.sin(origin.yaw),
+    y: origin.y + sample.z - reference.z,
+    z: origin.z + forward * Math.sin(origin.yaw) + left * Math.cos(origin.yaw),
+    yaw: origin.yaw + MathUtils.degToRad(relativeYaw),
+  };
 }
 
 export function getAttitudeApi(): AttitudeApi | undefined {

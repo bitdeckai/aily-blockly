@@ -1,6 +1,11 @@
 import * as Blockly from 'blockly';
 import { Order } from 'blockly/python';
 
+export const CRAZYFLIE_FLIGHT_COLOUR = '#4a87c6';
+export const CRAZYFLIE_BASIC_FLIGHT_TYPES: readonly string[] = [
+  'cf_crazyflie_link', 'cf_test_crazyflie_link', 'cf_takeoff', 'cf_land',
+];
+
 export type MotionKind = 'takeoff' | 'land' | 'move' | 'turn' | 'circle' | 'hover';
 export interface MotionCommand {
   kind: MotionKind;
@@ -193,7 +198,7 @@ export function registerCrazyflieMotionBlocks(generator: Blockly.CodeGenerator, 
     args.push(...spec.inputs.map(item => ({ type: 'input_value', name: item.name, check: 'Number' })));
     Blockly.defineBlocksWithJsonArray([{
       type: spec.type, message0: chinese ? spec.zh : spec.en, args0: args,
-      previousStatement: null, nextStatement: null, colour: '#4a87c6',
+      previousStatement: null, nextStatement: null, colour: CRAZYFLIE_FLIGHT_COLOUR,
       tooltip: chinese
         ? '需定位甲板；先连接再起飞。机体坐标 X 向前、Y 向左、Z 向上；悬停不会关闭电机。'
         : 'Requires positioning. Connect then take off. Body X forward, Y left, Z up. Hover does not turn off motors.',
@@ -226,13 +231,60 @@ export function registerCrazyflieMotionBlocks(generator: Blockly.CodeGenerator, 
 
 export function createCrazyflieMotionToolbox(chinese: boolean) {
   return {
-    kind: 'category', name: chinese ? '飞行运动' : 'Flight motion',
-    categoryId: 'crazyflie-motion', icon: 'fa-light fa-drone-front', colour: '#4a87c6',
+    kind: 'category', name: 'Crazyflie',
+    categoryId: 'crazyflie-motion', icon: 'fa-light fa-drone-front', colour: CRAZYFLIE_FLIGHT_COLOUR,
     contents: motionBlocks.map(spec => ({
       kind: 'block', type: spec.type,
       inputs: Object.fromEntries(spec.inputs.map(item => [
         item.name, { shadow: { type: 'math_number', fields: { NUM: item.value } } },
       ])),
     })),
+  };
+}
+
+export interface CrazyflieToolboxItem {
+  kind: string;
+  type?: string;
+  name?: string;
+  categoryId?: string;
+  ailyLibraryName?: string;
+  contents?: CrazyflieToolboxItem[];
+  [key: string]: unknown;
+}
+
+export function isCrazyflieFlightToolbox(item: CrazyflieToolboxItem): boolean {
+  return item.categoryId === 'crazyflie-motion'
+    || item.ailyLibraryName === '@aily-project/lib-crazyflie-motion'
+    || item.name === 'Crazyflie';
+}
+
+export function mergeCrazyflieFlightToolbox(
+  incoming: CrazyflieToolboxItem, existing?: CrazyflieToolboxItem,
+): CrazyflieToolboxItem {
+  const hidden = new Set(['cf_delay', 'cf_print_text', 'cf_print', 'cf_test_link',
+    'cf_link_config', 'cf_scan_links', 'cf_radio_config']);
+  const clean = (items: CrazyflieToolboxItem[]): CrazyflieToolboxItem[] => {
+    const seen = new Set<string>();
+    return items.filter(item => {
+      if (item.type && hidden.has(item.type)) return false;
+      const key = item.type || (item.kind === 'category' ? item.name : undefined);
+      if (key && seen.has(key)) return false;
+      if (key) seen.add(key);
+      return true;
+    }).map(item => item.contents ? { ...item, contents: clean(item.contents) } : item)
+      .filter(item => item.kind !== 'category' || !item.contents || item.contents.length > 0);
+  };
+  const contents = clean([
+    ...(incoming.contents || []), ...(existing?.contents || []),
+    ...createCrazyflieMotionToolbox(true).contents,
+  ]);
+  const priority = (item: CrazyflieToolboxItem): number => {
+    const index = item.type ? CRAZYFLIE_BASIC_FLIGHT_TYPES.indexOf(item.type) : -1;
+    return index < 0 ? CRAZYFLIE_BASIC_FLIGHT_TYPES.length : index;
+  };
+  contents.sort((a, b) => priority(a) - priority(b));
+  return {
+    ...existing, ...incoming, name: 'Crazyflie', categoryId: 'crazyflie-motion',
+    colour: CRAZYFLIE_FLIGHT_COLOUR, contents,
   };
 }

@@ -1,9 +1,14 @@
 <div class="sim-panel">
   <div class="sim-panel__toolbar">
     <div class="sim-panel__title">3D 模拟器</div>
+    <select class="sim-scene-select" aria-label="场景模型" [value]="simService.roomPreset$.value"
+      [disabled]="running" (change)="onPresetSelected($event)">
+      <option value="classroom">教室</option>
+      <option value="home">家庭</option>
+    </select>
     <label class="attitude-switch">
-      <input type="checkbox" [checked]="attitudeActive" [disabled]="attitudePending" (change)="toggleAttitude()">
-      显示真实姿态
+      <input type="checkbox" [checked]="attitudeActive" [disabled]="attitudePending || running" (change)="toggleAttitude()">
+      只读姿态
     </label>
     <div class="sim-panel__status" [class.running]="running" [class.loading]="!sceneReady && !running">
       {{ running ? '运行中' : (sceneReady ? '已就绪' : '加载中') }}
@@ -11,29 +16,8 @@
   </div>
 
   <div class="sim-panel__controls">
-    <button class="sim-btn" (click)="setPreset('classroom')">教室</button>
-    <button class="sim-btn" (click)="setPreset('home')">家庭</button>
-    <button class="sim-btn" (click)="insertStarterFlow()">新建起飞-降落示例</button>
-    <button class="sim-btn" (click)="openFloorPlanFilePicker()">导入平面图</button>
-    <button class="sim-btn" (click)="openSceneModelFilePicker()">导入3D模型</button>
-    <button class="sim-btn" (click)="clearFloorPlan()">清除贴图</button>
-    <button class="sim-btn" (click)="clearSceneModel()">清除3D模型</button>
-    <button class="sim-btn" (click)="resetDronePose()">复位飞行器</button>
-    <button class="sim-btn" (click)="resetCameraView()">重置视角</button>
-    <button class="sim-btn" (click)="togglePause()" [disabled]="!running">{{ paused ? '继续' : '暂停' }}</button>
-    <button class="sim-btn" (click)="stepOnce()" [disabled]="!running">单步</button>
-    <label class="speed-control">
-      速度
-      <input type="range" min="0.2" max="3" step="0.1" [value]="speed" (input)="onSpeedChanged($any($event.target).value)">
-      <span>{{ speed | number:'1.1-1' }}x</span>
-    </label>
-    <label class="speed-control explosion-control">
-      爆炸图
-      <input type="range" min="0" max="100" step="1" [value]="explosionPercent" (input)="setExplosionAmount($any($event.target).value)">
-      <span>{{ explosionPercent }}%</span>
-    </label>
-    <input #floorPlanInput type="file" accept="image/*" (change)="onFloorPlanSelected($event)" hidden>
-    <input #sceneModelInput type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" (change)="onSceneModelSelected($event)" hidden>
+    <button class="sim-btn" [disabled]="running" (click)="insertStarterFlow()">新建飞行示例</button>
+    <button class="sim-btn" [disabled]="running" title="仅复位三维模型，不控制真机" (click)="resetDronePose()">复位模型</button>
     <div class="sim-view-tools" role="toolbar" aria-label="三维视角控制">
       <button class="sim-icon-btn" title="放大 (+)" aria-label="放大" (click)="zoomCamera(0.7)"><i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i></button>
       <button class="sim-icon-btn" title="缩小 (-)" aria-label="缩小" (click)="zoomCamera(1.4)"><i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i></button>
@@ -50,11 +34,11 @@
 
   <div class="sim-panel__canvas-wrap">
     <div class="sim-hud">
-      <span>{{ attitudeActive ? '模拟位置 X' : 'X' }} {{ telemetry.xCm }} cm</span>
+      <span>{{ realPoseShown ? '真机估计 X' : (attitudeActive ? '模拟位置 X' : 'X') }} {{ telemetry.xCm }} cm</span>
       <span>Y {{ telemetry.yCm }} cm</span>
       <span>高度 {{ telemetry.altitudeCm }} cm</span>
-      <span *ngIf="!attitudeActive">模拟航向 {{ telemetry.yawDeg }}°</span>
-      <span *ngIf="attitudeActive && attitudeReception.sample as sample">
+      <span *ngIf="!displayedAttitude">模拟航向 {{ telemetry.yawDeg }}°</span>
+      <span *ngIf="displayedAttitude as sample">
         Roll {{ sample.roll | number:'1.1-1' }}° · Pitch {{ sample.pitch | number:'1.1-1' }}° · Yaw {{ sample.yaw | number:'1.1-1' }}°
       </span>
       <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel }}</span>
@@ -90,15 +74,15 @@
         <label>URI <input [value]="attitudeUri" [disabled]="attitudeActive || attitudePending" (input)="attitudeUri = $any($event.target).value"></label>
         <label>地址 <input [value]="attitudeAddress" [disabled]="attitudeActive || attitudePending" (input)="attitudeAddress = $any($event.target).value"></label>
       </div>
-      <div>仅同步真实姿态，位置与轨迹仍为模拟。监测不发送电机或飞行指令；请关闭其他占用 Crazyradio 的客户端。</div>
+      <div>“只读姿态”仅监测姿态，不控制电机。“模拟+真机”自动共享流程连接，按真机 XYZ 和姿态更新模型、轨迹；首帧对齐场景起点。请关闭其他占用 Crazyradio 的客户端。</div>
     </details>
-    <div *ngIf="attitudeActive" class="attitude-metrics" [class.attitude-metrics--stale]="attitudeMetrics.stale" role="status">
-      {{ attitudeStatus }} · 接收 {{ attitudeMetrics.hz | number:'1.0-1' }} Hz ·
+    <div *ngIf="attitudeActive || realPoseShown" class="attitude-metrics" [class.attitude-metrics--stale]="attitudeMetrics.stale" role="status">
+      {{ realPoseShown ? simService.realStatus$.value : attitudeStatus }} · 接收 {{ attitudeMetrics.hz | number:'1.0-1' }} Hz ·
       {{ attitudeMetrics.ageMs === null ? '等待数据' : ('距上次接收 ' + (attitudeMetrics.ageMs | number:'1.0-0') + ' ms') }}
-      {{ attitudeMetrics.stale ? '（暂无新数据，保持末次姿态）' : '' }}
+      {{ attitudeMetrics.stale ? '（暂无新数据，保持末次实测值）' : '' }}
     </div>
-    <div class="sim-panel__step">{{ stepText }}</div>
-    <div class="sim-panel__logs">
+    <div class="sim-panel__step" [title]="stepText">{{ stepText }}</div>
+    <div *ngIf="logs.length" class="sim-panel__logs">
       @for (log of logs; track $index) {
         <div class="sim-log-line">{{ log }}</div>
       }

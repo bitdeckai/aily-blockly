@@ -74,14 +74,12 @@ import { AttitudeReception, attitudeQuaternion, getAttitudeApi } from '../../../
 })
 export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('canvasHost', { static: true }) private canvasHostRef!: ElementRef<HTMLDivElement>;
-  @ViewChild('floorPlanInput', { static: true }) private floorPlanInputRef!: ElementRef<HTMLInputElement>;
-  @ViewChild('sceneModelInput', { static: true }) private sceneModelInputRef!: ElementRef<HTMLInputElement>;
   @ViewChild('orientationCanvas', { static: true }) private orientationCanvasRef!: ElementRef<HTMLCanvasElement>;
 
   running = false;
   paused = false;
   speed = 1;
-  stepText = 'idle';
+  stepText = '就绪';
   logs: string[] = [];
   telemetry = { xCm: 0, yCm: 0, altitudeCm: 6, yawDeg: 0 };
   gridVisible = false;
@@ -89,7 +87,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   sceneReady = false;
   measureMode = false;
   measureStatus = '';
-  explosionPercent = 0;
   detectedDeckLabels: string[] = [];
   axesVisible = true;
   selectedView = 'iso';
@@ -122,8 +119,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private droneGroup: Group | null = null;
   private propellerMeshes: Group[] = [];
   private propellerDirections: number[] = [];
-  private explodedModelRoot: Group | null = null;
-  private explodedParts: Array<{ node: Object3D; origin: Vector3; direction: Vector3 }> = [];
   private deckMountGroup: Group | null = null;
   private detectedDeckTypes: CrazyflieDeckType[] = [];
   private readonly deckLabels: Record<CrazyflieDeckType, string> = {
@@ -240,7 +235,26 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   setPreset(preset: 'classroom' | 'home'): void {
+    if (this.running) {
+      this.message.error('请先结束当前流程再切换场景');
+      return;
+    }
     this.simService.setRoomPreset(preset);
+  }
+
+  onPresetSelected(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'classroom' || value === 'home') this.setPreset(value);
+    else this.message.error('不支持的场景模型');
+  }
+
+  get realPoseShown(): boolean {
+    return this.simService.poseSource$.value === 'real';
+  }
+
+  get displayedAttitude() {
+    return this.realPoseShown ? this.simService.realAttitude$.value
+      : this.attitudeActive ? this.attitudeReception.sample : null;
   }
 
   async toggleAttitude(): Promise<void> {
@@ -276,7 +290,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           } else if (event.type === 'state') {
             this.attitudeReception = new AttitudeReception();
             this.attitudeStatus = event.state === 'flow' ? '使用流程连接，等待姿态数据…' : '正在连接真机…';
-          } else {
+          } else if (event.type === 'stopped') {
             this.attitudeStatus = '姿态连接已停止';
           }
         }));
@@ -303,46 +317,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     } finally {
       this.attitudePending = false;
     }
-  }
-
-  async onFloorPlanSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input?.files?.[0];
-    if (!file) {
-      return;
-    }
-    await this.simService.importFloorPlan(file);
-    if (input) {
-      input.value = '';
-    }
-  }
-
-  openFloorPlanFilePicker(): void {
-    this.floorPlanInputRef?.nativeElement?.click();
-  }
-
-  openSceneModelFilePicker(): void {
-    this.sceneModelInputRef?.nativeElement?.click();
-  }
-
-  async onSceneModelSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input?.files?.[0];
-    if (!file) {
-      return;
-    }
-    await this.simService.importSceneModel(file);
-    if (input) {
-      input.value = '';
-    }
-  }
-
-  clearFloorPlan(): void {
-    this.simService.clearFloorPlan();
-  }
-
-  clearSceneModel(): void {
-    this.simService.clearSceneModel();
   }
 
   resetDronePose(): void {
@@ -423,9 +397,14 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   insertStarterFlow(): void {
+    if (this.running) {
+      this.message.error('请先结束当前流程再新建示例');
+      return;
+    }
+    const linkType = 'cf_crazyflie_link';
     const takeoffType = 'cf_takeoff';
     const landType = 'cf_land';
-    if (!(Blockly.Blocks as any)[takeoffType] || !(Blockly.Blocks as any)[landType]) {
+    if (!Blockly.Blocks[linkType] || !Blockly.Blocks[takeoffType] || !Blockly.Blocks[landType]) {
       this.message.error('Crazyflie 起飞/降落积木尚未加载，请先打开 Crazyflie 工程。');
       return;
     }
@@ -433,36 +412,27 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.blocklyService.createPage('Crazyflie 起飞降落示例');
     const workspace: any = this.blocklyService.workspace;
     try {
+      const link = workspace.newBlock(linkType);
       const takeoff = workspace.newBlock(takeoffType);
       const land = workspace.newBlock(landType);
+      link.initSvg();
       takeoff.initSvg();
       land.initSvg();
-      if (!takeoff.nextConnection || !land.previousConnection) {
+      if (!link.nextConnection || !takeoff.previousConnection || !takeoff.nextConnection || !land.previousConnection) {
         throw new Error('积木连接口不可用');
       }
+      link.nextConnection.connect(takeoff.previousConnection);
       takeoff.nextConnection.connect(land.previousConnection);
-      takeoff.moveBy(80, 80);
+      link.moveBy(80, 80);
+      link.render();
       takeoff.render();
       land.render();
-      workspace.centerOnBlock?.(takeoff.id);
+      workspace.centerOnBlock?.(link.id);
       this.message.success('示例已插入新页面；默认仅模拟，不会自动起飞。');
     } catch (error) {
       console.error('插入 Crazyflie 示例失败:', error);
       this.message.error('插入示例失败，请确认 Crazyflie 积木库已加载。');
     }
-  }
-
-  togglePause(): void {
-    this.simService.togglePause();
-  }
-
-  stepOnce(): void {
-    this.simService.requestStepOnce();
-  }
-
-  onSpeedChanged(value: string): void {
-    const speed = Number(value || 1);
-    this.simService.setSpeed(speed);
   }
 
   get trailThemeLabel(): string {
@@ -857,14 +827,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return group;
   }
 
-  setExplosionAmount(value: string | number): void {
-    this.explosionPercent = MathUtils.clamp(Number(value) || 0, 0, 100);
-    const offset = (this.explosionPercent / 100) * 0.075;
-    this.explodedParts.forEach(({ node, origin, direction }) => {
-      node.position.copy(origin).addScaledVector(direction, offset);
-    });
-  }
-
   registerDeckShellAsset(deck: CrazyflieDeckType, url: string): void {
     this.deckShellAssets[deck] = url;
     if (this.detectedDeckTypes.includes(deck)) {
@@ -945,43 +907,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
         const visualRoot = collada.scene;
         visualRoot.name = 'Bitcraze Crazyflie 2 assembly';
-        this.explodedParts = [];
-        visualRoot.children.slice().forEach((part) => {
-          let hasMesh = false;
-          part.traverse((node) => {
-            if ((node as Mesh).isMesh) {
-              hasMesh = true;
-            }
-          });
-          if (!hasMesh) {
-            return;
-          }
-
-          const wrapper = new Group();
-          wrapper.name = `${part.name || 'component'} exploded component`;
-          wrapper.position.copy(part.position);
-          wrapper.quaternion.copy(part.quaternion);
-          wrapper.scale.copy(part.scale);
-          part.position.set(0, 0, 0);
-          part.quaternion.identity();
-          part.scale.set(1, 1, 1);
-          visualRoot.remove(part);
-          wrapper.add(part);
-          visualRoot.add(wrapper);
-
-          const direction = wrapper.position.clone().sub(new Vector3(0, 0, 0.015));
-          if (direction.lengthSq() < 0.000001) {
-            direction.set(0, 1, 0);
-          } else {
-            direction.normalize();
-          }
-          this.explodedParts.push({ node: wrapper, origin: wrapper.position.clone(), direction });
-        });
-
         const assemblyRoot = new Group();
         assemblyRoot.position.y = -0.015;
         assemblyRoot.add(visualRoot);
-        this.explodedModelRoot = assemblyRoot;
         group.add(assemblyRoot);
 
         this.deckMountGroup = new Group();
@@ -989,7 +917,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.deckMountGroup.position.y = -0.015;
         group.add(this.deckMountGroup);
         this.updateDetectedDeckShells(this.detectedDeckTypes);
-        this.setExplosionAmount(this.explosionPercent);
         this.loadBitcrazePropellers(group);
       },
       undefined,
@@ -1164,10 +1091,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.subscriptions.push(
       this.simService.step$.subscribe((step) => {
         if (!step) {
-          this.stepText = this.running ? 'running...' : 'idle';
+          this.stepText = this.running ? '运行中…' : '就绪';
           return;
         }
-        this.stepText = `step ${step.current}/${step.total}: ${step.label}`;
+        this.stepText = `步骤 ${step.current}/${step.total}: ${step.label}`;
       }),
     );
 
@@ -1179,10 +1106,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.subscriptions.push(
       this.simService.pose$.subscribe((pose) => {
-        if (!this.attitudeActive) this.aircraftYaw = pose.yaw;
+        if (this.realPoseShown || !this.attitudeActive) this.aircraftYaw = pose.yaw;
         this.targetPosition.set(pose.x, pose.y, pose.z);
         this.telemetry = {
-          xCm: Math.round(pose.x * 100),
+          xCm: Math.round(-pose.x * 100),
           yCm: Math.round(pose.z * 100),
           altitudeCm: Math.max(0, Math.round(pose.y * 100)),
           yawDeg: Math.round(MathUtils.radToDeg(pose.yaw)),
@@ -2056,6 +1983,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       { side: -1, bay: 0, color: '#8fa9bb' },
       { side: -1, bay: 3, color: '#eee6d9' },
       { side: -1, bay: 6, color: '#a55947' },
+      { side: 1, bay: 0, color: '#477caa' },
       { side: 1, bay: 2, color: '#556e63' },
       { side: 1, bay: 5, color: '#e1c38b' },
     ];
@@ -3206,22 +3134,24 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.droneGroup.position.x = MathUtils.lerp(this.droneGroup.position.x, this.targetPosition.x, 0.16);
       this.droneGroup.position.y = MathUtils.lerp(this.droneGroup.position.y, this.targetPosition.y, 0.16);
       this.droneGroup.position.z = MathUtils.lerp(this.droneGroup.position.z, this.targetPosition.z, 0.16);
-      const sample = this.attitudeActive ? this.attitudeReception.sample : null;
+      const sample = this.displayedAttitude;
       if (sample) {
         this.droneGroup.quaternion.slerp(
           attitudeQuaternion(sample.roll, sample.pitch, sample.yaw, this.defaultDroneYawOffset),
           1 - Math.exp(-Math.max(0, deltaSec) / 0.035),
         );
-      } else if (!this.attitudeActive) {
+      } else if (!this.attitudeActive && !this.realPoseShown) {
         this.aircraftYaw = this.simService.pose$.value.yaw;
         this.droneGroup.quaternion.slerp(
           attitudeQuaternion(0, 0, MathUtils.radToDeg(this.aircraftYaw), this.defaultDroneYawOffset),
           1 - Math.exp(-Math.max(0, deltaSec) / 0.035),
         );
       }
-      if (this.attitudeActive && now - this.lastAttitudeMetricsTs >= 200) {
+      if ((this.attitudeActive || this.realPoseShown) && now - this.lastAttitudeMetricsTs >= 200) {
         this.lastAttitudeMetricsTs = now;
-        this.zone.run(() => { this.attitudeMetrics = this.attitudeReception.metrics(now); });
+        this.zone.run(() => {
+          this.attitudeMetrics = (this.realPoseShown ? this.simService.realReception : this.attitudeReception).metrics(now);
+        });
       }
       this.updatePropellerAnimation(deltaSec);
       if (this.running && !this.paused) {

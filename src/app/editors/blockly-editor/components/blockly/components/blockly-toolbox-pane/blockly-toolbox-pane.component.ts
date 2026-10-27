@@ -313,7 +313,11 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
       return this.items;
     }
 
-    return this.items.filter((item) => String(item.name || '').toLowerCase().trim() !== 'crazyflie');
+    return this.items.filter((item) => !['crazyflie', 'crazyradio'].includes(String(item.name || '').toLowerCase().trim()));
+  }
+
+  get crazyradioRootItem(): BlocklyToolboxFacadeItem | null {
+    return this.showDeckPanel ? this.items.find(item => item.name === 'Crazyradio') || null : null;
   }
 
   onDeckRowClick(deckKey: string): void {

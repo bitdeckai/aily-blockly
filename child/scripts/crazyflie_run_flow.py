@@ -9,7 +9,7 @@ import os
 import re
 import sys
 import time
-from threading import Event
+from threading import Event, Thread
 from pathlib import Path
 from contextlib import contextmanager, ExitStack
 
@@ -197,6 +197,8 @@ def parse_commands(code: str):
 
         if re.match(r"^cf_test_link\s*\(\s*(?:['\"].*?['\"]\s*(?:,\s*['\"].*?['\"]\s*)?)?\)\s*;?$", line):
             return ("test_link", None)
+        if re.match(r"^cf_scan_links\s*\(\s*\)\s*;?$", line):
+            return ("scan_links", None)
         if re.match(r"^cf_detect_flow_v2\s*\(\s*\)\s*;?$", line):
             return ("detect_flow_v2", None)
         if re.match(r"^cf_detect_multiranger\s*\(\s*\)\s*;?$", line):
@@ -383,6 +385,7 @@ def parse_commands(code: str):
         r"cf_crazyflie_link\s*\(\s*\)",
         r"cf_test_crazyflie_link\s*\(\s*\)",
         r"cf_test_link\s*\(\s*(?:['\"].*?['\"]\s*(?:,\s*['\"].*?['\"]\s*)?)?\)",
+        r"cf_scan_links\s*\(\s*\)",
         r"cf_detect_flow_v2\s*\(\s*\)",
         r"cf_detect_multiranger\s*\(\s*\)",
         r"cf_detect_led_ring\s*\(\s*\)",
@@ -509,8 +512,16 @@ def test_link(cflib_module, radio_driver_cls, address_hex: str | None):
     return radio_status, links, scan_error, normalized_address
 
 
-def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
+def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow_position=False,
+             stop_requested=None):
     validate_motion_sequence(commands)
+    radio_prefix_length = 0
+    for cmd, _ in commands:
+        if cmd not in {"set_link", "test_link", "scan_links"}:
+            break
+        radio_prefix_length += 1
+    if any(cmd == "scan_links" for cmd, _ in commands[radio_prefix_length:]):
+        raise ValueError("Crazyradio: place scanning at the start of the flow, before connecting")
     import cflib.crtp
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
     from cflib.crazyflie.log import LogConfig
@@ -518,16 +529,30 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
     from cflib.positioning.motion_commander import MotionCommander
     from cflib.crtp.radiodriver import RadioDriver
     from cflib.utils.multiranger import Multiranger
+    pose_health = None
+
+    def ensure_running():
+        if stop_requested is not None and stop_requested.is_set():
+            raise RuntimeError("Flight cancelled; remaining commands skipped")
+        if pose_health is not None:
+            pose_health()
 
     @contextmanager
     def open_connection(connection_uri):
+        nonlocal pose_health
+        ensure_running()
         with SyncCrazyflie(connection_uri) as scf:
-            if attitude:
+            if attitude or follow_position:
                 from crazyflie_attitude import attitude_logging
                 def emit(sample):
                     print(f"__ATTITUDE__:{json.dumps(sample)}", flush=True)
-                with attitude_logging(scf, emit):
-                    yield scf
+                with attitude_logging(scf, emit, follow_position=follow_position) as health:
+                    pose_health = health if follow_position else None
+                    try:
+                        ensure_running()
+                        yield scf
+                    finally:
+                        pose_health = None
             else:
                 yield scf
 
@@ -552,12 +577,14 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
                     pass
 
         def ensure_link_ok():
+            ensure_running()
             if state["error"]:
                 raise RuntimeError(f"Crazyflie link unstable: {state['error']}")
 
         return ensure_link_ok
 
     def interruptible_sleep(seconds: float, ensure_link_ok):
+        ensure_running()
         remain = max(0.0, float(seconds))
         if remain <= 0:
             ensure_link_ok()
@@ -945,6 +972,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
         print(f"__TELEM__:{json.dumps(telem, ensure_ascii=False)}", flush=True)
 
     def require_link_gate(cmd_name: str):
+        ensure_running()
         if cmd_name in {
             "test_crazyflie_link",
             "takeoff", "move", "land", "motion",
@@ -956,10 +984,47 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
         } and not link_gate_open:
             raise RuntimeError(f"CRAZYFLIE_LINK_REQUIRED: Run 'Crazyflie link' block before {cmd_name}")
 
+    # Radio scans must finish before any flight branch opens its shared connection.
+    for cmd, arg in commands[:radio_prefix_length]:
+        ensure_running()
+        step_index += 1
+        _emit_step(step_index, total_steps, _step_label(cmd, arg))
+        if cmd == "set_link":
+            set_active_link(arg)
+            executed.append(f"set_link:{active_uri}:{active_address}")
+        elif cmd == "test_link":
+            strict_radio_test_or_raise()
+            print(radio_status, flush=True)
+            executed.append("test_link")
+        elif cmd == "scan_links":
+            if not active_uri.startswith("radio://0/"):
+                raise ValueError("Crazyradio: scanning supports radio 0; use radio://0/... for scanning")
+            radio_status, links, scan_error, active_address = test_link(cflib, RadioDriver, active_address)
+            ensure_running()
+            if not radio_present(radio_status) or scan_error:
+                raise RuntimeError(f"RADIO_SCAN_FAILED: radioStatus={radio_status}, scanError={scan_error}")
+            print(f"Crazyradio: found {len(links)} aircraft URI(s)", flush=True)
+            for link in links:
+                print(link, flush=True)
+            executed.append("scan_links")
+    commands = commands[radio_prefix_length:]
+    if not commands:
+        return {
+            "success": True,
+            "message": "Radio flow executed",
+            "radioStatus": radio_status,
+            "uri": active_uri,
+            "addressHex": active_address,
+            "links": links,
+            "scanError": scan_error,
+            "executed": executed,
+        }
+
     if not has_motion_cmd and not has_flow_detect_cmd and not has_mr_cmd and not has_led_cmd and not has_buzzer_cmd and not has_motor_cmd:
         with ExitStack() as connections:
             shared_scf = None
             for cmd, arg in commands:
+                ensure_running()
                 if cmd == "set_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -968,7 +1033,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
                 elif cmd == "crazyflie_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
-                    if attitude and shared_scf is None:
+                    if (attitude or follow_position) and shared_scf is None:
                         shared_scf = connections.enter_context(open_connection(active_uri))
                     strict_crazyflie_connect_or_raise(shared_scf)
                     link_gate_open = True
@@ -992,7 +1057,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
                     wait_sec = max(0.0, float(arg))
                     executed.append(f"delay:{wait_sec}")
-                    time.sleep(wait_sec)
+                    interruptible_sleep(wait_sec, ensure_running)
                 elif cmd == "print":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1720,6 +1785,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False):
                         ok = buzzer_beep(scf, duration, times)
                         executed.append(f"buzzer_beep:{duration}:{times}:{'1' if ok else '0'}")
                         ensure_link_ok()
+            ensure_link_ok()
     except Exception as exc:
         message = str(exc)
         if "Crazyflie link unstable:" in message and not message.startswith("LINK_ABORTED:"):
@@ -1754,7 +1820,18 @@ def main():
     parser.add_argument("--address-hex", default=DEFAULT_ADDRESS_HEX)
     parser.add_argument("--lib-path", default=None)
     parser.add_argument("--attitude", action="store_true", help="Stream attitude using flow connections")
+    parser.add_argument("--follow-position", action="store_true", help="Require live XYZ/RPY for synchronized visualization")
+    parser.add_argument("--control-stdin", action="store_true", help="Accept graceful cancellation on stdin")
     args = parser.parse_args()
+    stop_requested = Event()
+    if args.control_stdin:
+        def watch_control():
+            for line in sys.stdin:
+                if line.strip() == "stop":
+                    stop_requested.set()
+                    return
+            stop_requested.set()
+        Thread(target=watch_control, daemon=True).start()
 
     loaded_from = _append_cflib_path(args.lib_path)
     if not loaded_from:
@@ -1778,7 +1855,8 @@ def main():
             }, ensure_ascii=False))
             return 2
 
-        result = run_flow(args.uri, commands, args.address_hex, attitude=args.attitude)
+        result = run_flow(args.uri, commands, args.address_hex, attitude=args.attitude,
+                          follow_position=args.follow_position, stop_requested=stop_requested)
         result["loadedFrom"] = loaded_from
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("success") else 2

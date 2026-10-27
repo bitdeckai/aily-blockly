@@ -297,12 +297,12 @@ async function runFlow(options = {}) {
   };
 }
 
-function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArgs = [], includeTimeoutArg = true, onLine) {
+function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArgs = [], includeTimeoutArg = true, onLine, onChild) {
   const args = [];
   if (pythonCmd === "py" || pythonCmd.toLowerCase().endsWith("\\py.exe")) {
     args.push("-3");
   }
-  args.push("-u");
+  args.push("-B", "-u");
   args.push(scriptPath);
   if (includeTimeoutArg && Number.isFinite(timeoutMs) && timeoutMs > 0) {
     args.push("--timeout-ms", String(timeoutMs));
@@ -317,14 +317,16 @@ function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArg
   return new Promise((resolve, reject) => {
     const child = spawn(pythonCmd, args, {
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    onChild?.(child);
 
     let stdout = "";
     let stderr = "";
     let stdoutPending = "";
     let stderrPending = "";
     let timedOut = false;
+    child.stdin.on("error", error => { stderr += `Control input error: ${error.message}\n`; });
 
     const emitLine = (source, line) => {
       if (!line) {
@@ -370,16 +372,14 @@ function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArg
     });
 
     child.on("error", (error) => {
+      clearTimeout(killTimer);
       reject({ error, stdout, stderr, pythonCmd, args });
     });
 
     const killTimer = setTimeout(() => {
       timedOut = true;
-      try {
-        child.kill();
-      } catch (_error) {
-        // ignore kill errors
-      }
+      if (child.stdin.writable) child.stdin.write("stop\n");
+      onLine?.({ source: "stderr", line: "Flow timeout: requested cancellation; waiting for the current action and landing." });
     }, Math.max(1000, timeoutMs + 4000));
 
     child.on("close", (code) => {
@@ -400,7 +400,7 @@ function runScriptStream(pythonCmd, scriptPath, timeoutMs, libPathHint, extraArg
   });
 }
 
-async function runFlowStream(event, options = {}, onAttitude = () => {}) {
+async function runFlowStream(event, options = {}, onAttitude = () => {}, onChild) {
   const timeoutMs = Number(options.timeoutMs || 45000);
   const scriptPath = resolveChildPath("scripts", "crazyflie_run_flow.py");
   const libPathHint = getCrazyflieLibPathHint();
@@ -425,13 +425,17 @@ async function runFlowStream(event, options = {}, onAttitude = () => {}) {
         scriptPath,
         timeoutMs,
         libPathHint,
-        [...connection.args, "--code-base64", codeBase64, "--attitude"],
+        [...connection.args, "--code-base64", codeBase64, "--attitude", "--control-stdin",
+          ...(options.followPosition ? ["--follow-position"] : [])],
         false,
         ({ source, line }) => {
           if (line.startsWith("__ATTITUDE__:")) {
             const payload = parseJsonOutput(line.slice("__ATTITUDE__:".length));
-            if (payload?.type === "sample"
-                && [payload.timestampMs, payload.roll, payload.pitch, payload.yaw].every(Number.isFinite)) {
+            if (payload?.type === "reference") {
+              onAttitude(payload);
+            } else if (payload?.type === "sample"
+                && [payload.timestampMs, payload.roll, payload.pitch, payload.yaw].every(Number.isFinite)
+                && (!options.followPosition || [payload.x, payload.y, payload.z].every(Number.isFinite))) {
               onAttitude(payload);
             } else {
               onAttitude({ type: "error", message: payload?.message || "Invalid flow attitude sample" });
@@ -443,7 +447,8 @@ async function runFlowStream(event, options = {}, onAttitude = () => {}) {
             return;
           }
           sendLog({ source, line });
-        }
+        },
+        onChild
       );
 
       const parsed = parseLastJsonLine(stdout) || parseLastJsonLine(stderr);
@@ -472,8 +477,10 @@ async function runFlowStream(event, options = {}, onAttitude = () => {}) {
       const parsed = parseScriptResultFromError(errorInfo);
       if (parsed) {
         return {
-          success: !!parsed.success,
-          message: parsed.message || (parsed.success ? "Flow executed" : "Flow failed"),
+          success: errorInfo?.error?.message === "Process timeout" ? false : !!parsed.success,
+          message: errorInfo?.error?.message === "Process timeout"
+            ? "Flow timed out; executor exited after the cancellation request"
+            : parsed.message || (parsed.success ? "Flow executed" : "Flow failed"),
           radioStatus: parsed.radioStatus || "unknown",
           links: parsed.links || [],
           executed: parsed.executed || [],
@@ -481,12 +488,18 @@ async function runFlowStream(event, options = {}, onAttitude = () => {}) {
           detail: parsed,
         };
       }
-      errors.push({
+      const failure = {
         pythonCmd,
         message: errorInfo?.error?.message || "unknown error",
         stdout: errorInfo?.stdout || "",
         stderr: errorInfo?.stderr || "",
-      });
+      };
+      errors.push(failure);
+      // Once a process can have sent commands, never replay the plan in another interpreter.
+      if (!["ENOENT", "EACCES"].includes(errorInfo?.error?.code)) {
+        return { success: false, message: failure.message, radioStatus: "error", executed: [],
+          detail: failure };
+      }
     }
   }
 
@@ -567,6 +580,7 @@ function registerCrazyflieHandlers() {
   let radioOperation = false;
   let operationSenderId = null;
   let monitorShutdown = null;
+  let flowControl = null;
 
   const sendAttitude = payload => {
     if (session && !session.sender.isDestroyed()) {
@@ -613,18 +627,38 @@ function registerCrazyflieHandlers() {
     }
     if (monitorShutdown) await monitorShutdown;
   };
-  const withRadio = async (event, options, run) => {
+  const withRadio = async (event, options, run, flight = false) => {
     if (radioOperation || (session && session.sender.id !== event.sender.id)) {
       return { success: false, radioStatus: "busy", message: "Crazyradio is busy in another operation or window", links: [], executed: [] };
     }
     radioOperation = true;
     operationSenderId = event.sender.id;
+    const requestStop = () => {
+      if (!flowControl) return;
+      flowControl.stopping = true;
+      if (flowControl.child?.stdin.writable) flowControl.child.stdin.write("stop\n");
+    };
+    const onNavigation = (_event, _url, _inPlace, isMainFrame) => {
+      if (isMainFrame) requestStop();
+    };
+    if (flight) {
+      flowControl = { child: null, stopping: false, requestStop };
+      event.sender.once("destroyed", requestStop);
+      event.sender.once("render-process-gone", requestStop);
+      event.sender.on("did-start-navigation", onNavigation);
+    }
     try {
       sendAttitude({ type: "state", state: "flow" });
       await stopIdleMonitor();
       if (session) session.options = buildConnectionArgs(options);
       return await run();
     } finally {
+      if (flight) {
+        event.sender.removeListener("destroyed", requestStop);
+        event.sender.removeListener("render-process-gone", requestStop);
+        event.sender.removeListener("did-start-navigation", onNavigation);
+        flowControl = null;
+      }
       radioOperation = false;
       operationSenderId = null;
       startIdleMonitor();
@@ -675,7 +709,15 @@ function registerCrazyflieHandlers() {
 
   ipcMain.handle("crazyflie-run-flow", async (event, options) => {
     try {
-      return await withRadio(event, options || {}, () => runFlowStream(event, options || {}, sendAttitude));
+      return await withRadio(event, options || {}, () => runFlowStream(event, options || {}, payload => {
+        sendAttitude(payload);
+        if (options?.followPosition && session?.sender.id !== event.sender.id && !event.sender.isDestroyed()) {
+          event.sender.send("crazyflie-attitude", payload);
+        }
+      }, child => {
+        flowControl.child = child;
+        if (flowControl.stopping && child.stdin.writable) child.stdin.write("stop\n");
+      }), true);
     } catch (error) {
       return {
         success: false,
@@ -686,6 +728,14 @@ function registerCrazyflieHandlers() {
         loadedFrom: null,
       };
     }
+  });
+
+  ipcMain.handle("crazyflie-cancel-flow", event => {
+    if (!flowControl || operationSenderId !== event.sender.id) {
+      return { success: false, message: "No flight owned by this window is running" };
+    }
+    flowControl.requestStop();
+    return { success: true };
   });
 
   ipcMain.handle("crazyflie-list-radios", async () => {

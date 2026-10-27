@@ -160,6 +160,10 @@ class Callback:
 connections, configurations, commands = [], [], []
 active = [0]
 bad_logger = [False]
+cancel_takeoff = [False]
+fail_during_flight = [False]
+stop_requested = Event()
+reset_callbacks = []
 class Config:
     def __init__(self, name, period_in_ms):
         if name != 'AilyAttitude': raise RuntimeError('battery telemetry not available in this mock')
@@ -174,7 +178,8 @@ class Config:
             timestamp = 0
             while not self.stopped.is_set():
                 self.data_received_cb.call(timestamp, {'stabilizer.roll': 15,
-                    'stabilizer.pitch': -10, 'stabilizer.yaw': 30}, self)
+                    'stabilizer.pitch': -10, 'stabilizer.yaw': 30,
+                    'stateEstimate.x': 1, 'stateEstimate.y': 2, 'stateEstimate.z': 3}, self)
                 timestamp += 50
                 self.stopped.wait(0.05)
         self.worker = Thread(target=produce)
@@ -188,6 +193,9 @@ class Connection:
         self.cf = types.SimpleNamespace(
             platform=types.SimpleNamespace(send_arming_request=lambda value: commands.append('arm')),
             log=types.SimpleNamespace(add_config=lambda config: None),
+            param=types.SimpleNamespace(
+                add_update_callback=lambda **kwargs: reset_callbacks.append(kwargs['cb']),
+                remove_update_callback=lambda **kwargs: reset_callbacks.remove(kwargs['cb'])),
             disconnected=Callback())
         connections.append(self)
     def __enter__(self):
@@ -199,7 +207,12 @@ class Connection:
         assert all(c.deleted and c.stopped.is_set() for c in configurations)
 class Commander:
     def __init__(self, scf): assert scf is connections[-1]
-    def take_off(self, **kwargs): commands.append('takeoff')
+    def take_off(self, **kwargs):
+        commands.append('takeoff')
+        if cancel_takeoff[0]: stop_requested.set()
+        if fail_during_flight[0]:
+            configurations[-1].error_cb.call(configurations[-1], 'lost XYZ during flight')
+            time.sleep(0.1)
     def stop(self): commands.append('hover')
     def land(self, **kwargs): commands.append('land')
 modules['cflib.crtp'].init_drivers = lambda **kwargs: None
@@ -232,6 +245,26 @@ for failure in [False, True]:
     assert len(connections) == 1 and active[0] == 0
     assert commands == ['arm', 'takeoff', 'hover', 'land', 'land'], commands
     if failure: assert 'mock attitude unavailable' in out.getvalue()
+for fault in ['none', 'preflight', 'cancel', 'inflight']:
+    bad_logger[0] = fault == 'preflight'
+    cancel_takeoff[0] = fault == 'cancel'
+    fail_during_flight[0] = fault == 'inflight'
+    stop_requested.clear()
+    connections.clear()
+    configurations.clear()
+    commands.clear()
+    with redirect_stdout(io.StringIO()):
+        result = runner.run_flow('radio://mock', flight, 'E7E7E7E7E7',
+                                 follow_position=True, stop_requested=stop_requested)
+    assert result['success'] == (fault == 'none'), (fault, result)
+    assert len(connections) == 1 and active[0] == 0
+    assert not reset_callbacks, fault
+    if fault == 'preflight':
+        assert not commands, 'missing telemetry must fail before arming or starting motors'
+    else:
+        assert commands[-1] == 'land', (fault, commands)
+    if fault in ('cancel', 'inflight'):
+        assert commands == ['arm', 'takeoff', 'land'], (fault, commands)
 print('shared idle/flight connection and logger error isolation passed')
 `], { cwd: root, encoding: 'utf8', timeout: 15000 });
   assert.equal(result.status, 0, result.stderr || String(result.error));
@@ -372,6 +405,7 @@ test('Electron hands idle monitoring to the flow connection, forwards attitude w
           assert.equal(activeMonitors, 0, 'monitor must close before flow acquires the radio');
           flowArgs = args;
           flowChild = new EventEmitter();
+          flowChild.stdin = new PassThrough();
           flowChild.stdout = new PassThrough();
           flowChild.stderr = new PassThrough();
           flowChild.kill = () => flowChild.emit('close', 1);
@@ -430,6 +464,27 @@ test('Electron hands idle monitoring to the flow connection, forwards attitude w
   flowChild.emit('close', 0);
   assert.equal((await secondFlow).success, true);
   assert.equal(activeMonitors, 0, 'turning display off during flow must not reconnect afterwards');
+  const combined = handlers.get('crazyflie-run-flow')(event, { ...opts, followPosition: true,
+    code: 'cf_crazyflie_link()' });
+  await tick();
+  assert.ok(flowArgs.includes('--follow-position'));
+  flowChild.stdout.write('__ATTITUDE__:{"type":"reference"}\n');
+  flowChild.stdout.write('__ATTITUDE__:{"type":"sample","timestampMs":150,"roll":0,"pitch":0,"yaw":0,"x":1,"y":2,"z":3}\n');
+  const live = messages.filter(item => item.channel === 'crazyflie-attitude' && item.payload.x === 1);
+  assert.equal(live.length, 1, 'combined mode receives pose without opening an idle monitor');
+  assert.equal(activeMonitors, 0);
+  assert.equal(handlers.get('crazyflie-cancel-flow')({ sender: { id: 2 } }).success, false);
+  assert.equal(handlers.get('crazyflie-cancel-flow')(event).success, true);
+  assert.equal(flowChild.stdin.read().toString(), 'stop\n');
+  flowChild.stdout.write('{"success":false,"message":"Flight cancelled"}\n');
+  flowChild.emit('close', 1);
+  assert.equal((await combined).success, false);
+  assert.equal(handlers.get('crazyflie-cancel-flow')(event).success, false);
+  const crashed = handlers.get('crazyflie-run-flow')(event, { ...opts, code: 'cf_crazyflie_link()' });
+  await tick();
+  flowChild.stdout.write('__STEP__:1/1:connect\n');
+  flowChild.emit('close', 1);
+  assert.equal((await crashed).success, false, 'a crashed plan must not be replayed with another Python');
   assert.equal(handlers.get('crazyflie-start-attitude')(event, opts).success, true);
   sender.emit('did-start-navigation', null, 'url', false, true);
   await tick();
@@ -479,7 +534,10 @@ function panelHarness({ globals = {}, three = require('three') } = {}) {
   };
   vm.runInNewContext(js, context);
   const messages = [];
-  const sim = { pose$: { value: { x: 0, y: 0, z: 0, yaw: 0 } } };
+  const sim = {
+    pose$: { value: { x: 0, y: 0, z: 0, yaw: 0 } },
+    poseSource$: { value: 'simulation' }, realAttitude$: { value: null },
+  };
   const panel = new exports.CrazyflieSimPanelComponent(sim, {}, {},
     { error: text => messages.push(text) }, { run: fn => fn() });
   panel.scene = {};
@@ -726,9 +784,13 @@ test('parking lot has sixteen bays and an open six-meter lane, clear of other cl
     assert.equal(parking.children.filter(node => node.name === 'Parking wheel stop').length, 16);
     assert.equal(parking.children.filter(node => node.name === 'Parking lane direction').length, 2);
     const cars = parking.children.filter(node => node.name === 'Parked car');
-    assert.equal(cars.length, 5);
+    assert.equal(cars.length, 6);
+    const occupiedCarBounds = [];
     for (const car of cars) {
       const carBounds = new Box3().setFromObject(car);
+      assert.ok(occupiedCarBounds.every(bounds => !carBounds.intersectsBox(bounds)),
+        'parked cars must not overlap one another');
+      occupiedCarBounds.push(carBounds);
       assert.ok(carBounds.max.x <= parking.position.x - 3 || carBounds.min.x >= parking.position.x + 3,
         'parked vehicles must leave the entire six-meter lane clear');
       assert.ok(carBounds.min.z >= car.position.z - 1.25 && carBounds.max.z <= car.position.z + 1.25,

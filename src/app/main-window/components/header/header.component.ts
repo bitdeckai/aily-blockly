@@ -196,7 +196,7 @@ export class HeaderComponent implements OnDestroy {
       return;
     }
 
-    this.crazyflieRuntimeService.setPolicy('sim-first');
+    this.crazyflieRuntimeService.setPolicy('sim-real');
     this.crazyflieSimService.setPanelVisible(true);
     const result = await this.uploaderService.flyCrazyflieSimAndReal();
     if (result.state === 'error') {
@@ -220,7 +220,7 @@ export class HeaderComponent implements OnDestroy {
     try {
       if (this.runtimePolicy === 'real-only') {
         await this.runCrazyflieRealFlight();
-      } else if (this.runtimePolicy === 'sim-first') {
+      } else if (this.runtimePolicy === 'sim-real') {
         await this.runCrazyflieSimAndReal();
       } else {
         await this.runCrazyflieSimulation();
@@ -769,6 +769,10 @@ export class HeaderComponent implements OnDestroy {
         })
         break;
       case 'upload':
+        if (this.canShowSimulatorControls()) {
+          await this.runSelectedCrazyflieMode();
+          break;
+        }
         // Crazyflie 使用 Crazyradio（USB/libusb）链路，不依赖 COM 串口。
         const isCrazyflieBoard = String(this.projectService.currentBoardConfig?.name || this.currentBoard || '').toLowerCase().includes('crazyflie');
         if (!this.serialService.currentPort && !isCrazyflieBoard) {
@@ -1125,7 +1129,7 @@ export class HeaderComponent implements OnDestroy {
   }
 
   shouldShowHeaderButton(btn: IMenuItem): boolean {
-    return true;
+    return !this.canShowSimulatorControls() || (btn.action !== 'compile' && btn.action !== 'upload');
   }
 
   // 判断路由是否为 ['/main/blockly-editor', '/main/code-editor']中的一个，如果是返回true

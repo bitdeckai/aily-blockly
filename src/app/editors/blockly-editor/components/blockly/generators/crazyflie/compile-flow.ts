@@ -1,6 +1,7 @@
 import * as Blockly from 'blockly';
 import { crazyflieBasicBlockTypes } from './basic-blocks';
 import { emitMotionCommand, motionBlockCommand, motionBlocks, parseMotionCall, validateMotionSequence } from './motion-blocks';
+import { validateRadioScanCode } from './radio-blocks';
 
 type Value = number | string | boolean | null;
 type Flow = 'break' | 'continue' | undefined;
@@ -15,7 +16,9 @@ export function compileCrazyflieFlow(
   if (!workspace.getAllBlocks(false).some(block =>
     crazyflieBasicBlockTypes.includes(block.type) || block.type === 'cf_core_delay'
       || motionBlocks.some(spec => spec.type === block.type))) {
-    return generator.workspaceToCode(workspace);
+    const code = generator.workspaceToCode(workspace);
+    validateRadioScanCode(code);
+    return code;
   }
 
   const variables = new Map<string, Value>();
@@ -245,6 +248,7 @@ export function compileCrazyflieFlow(
       if (!block.isShadow()) run(block);
     }
     const code = output.join('\n');
+    validateRadioScanCode(code);
     validateMotionSequence(code.split(/\r?\n/).map(line => {
       const motion = parseMotionCall(line);
       if (motion) return { type: 'motion', value: motion };

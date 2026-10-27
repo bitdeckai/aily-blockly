@@ -30,6 +30,10 @@ function initLogger(appDataPath) {
     
     // 捕获未处理的异常和承诺拒绝
     process.on('uncaughtException', (err) => {
+        if (err && err.code === 'EPIPE') {
+            // Do not report a broken output pipe back through the same console transport.
+            electronLog.transports.console.level = false;
+        }
         electronLog.error('Uncaught Exception:', err);
     });
     

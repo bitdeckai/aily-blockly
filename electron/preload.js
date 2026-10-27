@@ -720,6 +720,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * @param {number} [options.timeoutMs] - 超时
      */
     runFlow: (options) => ipcRenderer.invoke("crazyflie-run-flow", options || {}),
+    cancelFlow: () => ipcRenderer.invoke("crazyflie-cancel-flow"),
     startAttitude: (options) => ipcRenderer.invoke("crazyflie-start-attitude", options || {}),
     stopAttitude: () => ipcRenderer.invoke("crazyflie-stop-attitude"),
     onAttitude: (callback) => {

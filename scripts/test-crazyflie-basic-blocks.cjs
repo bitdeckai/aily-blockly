@@ -20,6 +20,7 @@ const source = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'compo
 const { createCrazyflieBasicToolbox, registerCrazyflieBasicBlocks, crazyflieGenerator } =
   require(path.join(source, 'basic-blocks.ts'));
 const { compileCrazyflieFlow } = require(path.join(source, 'compile-flow.ts'));
+const radio = require(path.join(source, 'radio-blocks.ts'));
 const {
   registerCrazyflieMotionBlocks, createCrazyflieMotionToolbox, parseMotionCall, validateMotionCommand,
   motionDurationSeconds, motionFlowTimeoutMs,
@@ -35,6 +36,7 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'child', 'boards', 'board-cra
   'node_modules', '@aily-project', 'lib-crazyflie-motion', 'generator.js'), 'utf8'), {
   window: { MPY: crazyflieGenerator },
 });
+radio.registerCrazyradioBlocks(crazyflieGenerator, true);
 
 const workspaces = [];
 function workspace(blocks, variables = []) {
@@ -75,6 +77,128 @@ test('legacy straight-line flight still generates valid Python', () => {
   assert.match(code, /cf_takeoff\(\)/);
   assert.match(code, /cf_land\(\)/);
   assert.doesNotMatch(code, /while True/);
+});
+
+test('Crazyradio parameters generate addressed official URIs and round-trip saved blocks', () => {
+  for (const rate of ['250K', '1M', '2M']) {
+    const ws = workspace([chain(
+      { type: 'cf_radio_config', fields: { RADIO: 0, CHANNEL: 42, RATE: rate, ADDRESS: '0xABCDEF1234' } },
+      flight('cf_test_link'), flight('cf_scan_links'),
+    )]);
+    const code = compile(ws);
+    assert.match(code, new RegExp(`cf_set_link\\("radio://0/42/${rate}/ABCDEF1234", "ABCDEF1234"\\)`));
+    assert.match(code, /cf_test_link\(\)/);
+    assert.match(code, /cf_scan_links\(\)/);
+    const restored = workspace([]);
+    Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
+    assert.equal(compile(restored), code);
+  }
+  const uri = workspace([{ type: 'cf_link_config', fields: {
+    URI: 'radio://0/80/2M/E7E7E7E7E7?safelink=1', ADDRESS: 'ABCDEF1234',
+  } }]);
+  assert.match(compile(uri), /radio:\/\/0\/80\/2M\/ABCDEF1234\?safelink=1/);
+  for (const fields of [{ ADDRESS: 'bad' }, { URI: 'radio://0/999/2M' }, { URI: 'usb://0' }]) {
+    assert.throws(() => compile(workspace([{ type: 'cf_link_config', fields }])), /Crazyradio/);
+  }
+});
+
+test('radio scans run only in the initial radio prefix and simulation never invents hardware results', async () => {
+  const sim = simulator();
+  const code = compile(workspace([chain(flight('cf_radio_config'), flight('cf_test_link'), flight('cf_scan_links'))]));
+  const result = await sim.runCode(code);
+  assert.equal(result.success, true, result.message);
+  assert.equal(result.executed.at(-1), 'scan_links');
+  assert.ok(sim.logs$.value.some(line => line.includes('no radio scan')));
+  const invalid = workspace([chain(flight('cf_crazyflie_link'), flight('cf_scan_links'))]);
+  assert.throws(() => compile(invalid), /before connecting/);
+  await assert.rejects(sim.runCode('cf_crazyflie_link()\ncf_scan_links()'), /before connecting/);
+});
+
+test('Python radio prefix scans before connecting, reports empty/error results, and never starts motors', () => {
+  const python = process.platform === 'win32' ? 'py' : 'python3';
+  const args = process.platform === 'win32' ? ['-3'] : [];
+  const result = spawnSync(python, [...args, '-B', '-c', `
+import io, runpy, sys, types
+from pathlib import Path
+from contextlib import redirect_stdout
+ns = runpy.run_path(str(Path('child') / 'scripts' / 'crazyflie_run_flow.py'), run_name='radio_test')
+modules = {}
+for name in ['cflib', 'cflib.crtp', 'cflib.crazyflie', 'cflib.crazyflie.syncCrazyflie',
+             'cflib.crazyflie.log', 'cflib.crazyflie.syncLogger', 'cflib.positioning',
+             'cflib.positioning.motion_commander', 'cflib.crtp.radiodriver',
+             'cflib.utils', 'cflib.utils.multiranger']:
+    module = types.ModuleType(name)
+    modules[name] = sys.modules[name] = module
+    if '.' in name:
+        parent, attr = name.rsplit('.', 1)
+        setattr(modules[parent], attr, module)
+calls = []
+mode = ['found']
+class Connection:
+    def __init__(self, uri):
+        calls.append(('connect', uri))
+        self.cf = types.SimpleNamespace()
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+def forbidden(*args, **kwargs):
+    raise AssertionError('motor or motion API called during radio scan')
+def scan(address):
+    assert not any(call[0] == 'connect' for call in calls), calls
+    calls.append(('scan', address))
+    if mode[0] == 'error': raise RuntimeError('USB scan failed')
+    return [('radio://0/42/2M/ABCDEF1234', '')] if mode[0] == 'found' else []
+modules['cflib.crtp'].init_drivers = lambda **kwargs: None
+modules['cflib.crtp'].scan_interfaces = scan
+modules['cflib.crazyflie.syncCrazyflie'].SyncCrazyflie = Connection
+modules['cflib.crazyflie.log'].LogConfig = forbidden
+modules['cflib.crazyflie.syncLogger'].SyncLogger = forbidden
+modules['cflib.positioning.motion_commander'].MotionCommander = forbidden
+modules['cflib.crtp.radiodriver'].RadioDriver = lambda: types.SimpleNamespace(get_status=lambda: 'Crazyradio version 0.53')
+modules['cflib.utils.multiranger'].Multiranger = forbidden
+code = 'cf_set_link("radio://0/42/2M/ABCDEF1234", "ABCDEF1234")\\ncf_test_link()\\ncf_scan_links()'
+commands = ns['parse_commands'](code)
+assert [cmd for cmd, _ in commands] == ['set_link', 'test_link', 'scan_links']
+for state in ['found', 'empty', 'error']:
+    mode[0] = state
+    calls.clear()
+    output = io.StringIO()
+    try:
+        with redirect_stdout(output):
+            result = ns['run_flow']('radio://0/80/2M', commands, 'E7E7E7E7E7')
+    except RuntimeError as error:
+        assert state == 'error' and 'RADIO_SCAN_FAILED' in str(error), error
+    else:
+        assert state != 'error'
+        assert result['success'], result
+        assert result['addressHex'] == 'ABCDEF1234'
+        assert result['uri'] == 'radio://0/42/2M/ABCDEF1234'
+        assert result['executed'][-1] == 'scan_links'
+        assert len(result['links']) == (1 if state == 'found' else 0)
+    assert calls == [('scan', int('ABCDEF1234', 16))], calls
+mode[0] = 'found'
+calls.clear()
+with redirect_stdout(io.StringIO()):
+    result = ns['run_flow']('radio://0/80/2M', commands + [('crazyflie_link', None)], 'E7E7E7E7E7')
+assert calls[0][0] == 'scan' and calls[1][0] == 'connect', calls
+calls.clear()
+try:
+    ns['run_flow']('radio://0/80/2M', [('crazyflie_link', None), ('scan_links', None)], 'E7E7E7E7E7')
+except ValueError: pass
+else: raise AssertionError('scan after connecting accepted')
+assert not calls
+print('radio prefix passed without motor access')
+`], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('hidden legacy delay and print blocks still deserialize and compile from old projects', () => {
+  const original = workspace([chain(flight('cf_delay'), flight('cf_print_text'), flight('cf_print'))]);
+  const restored = workspace([]);
+  Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(original), restored);
+  const code = compile(restored);
+  assert.equal(code, compile(original));
+  assert.match(code, /cf_delay\(/);
+  assert.equal((code.match(/cf_print\(/g) || []).length, 2);
 });
 
 test('repeat expands flight calls and preserves repeated highlight targets', () => {
@@ -259,7 +383,9 @@ function simulator() {
     exports,
     require: name => name === '@angular/core' ? { Injectable: () => type => type }
       : name.endsWith('/crazyflie-classroom') ? require(path.join(root, 'src', 'app', 'services', 'crazyflie-classroom.ts'))
-      : name.endsWith('/motion-blocks') ? require(path.join(source, 'motion-blocks.ts')) : require(name),
+      : name.endsWith('/crazyflie-attitude') ? require(path.join(root, 'src', 'app', 'services', 'crazyflie-attitude.ts'))
+      : name.endsWith('/motion-blocks') ? require(path.join(source, 'motion-blocks.ts'))
+      : name.endsWith('/radio-blocks') ? radio : require(name),
     setTimeout, clearTimeout, console,
   });
   return new exports.CrazyflieSimService({ setDeckDetected() {} });

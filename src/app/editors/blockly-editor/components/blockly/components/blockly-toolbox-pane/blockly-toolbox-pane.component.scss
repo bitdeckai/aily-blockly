@@ -76,6 +76,11 @@
   border-top: 1px solid color-mix(in srgb, var(--aily-border-input) 65%, transparent);
 }
 
+.flight-toolbox-divider {
+  margin: 8px 12px;
+  border-top: 1px solid var(--aily-border-input);
+}
+
 .toolbox-footer__button {
   display: flex;
   align-items: center;

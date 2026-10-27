@@ -2,7 +2,9 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { CrazyflieConnectionService } from './crazyflie-connection.service';
 import { getClassroomDeskLayout } from './crazyflie-classroom';
+import { AttitudeReception, AttitudeSample, FlightPoseSample, isFlightPoseSample, relativeFlightPose } from './crazyflie-attitude';
 import { MotionCommand, motionDurationSeconds, parseMotionCall, validateMotionSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/motion-blocks';
+import { validateRadioScanSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/radio-blocks';
 
 export type CrazyflieRoomPreset = 'classroom' | 'home' | 'custom';
 
@@ -14,7 +16,7 @@ export interface CrazyfliePose {
 }
 
 interface CrazyflieSimCommand {
-  type: 'motion' | 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'set_link' | 'test_link' | 'crazyflie_link' | 'test_crazyflie_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
+  type: 'motion' | 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'set_link' | 'test_link' | 'scan_links' | 'crazyflie_link' | 'test_crazyflie_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
   value?: any;
 }
 
@@ -29,7 +31,7 @@ export interface CrazyflieStepEvent {
 })
 export class CrazyflieSimService {
   private readonly originPose: CrazyfliePose = { x: 0, y: 0.06, z: 0, yaw: 0 };
-  private readonly baseMoveSpeedMps = 0.9;
+  private readonly baseMoveSpeedMps = 0.2;
 
   constructor(private readonly connectionService: CrazyflieConnectionService) {}
 
@@ -40,6 +42,13 @@ export class CrazyflieSimService {
   logs$ = new BehaviorSubject<string[]>([]);
   paused$ = new BehaviorSubject<boolean>(false);
   speed$ = new BehaviorSubject<number>(1);
+  readonly followingReal$ = new BehaviorSubject<boolean>(false);
+  readonly poseSource$ = new BehaviorSubject<'simulation' | 'real'>('simulation');
+  readonly realAttitude$ = new BehaviorSubject<AttitudeSample | null>(null);
+  readonly realStatus$ = new BehaviorSubject<string>('未开启真机同步');
+  realReception = new AttitudeReception();
+  private realReference: FlightPoseSample | null = null;
+  private realOrigin: CrazyfliePose | null = null;
 
   roomPreset$ = new BehaviorSubject<CrazyflieRoomPreset>('classroom');
   roomSize$ = new BehaviorSubject<{ width: number; depth: number; height: number }>({
@@ -86,6 +95,7 @@ export class CrazyflieSimService {
   }
 
   setRoomPreset(preset: CrazyflieRoomPreset): void {
+    if (this.running$.value) throw new Error('运行期间不能切换场景');
     this.roomPreset$.next(preset);
     if (preset === 'classroom') {
       this.roomSize$.next({ width: 8.2, depth: 6.2, height: 3 });
@@ -94,7 +104,7 @@ export class CrazyflieSimService {
     }
 
     if (!this.running$.value) {
-      this.pose$.next(this.getResetPoseForPreset(preset));
+      this.resetPose();
     }
   }
 
@@ -137,7 +147,48 @@ export class CrazyflieSimService {
   }
 
   resetPose(): void {
+    if (this.followingReal$.value) throw new Error('真机同步期间不能复位；复位不会控制真机');
+    this.poseSource$.next('simulation');
+    this.realAttitude$.next(null);
     this.pose$.next(this.getResetPoseForPreset(this.roomPreset$.value));
+  }
+
+  beginRealFollow(): void {
+    if (this.running$.value) throw new Error('已有运行中的流程，请先结束当前流程');
+    this.resetPose();
+    this.realOrigin = { ...this.pose$.value };
+    this.resetRealReference();
+    this.logs$.next([]);
+    this.step$.next(null);
+    this.paused$.next(false);
+    this.speed$.next(1);
+    this.poseSource$.next('real');
+    this.followingReal$.next(true);
+    this.running$.next(true);
+  }
+
+  resetRealReference(): void {
+    if (this.followingReal$.value) this.realOrigin = { ...this.pose$.value };
+    this.realReference = null;
+    this.realReception = new AttitudeReception();
+    this.realStatus$.next('等待真机位置和姿态，首帧对齐场景起点…');
+  }
+
+  receiveRealPose(value: unknown, now: number): void {
+    if (!this.followingReal$.value || !this.realOrigin) return;
+    if (!isFlightPoseSample(value)) throw new Error('真机同步缺少有效的 XYZ 位置或姿态');
+    if (!this.realReception.receive(value, now)) return;
+    this.realReference ??= value;
+    const pose = relativeFlightPose(value, this.realReference, this.realOrigin);
+    this.realAttitude$.next({ ...value, yaw: pose.yaw * 180 / Math.PI });
+    this.pose$.next(pose);
+    this.realStatus$.next('真机估计位置与姿态（相对起点）');
+  }
+
+  endRealFollow(message: string): void {
+    this.realStatus$.next(message);
+    this.followingReal$.next(false);
+    this.running$.next(false);
   }
 
   async runCode(code: string): Promise<{ success: boolean; message: string; executed: string[] }> {
@@ -146,6 +197,7 @@ export class CrazyflieSimService {
     }
 
     const commands = this.parseCommands(code);
+    validateRadioScanSequence(commands);
     validateMotionSequence(commands);
     if (commands.length === 0) {
       return { success: false, message: '未检测到可模拟的 Crazyflie 指令', executed: [] };
@@ -177,11 +229,9 @@ export class CrazyflieSimService {
           break;
         }
 
-        if (command.type !== 'test_link') {
-          current += 1;
-          const label = this.commandLabel(command);
-          this.step$.next({ current, total, label });
-        }
+        current += 1;
+        const label = this.commandLabel(command);
+        this.step$.next({ current, total, label });
 
         switch (command.type) {
           case 'motion': {
@@ -199,6 +249,11 @@ export class CrazyflieSimService {
           case 'test_link':
             this.appendLog('sim: test_link');
             executed.push('test_link');
+            await this.waitWithControl(120, true);
+            break;
+          case 'scan_links':
+            this.appendLog('sim: scan_links (simulation only; no radio scan)');
+            executed.push('scan_links');
             await this.waitWithControl(120, true);
             break;
           case 'crazyflie_link':
@@ -284,18 +339,16 @@ export class CrazyflieSimService {
             break;
           }
           case 'takeoff':
-            pose.y = this.getLandingReferenceY() + 0.3;
-            this.pose$.next({ ...pose });
             this.appendLog('sim: takeoff');
             executed.push('takeoff');
-            await this.waitWithControl(400, true);
+            await this.waitWithControl(2100, true);
+            await this.animateMotion(pose, { kind: 'takeoff', values: [0.3, this.baseMoveSpeedMps] });
+            await this.waitWithControl(500, true);
             break;
           case 'land':
-            pose.y = this.getLandingReferenceY();
-            this.pose$.next({ ...pose });
             this.appendLog('sim: land');
             executed.push('land');
-            await this.waitWithControl(400, true);
+            await this.animateMotion(pose, { kind: 'land', values: [this.baseMoveSpeedMps] });
             break;
           case 'spin_motors': {
             const start = Math.max(1000, Math.min(60000, Number(command.value?.start ?? 20000)));
@@ -332,6 +385,7 @@ export class CrazyflieSimService {
             this.appendLog(`sim: move ${direction} ${distance}m`);
             executed.push(`move:${direction}:${distance}`);
             await this.movePoseOverTime(pose, direction, distance);
+            await this.waitWithControl(600, true);
             break;
           }
           default:
@@ -575,6 +629,11 @@ export class CrazyflieSimService {
 
       if (/^cf_test_link\s*\(/.test(line)) {
         commands.push({ type: 'test_link' });
+        continue;
+      }
+
+      if (/^cf_scan_links\s*\(\s*\)\s*;?$/.test(line)) {
+        commands.push({ type: 'scan_links' });
         continue;
       }
 

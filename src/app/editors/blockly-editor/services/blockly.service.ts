@@ -9,7 +9,8 @@ import { BlockCodeMapping, CodeLineRange } from '../components/blockly/generator
 import { convertBlockTreeToAbs, convertAbiToAbsWithLineMap } from '../../../tools/aily-chat/public-api';
 import { BlockSearcher } from '../components/blockly/plugins/toolbox-search/src/block_searcher';
 import { createCrazyflieBasicToolbox, registerCrazyflieBasicBlocks, crazyflieGenerator } from '../components/blockly/generators/crazyflie/basic-blocks';
-import { createCrazyflieMotionToolbox, registerCrazyflieMotionBlocks } from '../components/blockly/generators/crazyflie/motion-blocks';
+import { CRAZYFLIE_BASIC_FLIGHT_TYPES, CRAZYFLIE_FLIGHT_COLOUR, createCrazyflieMotionToolbox, registerCrazyflieMotionBlocks, isCrazyflieFlightToolbox, mergeCrazyflieFlightToolbox } from '../components/blockly/generators/crazyflie/motion-blocks';
+import { createCrazyradioToolbox, crazyradioBlockTypes, registerCrazyradioBlocks } from '../components/blockly/generators/crazyflie/radio-blocks';
 
 export interface BlocklyWorkspaceViewState {
   scale: number;
@@ -89,9 +90,9 @@ interface CrazyflieBlockTranslation {
 const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string, CrazyflieBlockTranslation>> = {
   en: {
     cf_link_config: { message0: 'Set link URI %1 address %2', tooltip: 'Configure the radio URI and address' },
-    cf_test_link: { message0: 'Test Crazyradio link ⌁', tooltip: 'Check whether the Crazyradio is available' },
-    cf_crazyflie_link: { message0: 'Connect ⌁', tooltip: 'Connect to the aircraft before running flight blocks' },
-    cf_test_crazyflie_link: { message0: 'Basic connection test ⌁', tooltip: 'Run a brief connection and motor test' },
+    cf_test_link: { message0: 'Check radio', tooltip: 'Check whether the Crazyradio is available' },
+    cf_crazyflie_link: { message0: 'Connect', tooltip: 'Connect to the aircraft before running flight blocks' },
+    cf_test_crazyflie_link: { message0: 'Self-test', tooltip: 'Test the connection and motors without taking off; remove propellers first' },
     cf_detect_flow_v2: { message0: 'Detect Flow deck v2', tooltip: 'Check whether the Flow deck v2 is installed' },
     cf_detect_multiranger: { message0: 'Detect Multiranger deck', tooltip: 'Check whether the Multiranger deck is installed' },
     cf_mr_get_distance: {
@@ -131,9 +132,9 @@ const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string
   },
   zh: {
     cf_link_config: { message0: '设置连接 URI %1 地址 %2', tooltip: '设置无线连接地址和编号' },
-    cf_test_link: { message0: '检测 Crazyradio 链路 ⌁', tooltip: '检查 Crazyradio 是否可用' },
-    cf_crazyflie_link: { message0: '连接飞行器 ⌁', tooltip: '执行飞行积木前先连接飞行器' },
-    cf_test_crazyflie_link: { message0: '基础连接测试 ⌁', tooltip: '进行简短的连接与电机测试' },
+    cf_test_link: { message0: '检测电台', tooltip: '检查 Crazyradio 是否可用' },
+    cf_crazyflie_link: { message0: '连接', tooltip: '执行飞行积木前先连接飞行器' },
+    cf_test_crazyflie_link: { message0: '自检', tooltip: '测试连接与电机，不起飞；请先卸下螺旋桨' },
     cf_detect_flow_v2: { message0: '探测 Flow 定位甲板 v2', tooltip: '检测是否安装 Flow 定位甲板 v2' },
     cf_detect_multiranger: { message0: '探测多向测距甲板', tooltip: '检测是否安装多向测距甲板' },
     cf_mr_get_distance: {
@@ -1047,6 +1048,7 @@ export class BlocklyService {
         ...sourceBlock,
         message0: translation.message0,
         tooltip: translation.tooltip,
+        ...(CRAZYFLIE_BASIC_FLIGHT_TYPES.includes(sourceBlock.type) ? { colour: CRAZYFLIE_FLIGHT_COLOUR } : {}),
       };
       if (translation.optionLabels && Array.isArray(sourceBlock.args0)) {
         block.args0 = sourceBlock.args0.map((argument: any, index: number) => {
@@ -1067,9 +1069,10 @@ export class BlocklyService {
   loadCrazyflieBasicBlocks(): void {
     const categories = createCrazyflieBasicToolbox(this.translateService.currentLang?.toLowerCase().startsWith('zh'));
     registerCrazyflieBasicBlocks();
-    categories.forEach(category => this.loadLibToolbox(category));
     const chinese = this.crazyflieBlockLanguage === 'zh';
     registerCrazyflieMotionBlocks(crazyflieGenerator, chinese);
+    registerCrazyradioBlocks(crazyflieGenerator, chinese);
+    categories.forEach(category => this.loadLibToolbox(category));
     this.loadLibToolbox(createCrazyflieMotionToolbox(chinese));
   }
 
@@ -1087,6 +1090,14 @@ export class BlocklyService {
   }
 
   loadLibToolbox(toolboxItem) {
+    if (isCrazyflieFlightToolbox(toolboxItem)) {
+      registerCrazyflieBasicBlocks();
+      registerCrazyflieMotionBlocks(crazyflieGenerator, this.crazyflieBlockLanguage === 'zh');
+      registerCrazyradioBlocks(crazyflieGenerator, this.crazyflieBlockLanguage === 'zh');
+      const index = this.toolbox.contents.findIndex(item => isCrazyflieFlightToolbox(item));
+      toolboxItem = mergeCrazyflieFlightToolbox(toolboxItem, index < 0 ? undefined : this.toolbox.contents[index]);
+      if (index >= 0) this.toolbox.contents.splice(index, 1);
+    }
     // 检查是否已存在相同的toolboxItem
     const existingIndex = this.findToolboxItemIndex(toolboxItem);
     if (existingIndex !== -1) {
@@ -1096,6 +1107,14 @@ export class BlocklyService {
     this.toolbox.contents.push(toolboxItem);
     this.ensureToolboxItemIds(this.toolbox.contents);
     this.applyToolboxSortOrderToContents(this.toolbox.contents);
+    const flightIndex = this.toolbox.contents.findIndex(item => isCrazyflieFlightToolbox(item));
+    if (flightIndex >= 0) {
+      const radioIndex = this.toolbox.contents.findIndex(item => item.name === 'Crazyradio');
+      if (radioIndex >= 0) this.toolbox.contents.splice(radioIndex, 1);
+      this.toolbox.contents.splice(this.toolbox.contents.findIndex(item => isCrazyflieFlightToolbox(item)) + 1,
+        0, createCrazyradioToolbox());
+      this.ensureToolboxItemIds(this.toolbox.contents);
+    }
     if (this.workspace) {
       this.workspace.updateToolbox(this.toolbox);
       this.workspace.render();
@@ -1277,6 +1296,11 @@ export class BlocklyService {
 
   private removeLibBlockTypes(blockTypes: string[]) {
     for (const blockType of blockTypes) {
+      if (crazyradioBlockTypes.includes(blockType) && this.toolbox.contents.some(item => item.name === 'Crazyradio')) {
+        this.blockDefinitionsMap.delete(blockType);
+        this.blockTypeToLibMap.delete(blockType);
+        continue;
+      }
       // 从Blockly中删除block定义
       if (Blockly.Blocks[blockType]) {
         console.log(`- delete ${blockType}`);
@@ -1372,6 +1396,9 @@ export class BlocklyService {
     const registeredBlocks = this.loadedGenerators.get(scriptSrc);
     if (registeredBlocks && registeredBlocks.size > 0) {
       registeredBlocks.forEach(blockType => {
+        if (crazyradioBlockTypes.includes(blockType) && this.toolbox.contents.some(item => item.name === 'Crazyradio')) {
+          return;
+        }
         // 清理各种语言的generator（使用与脚本注册相同的全局对象）
         const arduinoGen = (window as any).Arduino;
         if (arduinoGen?.forBlock?.[blockType]) {

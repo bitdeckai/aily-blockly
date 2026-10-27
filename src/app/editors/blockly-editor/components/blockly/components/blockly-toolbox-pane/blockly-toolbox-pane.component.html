@@ -19,6 +19,7 @@
       </ng-container>
     </div>
 
+    <div *ngIf="showDeckPanel" class="flight-toolbox-divider" role="separator" aria-label="飞行器专用积木"></div>
     <div class="deck-crazyflie" *ngIf="crazyflieRootItem as cf">
       <div class="toolbox-node" [attr.data-toolbox-key]="cf.key" [attr.data-toolbox-sort-key]="cf.sortKey">
         <div class="toolbox-row" [class.selected]="selectedKey === cf.key" (contextmenu)="onToolboxItemContextMenu(cf, $event)">
@@ -40,6 +41,10 @@
         <p>Crazyflie 是一款可编程微型无人机。使用飞行、传感器和扩展甲板积木编排任务；选择左侧分类，右侧会显示对应积木。</p>
       </div>
     </div>
+
+    <ng-container *ngIf="crazyradioRootItem as radio">
+      <ng-container *ngTemplateOutlet="toolboxNode; context: { $implicit: radio }"></ng-container>
+    </ng-container>
 
     <div class="deck-panel" *ngIf="showDeckPanel">
       <div class="deck-panel__heading">

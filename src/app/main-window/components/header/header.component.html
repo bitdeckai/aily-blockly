@@ -42,11 +42,11 @@
         <span class="cf-runtime-control__label">运行模式</span>
         <div class="cf-mode-segments">
           <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'sim-only'"
-            (click)="setCrazyflieRuntimeMode('sim-only')">仅模拟</button>
+            (click)="setCrazyflieRuntimeMode('sim-only')">模拟</button>
           <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'real-only'"
-            (click)="setCrazyflieRuntimeMode('real-only')">仅实飞</button>
-          <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'sim-first'"
-            (click)="setCrazyflieRuntimeMode('sim-first')">仿真通过后实飞</button>
+            (click)="setCrazyflieRuntimeMode('real-only')">真机飞行</button>
+          <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'sim-real'"
+            (click)="setCrazyflieRuntimeMode('sim-real')" title="执行真机流程，同时用真机位置和姿态更新三维场景">模拟+真机</button>
         </div>
         <button type="button" class="cf-run-button" [disabled]="crazyflieRunInProgress"
           nz-tooltip nzTooltipTitle="运行当前模式"

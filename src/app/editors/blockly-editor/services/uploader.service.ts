@@ -1,4 +1,4 @@
-import { Injectable, inject } from "@angular/core";
+import { Injectable, NgZone, inject } from "@angular/core";
 import { TranslateService } from '@ngx-translate/core';
 import { ProjectService } from "../../../services/project.service";
 import { SerialService } from "../../../services/serial.service";
@@ -23,10 +23,15 @@ import { CrazyflieConnectionService } from '../../../services/crazyflie-connecti
 import { compileCrazyflieFlow } from '../components/blockly/generators/crazyflie/compile-flow';
 import type { Block } from 'blockly';
 import { motionBlocks, motionFlowTimeoutMs } from '../components/blockly/generators/crazyflie/motion-blocks';
+import { getAttitudeApi } from '../../../services/crazyflie-attitude';
 
 @Injectable()
 export class _UploaderService {
   private translate = inject(TranslateService);
+  private zone = inject(NgZone);
+  private crazyflieFlowActive = false;
+  private crazyflieCancelRequested = false;
+  private crazyflieCancelError: string | null = null;
 
   constructor(
     private projectService: ProjectService,
@@ -144,6 +149,7 @@ export class _UploaderService {
   }
 
   destroy() {
+    if (this.crazyflieFlowActive) this.cancel();
     console.log("_UploaderService destroy");
     this.actionService.unlisten('uploader-upload-begin');
     this.actionService.unlisten('uploader-upload-cancel');
@@ -190,8 +196,18 @@ export class _UploaderService {
     this._builderService.isUploading = false;
   }
 
-  private async uploadCrazyflieFlow(crazyflieCode: string, plannedBlocks?: Block[]): Promise<ActionState> {
-    const title = 'Crazyflie 链路测试';
+  private async uploadCrazyflieFlow(crazyflieCode: string, plannedBlocks?: Block[], followPosition = false): Promise<ActionState> {
+    const title = followPosition ? 'Crazyflie 模拟+真机' : 'Crazyflie 真机流程';
+    const poseApi = followPosition ? getAttitudeApi() : undefined;
+    const validationError = this.crazyflieFlowActive || this.crazyflieSimService.running$.value
+      ? '已有运行中的流程，请先结束当前流程'
+      : followPosition && !poseApi ? '未找到真机同步接口，请重启应用'
+      : followPosition && !/cf_crazyflie_link\s*\(\s*\)/.test(crazyflieCode)
+        ? '模拟+真机模式需要先添加 Crazyflie 连接积木' : null;
+    if (validationError) {
+      this.noticeService.update({ title, text: validationError, state: 'error' });
+      return { state: 'error', text: validationError };
+    }
     const timeoutMs = motionFlowTimeoutMs(crazyflieCode);
     this.crazyflieConnectionService.setChecking();
     this.crazyflieTelemetryService.clear();
@@ -215,7 +231,7 @@ export class _UploaderService {
       return { state: 'error', text: '未找到 Crazyflie 测试接口' };
     }
 
-    const hasRunFlowCmd = /cf_motion\s*\(|cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
+    const hasRunFlowCmd = /cf_set_link\s*\(|cf_test_link\s*\(|cf_scan_links\s*\(|cf_motion\s*\(|cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
     const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
     const executionBlocks = hasRunFlowCmd ? (plannedBlocks || this.getCrazyflieExecutionBlocksInOrder()) : [];
     let currentTelemetry: any = null;
@@ -234,6 +250,11 @@ export class _UploaderService {
           const current = Number(stepMatch[1] || 0);
           const total = Number(stepMatch[2] || 0);
           const label = (stepMatch[3] || '').trim();
+          if (followPosition) {
+            this.crazyflieSimService.step$.next({ current, total, label });
+            this.crazyflieSimService.logs$.next(
+              [...this.crazyflieSimService.logs$.value.slice(-5), `real: ${label}`]);
+          }
           const stepText = total > 0
             ? `正在执行步骤 ${current}/${total}: ${label}`
             : `正在执行步骤: ${label}`;
@@ -285,14 +306,58 @@ export class _UploaderService {
     }
 
     let result: any;
+    let disposePose: (() => void) | undefined;
+    let synchronizationError: string | null = null;
+    let receivedPose = false;
+    this.crazyflieFlowActive = true;
+    this.crazyflieCancelRequested = false;
+    this.crazyflieCancelError = null;
     try {
+      if (followPosition && poseApi) {
+        this.crazyflieSimService.beginRealFollow();
+        disposePose = poseApi.onAttitude(event => this.zone.run(() => {
+          try {
+            if (event.type === 'sample') {
+              this.crazyflieSimService.receiveRealPose(event, performance.now());
+              receivedPose = true;
+            } else if (event.type === 'reference') {
+              this.crazyflieSimService.resetRealReference();
+            } else if (event.type === 'error') {
+              throw new Error(event.message);
+            }
+          } catch (error) {
+            synchronizationError = error instanceof Error ? error.message : String(error);
+            this.crazyflieSimService.realStatus$.next(`真机同步异常：${synchronizationError}`);
+            this.logService.update({ detail: `[Crazyflie][pose] ${synchronizationError}`, state: 'error' });
+            this.cancel();
+          }
+        }));
+      }
       result = hasRunFlowCmd
-        ? await api.runFlow({ code: crazyflieCode, timeoutMs, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex })
+        ? await api.runFlow({ code: crazyflieCode, timeoutMs, uri: connectionOptions.uri,
+          addressHex: connectionOptions.addressHex, followPosition })
         : await api.testLink({ timeoutMs: 5000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex });
+      if (followPosition && result?.success && (!receivedPose || synchronizationError)) {
+        result = { ...result, success: false,
+          message: synchronizationError || '未收到真机位置和姿态，未完成同步' };
+      }
+      if (this.crazyflieCancelRequested && result?.success) {
+        result = { ...result, success: false,
+          message: this.crazyflieCancelError || '流程已取消，当前动作与降落处理已结束' };
+      }
     } catch (error: any) {
+      synchronizationError = error?.message || 'Crazyflie 真机流程异常';
       this.crazyflieConnectionService.setResult(false, error?.message || 'Crazyflie 链路检测异常');
       throw error;
     } finally {
+      disposePose?.();
+      this.crazyflieFlowActive = false;
+      if (followPosition) {
+        this.crazyflieSimService.endRealFollow(synchronizationError
+          ? `同步异常：${synchronizationError}`
+          : result?.success ? '真机流程已结束，保留末次实测位置和姿态'
+          : result?.message || '真机流程未完成');
+      }
       this.clearBlocklySelection();
       if (disposeFlowLog) {
         disposeFlowLog();
@@ -302,12 +367,18 @@ export class _UploaderService {
     this.updateCrazyflieDeckDetection(executed);
     if (result?.success) {
       const links: string[] = Array.isArray(result?.links) ? result.links : [];
-      const connectionMessage = hasRunFlowCmd
-        ? '真机通信成功'
-        : links.length > 0
-          ? `已发现 ${links.length} 台 Crazyflie`
-          : 'Crazyradio 已就绪，尚未发现飞行器';
-      this.crazyflieConnectionService.setResult(true, connectionMessage);
+      const radioChecked = executed.some(entry => entry === 'test_link' || entry === 'scan_links');
+      const aircraftConnected = executed.includes('crazyflie_link');
+      const connectionMessage = aircraftConnected ? '真机通信成功'
+        : links.length > 0 ? `已发现 ${links.length} 台 Crazyflie`
+        : radioChecked ? 'Crazyradio 已就绪，尚未发现飞行器' : '连接参数已设置，尚未检测链路';
+      if (radioChecked || aircraftConnected || !hasRunFlowCmd) {
+        this.crazyflieConnectionService.setResult(true, connectionMessage);
+      } else {
+        this.crazyflieConnectionService.state$.next({
+          status: 'unknown', message: connectionMessage, updatedAt: Date.now(),
+        });
+      }
       if (!receivedRealtimeLog) {
         executed.forEach((line) => {
           if (typeof line !== 'string' || !line.trim()) {
@@ -343,14 +414,15 @@ export class _UploaderService {
     } else {
       this.crazyflieConnectionService.setResult(false, result?.message || 'Crazyflie 链路测试失败');
     }
+    const failureState = this.crazyflieCancelRequested && !synchronizationError && !this.crazyflieCancelError ? 'warn' : 'error';
     this.noticeService.update({
       title,
       text: result?.message || 'Crazyflie 链路测试失败',
       detail,
-      state: 'error',
+      state: failureState,
       setTimeout: 180000
     });
-    return { state: 'error', text: result?.message || 'Crazyflie 链路测试失败' };
+    return { state: failureState, text: result?.message || 'Crazyflie 链路测试失败' };
   }
 
   private updateCrazyflieDeckDetection(executed: string[]): void {
@@ -381,6 +453,8 @@ export class _UploaderService {
       ...motionBlocks.map(spec => spec.type),
       'cf_link_config',
       'cf_test_link',
+      'cf_scan_links',
+      'cf_radio_config',
       'cf_crazyflie_link',
       'cf_test_crazyflie_link',
       'cf_takeoff',
@@ -600,21 +674,8 @@ export class _UploaderService {
     if (!('code' in preparedFlow)) return preparedFlow;
     const crazyflieCode = preparedFlow.code;
 
-    let simRun: ActionState;
-    try {
-      simRun = await this.simulateCrazyflie();
-    } catch (error: any) {
-      simRun = { state: 'error', text: error?.text || error?.message || '模拟执行失败' };
-    }
-
-    if (simRun.state !== 'done') {
-      const simErrorText = simRun.text || '模拟未通过，已停止实飞';
-      this.logService.update({ detail: `[Crazyflie][sim] ${simErrorText}`, state: 'warn' });
-      return { ...simRun, text: simErrorText };
-    }
-
-    this.logService.update({ detail: '[Crazyflie] 仿真通过，开始实飞', state: 'warn' });
-    return await this.uploadCrazyflieFlow(crazyflieCode, preparedFlow.executionBlocks);
+    this.crazyflieSimService.setPanelVisible(true);
+    return await this.uploadCrazyflieFlow(crazyflieCode, preparedFlow.executionBlocks, true);
   }
 
   private prepareCrazyflieFlow(generator: Parameters<typeof compileCrazyflieFlow>[1]): { code: string; executionBlocks: Block[] } | ActionState {
@@ -1479,6 +1540,31 @@ export class _UploaderService {
 * 取消当前上传过程
 */
   cancel() {
+    if (this.crazyflieFlowActive) {
+      if (this.crazyflieCancelRequested) return;
+      this.crazyflieCancelRequested = true;
+      this.noticeService.update({
+        title: 'Crazyflie 正在结束流程',
+        text: '已请求取消：等待当前动作结束并执行降落处理；这不是紧急停机',
+        state: 'doing', setTimeout: 0,
+      });
+      const api = window['crazyflie'];
+      const reportCancelError = (message: string) => {
+        this.crazyflieCancelError = `取消请求失败：${message}；请确认真机状态`;
+        this.message.error(this.crazyflieCancelError);
+        this.logService.update({ detail: `[Crazyflie] ${this.crazyflieCancelError}`, state: 'error' });
+      };
+      if (typeof api?.cancelFlow !== 'function') {
+        reportCancelError('未找到真机取消接口，请重启应用');
+        return;
+      }
+      void api.cancelFlow().then((result: { success: boolean; message?: string }) => {
+        if (!result.success) reportCancelError(result.message || '取消真机流程失败');
+      }).catch((error: unknown) => {
+        reportCancelError(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
     if (!this.uploadInProgress) {
       return;
     }

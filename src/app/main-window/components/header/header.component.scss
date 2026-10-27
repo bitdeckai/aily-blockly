@@ -33,6 +33,8 @@ $header-inner-height: 38px;
   }
 
   .board {
+    flex-shrink: 0;
+    white-space: nowrap;
     padding-left: 10px;
     height: $header-inner-height;
     color: var(--aily-text-hint);
@@ -97,6 +99,12 @@ $header-inner-height: 38px;
     color: var(--aily-text-secondary);
     font-size: 11px;
     white-space: nowrap;
+  }
+
+  @media (max-width: 1100px) {
+    .cf-runtime-control__label {
+      display: none;
+    }
   }
 
   .cf-mode-segments {
