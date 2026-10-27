@@ -258,11 +258,35 @@ function simulator() {
   vm.runInNewContext(outputText, {
     exports,
     require: name => name === '@angular/core' ? { Injectable: () => type => type }
+      : name.endsWith('/crazyflie-classroom') ? require(path.join(root, 'src', 'app', 'services', 'crazyflie-classroom.ts'))
       : name.endsWith('/motion-blocks') ? require(path.join(source, 'motion-blocks.ts')) : require(name),
     setTimeout, clearTimeout, console,
   });
   return new exports.CrazyflieSimService({ setDeckDetected() {} });
 }
+
+test('classroom initial, reset and run poses place the drone at horizontal origin without changing height or other presets', async () => {
+  const sim = simulator();
+  const { getClassroomDeskLayout } = require(path.join(root, 'src', 'app', 'services', 'crazyflie-classroom.ts'));
+  const helipad = () => getClassroomDeskLayout().helipadPose;
+  assert.deepEqual(sim.pose$.value, helipad());
+  assert.deepEqual({ ...sim.pose$.value }, { x: 0, y: 0.76573, z: 0, yaw: 0 });
+  sim.pose$.next({ x: -1, y: 2, z: 1, yaw: 1 });
+  sim.resetPose();
+  assert.deepEqual(sim.pose$.value, helipad());
+  sim.roomSize$.next({ width: 30, depth: 25, height: 5 });
+  sim.resetPose();
+  assert.deepEqual(sim.pose$.value, helipad());
+  const result = await sim.runCode('cf_print("helipad")');
+  assert.equal(result.success, true, result.message);
+  assert.deepEqual(sim.pose$.value, helipad());
+  for (const preset of ['home', 'custom']) {
+    sim.setRoomPreset(preset);
+    assert.deepEqual({ ...sim.pose$.value }, { x: 0, y: 0.06, z: 0, yaw: 0 });
+  }
+  sim.setRoomPreset('classroom');
+  assert.deepEqual(sim.pose$.value, helipad());
+});
 
 test('simulation executes the expanded branch and decodes printed text exactly', async () => {
   const sim = simulator();

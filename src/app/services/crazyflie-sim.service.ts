@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { CrazyflieConnectionService } from './crazyflie-connection.service';
+import { getClassroomDeskLayout } from './crazyflie-classroom';
 import { MotionCommand, motionDurationSeconds, parseMotionCall, validateMotionSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/motion-blocks';
 
 export type CrazyflieRoomPreset = 'classroom' | 'home' | 'custom';
@@ -28,14 +29,13 @@ export interface CrazyflieStepEvent {
 })
 export class CrazyflieSimService {
   private readonly originPose: CrazyfliePose = { x: 0, y: 0.06, z: 0, yaw: 0 };
-  private readonly classroomDeskHelipadPose: CrazyfliePose = { x: 0.39, y: 0.76573, z: -0.43, yaw: 0 };
   private readonly baseMoveSpeedMps = 0.9;
 
   constructor(private readonly connectionService: CrazyflieConnectionService) {}
 
   panelVisible$ = new BehaviorSubject<boolean>(false);
   running$ = new BehaviorSubject<boolean>(false);
-  pose$ = new BehaviorSubject<CrazyfliePose>({ ...this.classroomDeskHelipadPose });
+  pose$ = new BehaviorSubject<CrazyfliePose>(getClassroomDeskLayout().helipadPose);
   step$ = new BehaviorSubject<CrazyflieStepEvent | null>(null);
   logs$ = new BehaviorSubject<string[]>([]);
   paused$ = new BehaviorSubject<boolean>(false);
@@ -411,7 +411,7 @@ export class CrazyflieSimService {
 
   private getResetPoseForPreset(preset: CrazyflieRoomPreset): CrazyfliePose {
     if (preset === 'classroom') {
-      return { ...this.classroomDeskHelipadPose };
+      return getClassroomDeskLayout().helipadPose;
     }
     return { ...this.originPose };
   }

@@ -59,6 +59,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Subscription } from 'rxjs';
 import { CrazyflieSimService } from '../../../../../../services/crazyflie-sim.service';
+import { getClassroomDeskLayout } from '../../../../../../services/crazyflie-classroom';
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
 import { BlocklyService } from '../../../../services/blockly.service';
 import { NzMessageService } from 'ng-zorro-antd/message';
@@ -1395,7 +1396,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
               throw new Error(`Desk.proto face ${faceIndex} has mismatched UV coordinates`);
             }
             for (let triangle = 1; triangle < face.length - 1; triangle += 1) {
-              [0, triangle, triangle + 1].forEach((corner) => {
+              // Swapping the Y/Z axes reverses handedness, so reverse the face winding too.
+              [0, triangle + 1, triangle].forEach((corner) => {
                 const vertex = face[corner];
                 const uv = uvFace[corner];
                 positions.push(coordinates[vertex * 3], coordinates[vertex * 3 + 2], coordinates[vertex * 3 + 1]);
@@ -1420,7 +1422,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
             textureLoader.loadAsync(textureUrl('desk_normal.jpg')),
           ]);
           map.colorSpace = SRGBColorSpace;
-          const lightMap = this.createLightClassroomTexture(map, '#dfb270', 0.42);
+          const lightMap = this.createLightClassroomTexture(map, '#f1dfbf', 0.65);
           const context = lightMap.image.getContext('2d')!;
           const maskCanvas = document.createElement('canvas');
           maskCanvas.width = lightMap.image.width;
@@ -2877,6 +2879,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       group.add(artInner);
 
       const teacherDesk = new Group();
+      teacherDesk.name = 'Classroom teacher desk';
       teacherDesk.position.set(-room.width / 2 + 1.55, 0, -0.55);
       teacherDesk.rotation.y = Math.PI / 2;
       const teacherDeskFallback = new Mesh(
@@ -2994,38 +2997,17 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       aisle.position.set(0.35, 0.006, 0);
       group.add(aisle);
 
-      // 36-student standard matrix: 6 columns x 6 rows.
-      // Desk size: 60cm x 40cm, row spacing >= 90cm, center aisle >= 60cm.
-      const rows = 6;
-      const cols = 6;
-      const deskW = 0.6;
-      const deskD = 0.4;
-      const rowSpacing = 0.98;
-      const colSpacing = 0.86;
-      const totalColSpan = colSpacing * (cols - 1);
-      const colStart = -totalColSpan / 2;
-      const colCenters = Array.from({ length: cols }, (_, idx) => colStart + idx * colSpacing);
-
-      let firstRowX = -room.width / 2 + 1.55;
-      const lastRowX = firstRowX + rowSpacing * (rows - 1);
-      const lastRowMax = room.width / 2 - 0.55;
-      if (lastRowX > lastRowMax) {
-        firstRowX -= (lastRowX - lastRowMax);
-      }
-
-      const helipadDeskCol = 2;
-      const helipadDeskRow = 3;
-      const helipadX = firstRowX + rowSpacing * helipadDeskRow;
-      const helipadZ = colCenters[helipadDeskCol];
-
-      const chairOffsetX = deskD / 2 + 0.2;
+      const { rows, cols, deskW, deskD, rowSpacing, colCenters, firstRowX, chairOffsetX, helipadPose } =
+        getClassroomDeskLayout();
+      const helipadX = helipadPose.x;
+      const helipadZ = helipadPose.z;
       const backpackSeats = [
         { row: 0, col: 0, color: '#526c89' },
-        { row: 1, col: 4, color: '#9e6652' },
-        { row: 2, col: 1, color: '#6b7860' },
-        { row: 3, col: 5, color: '#b29258' },
-        { row: 4, col: 0, color: '#796b86' },
-        { row: 5, col: 4, color: '#527b79' },
+        { row: 0, col: 4, color: '#9e6652' },
+        { row: 1, col: 1, color: '#6b7860' },
+        { row: 2, col: 3, color: '#b29258' },
+        { row: 3, col: 0, color: '#796b86' },
+        { row: 3, col: 4, color: '#527b79' },
       ];
       for (const { row, col, color } of backpackSeats) {
         const backpack = this.createSchoolBackpack(color);
@@ -3097,6 +3079,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         new BoxGeometry(0.3, 0.024, 0.3),
         new MeshStandardMaterial({ color: '#7896a6', roughness: 0.82, metalness: 0.08 }),
       );
+      helipadBase.name = 'Classroom desk helipad';
       helipadBase.position.set(helipadX, deskSurfaceY + 0.012, helipadZ);
       group.add(helipadBase);
 

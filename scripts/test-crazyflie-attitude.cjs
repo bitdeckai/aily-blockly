@@ -18,6 +18,12 @@ const helper = { exports: {} };
 const helperContext = { exports: helper.exports, require, window: {} };
 vm.runInNewContext(helperJs, helperContext);
 const { attitudeQuaternion, AttitudeReception, isAttitudeSample } = helper.exports;
+const classroom = { exports: {} };
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'app', 'services',
+  'crazyflie-classroom.ts'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: classroom.exports });
+const { getClassroomDeskLayout } = classroom.exports;
 const sample = (timestampMs, yaw = 0) => ({ type: 'sample', timestampMs, roll: 0, pitch: 0, yaw });
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
 const vectorNear = (actual, expected) => actual.toArray().forEach((n, i) => near(n, expected[i]));
@@ -435,6 +441,7 @@ test('classroom uses natural wood finishes without loose books or extra cabinets
   const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts');
   const source = fs.readFileSync(filename, 'utf8');
+  assert.match(source, /createLightClassroomTexture\(map, '#f1dfbf', 0\.65\)/);
   assert.match(source, /createLightClassroomTexture\(map, '#dfb270', 0\.42\)/);
   assert.match(source, /createLightClassroomTexture\(map, '#d7a968', 0\.28\)/);
   assert.match(source, /this\.applyVarnishedPineFinish\(lecternPanels\)/);
@@ -443,7 +450,7 @@ test('classroom uses natural wood finishes without loose books or extra cabinets
   assert.doesNotMatch(source, /Webots school book|cabinetGroup|lowShelfGroup/);
 });
 
-function panelHarness() {
+function panelHarness({ globals = {}, three = require('three') } = {}) {
   const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts');
   const js = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
@@ -458,14 +465,17 @@ function panelHarness() {
     require: name => {
       if (name === '@angular/core') return { Component: () => target => target, ViewChild: () => () => {} };
       if (name === '@angular/common') return {};
-      if (name === 'three' || name === 'rxjs') return require(name);
+      if (name === 'three') return three;
+      if (name === 'rxjs') return require(name);
       if (name.endsWith('/crazyflie-attitude')) return helper.exports;
+      if (name.endsWith('/crazyflie-classroom')) return classroom.exports;
       if (name.endsWith('/GLTFLoader.js')) return { GLTFLoader: class {} };
       if (name.endsWith('/ColladaLoader.js')) return { ColladaLoader: class {} };
       if (name.endsWith('/RoundedBoxGeometry.js')) return require(name);
       if (name.endsWith('/OrbitControls.js')) return {};
       return {};
     },
+    ...globals,
   };
   vm.runInNewContext(js, context);
   const messages = [];
@@ -491,6 +501,88 @@ function panelHarness() {
   };
 }
 
+test('imported desk tabletop faces point upward after converting Webots coordinates', async () => {
+  const THREE = require('three');
+  const canvas = {
+    width: 1, height: 1,
+    getContext: () => ({
+      drawImage() {}, putImageData() {},
+      getImageData: () => ({ data: new Uint8ClampedArray(4) }),
+    }),
+  };
+  const panel = panelHarness({
+    globals: {
+      URL,
+      window: { location: { href: 'http://localhost/' } },
+      document: { createElement: () => canvas },
+      fetch: async () => ({
+        ok: true,
+        text: async () => fs.readFileSync(path.join(root, 'public', 'models', 'classroom', 'Desk.proto'), 'utf8'),
+      }),
+    },
+    three: { ...THREE, TextureLoader: class {
+      async loadAsync() { return new THREE.Texture({}); }
+    } },
+  }).panel;
+  panel.createLightClassroomTexture = () => new THREE.CanvasTexture(canvas);
+  const { geometry, material } = await panel.loadClassroomDeskAsset();
+  const position = geometry.getAttribute('position');
+  const normal = geometry.getAttribute('normal');
+  let tabletopVertices = 0;
+  try {
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      if (position.getY(vertex) < 0.7098 || Math.abs(normal.getY(vertex)) < 0.99) continue;
+      tabletopVertices += 1;
+      assert.ok(normal.getY(vertex) > 0.99, 'desktop must face the daylight, not the floor');
+    }
+    assert.ok(tabletopVertices >= 6, 'test must cover the real tabletop triangles');
+  } finally {
+    geometry.dispose();
+    for (const texture of [material.map, material.normalMap, material.roughnessMap, material.metalnessMap]) texture.dispose();
+    material.dispose();
+  }
+});
+
+test('student desks leave clearance from the teaching area and keep chairs, bags and helipad inside the classroom', () => {
+  const { Box3 } = require('three');
+  const panel = panelHarness().panel;
+  for (const room of [{ width: 8.2 }, { width: 30 }]) {
+    const layout = getClassroomDeskLayout();
+    const { rows, cols, firstRowX, rowSpacing, deskD, deskW, colCenters, chairOffsetX, helipadRow, helipadCol, helipadPose } = layout;
+    assert.equal(rows, 4);
+    assert.equal(cols, 5);
+    assert.equal(rows * cols, 20);
+    near(rowSpacing, 1.3);
+    assert.ok(colCenters.every((center, index) => !index || center - colCenters[index - 1] - deskW >= 0.49));
+    const teacherDeskBack = -room.width / 2 + 1.55 + 0.31;
+    assert.ok(firstRowX - deskD / 2 - teacherDeskBack >= 0.73, 'leave at least 73cm behind the teacher desk');
+    const lectern = panel.createClassroomLectern();
+    lectern.position.set(-room.width / 2 + 1.36, 0, 1.02);
+    lectern.rotation.y = Math.PI / 2;
+    assert.ok(firstRowX - deskD / 2 - new Box3().setFromObject(lectern).max.x >= 0.98);
+    const lastRowX = firstRowX + rowSpacing * (rows - 1);
+    const chair = panel.createClassroomChair();
+    chair.position.x = lastRowX + chairOffsetX;
+    const bag = panel.createSchoolBackpack('#526c89');
+    bag.position.set(lastRowX + chairOffsetX + 0.245, 0.56, 0);
+    for (const prop of [chair, bag]) {
+      assert.ok(new Box3().setFromObject(prop).max.x < room.width / 2 - 0.08,
+        'rear-row furniture must stay inside the back wall');
+    }
+    near(helipadPose.x, firstRowX + rowSpacing * helipadRow);
+    near(helipadPose.z, colCenters[helipadCol]);
+    assert.equal(helipadPose.x, 0);
+    assert.equal(helipadPose.z, 0);
+    near(helipadPose.y, 0.76573);
+    assert.ok(0.3 <= deskD && 0.3 <= deskW, 'helipad still fits on its assigned desk');
+    for (const prop of [lectern, chair, bag]) prop.traverse(node => {
+      node.geometry?.dispose();
+      node.material?.dispose();
+    });
+  }
+  near(getClassroomDeskLayout().firstRowX, -1.3);
+});
+
 test('school chairs have rounded wood panels, a continuous steel back and four floor-contacting rubber feet', () => {
   const { Box3 } = require('three');
   const chair = panelHarness().panel.createClassroomChair();
@@ -503,7 +595,7 @@ test('school chairs have rounded wood panels, a continuous steel back and four f
   assert.equal(chair.children.filter(part => part.name === 'Chair steel leg').length, 4);
   const bounds = new Box3().setFromObject(chair);
   assert.ok(bounds.max.y > 0.75 && bounds.max.y < 0.8);
-  assert.ok(bounds.max.z - bounds.min.z < 0.4, 'chair must fit inside each 0.86m column');
+  assert.ok(bounds.max.z - bounds.min.z < 0.4, 'chair must fit inside each 1.1m column');
   chair.traverse(node => { node.geometry?.dispose(); node.material?.dispose(); });
 });
 
@@ -567,7 +659,7 @@ test('school props have small hanging backpacks and a hollow set square, marked 
   assert.ok(bounds.max.z - bounds.min.z < 0.25, 'backpack stays within the chair width');
   bag.position.set(0.4 + 0.245, 0.56, 0);
   const hanging = new Box3().setFromObject(bag);
-  assert.ok(hanging.max.x < 0.98 - 0.2, 'hanging backpack must not touch the next desk');
+  assert.ok(hanging.max.x < getClassroomDeskLayout().rowSpacing - 0.2, 'hanging backpack must not touch the next desk');
   assert.ok(hanging.min.y > 0.4, 'backpack must not sit on the floor');
   const tools = panel.createClassroomTeachingTools();
   const triangle = tools.getObjectByName('Teaching set square');
