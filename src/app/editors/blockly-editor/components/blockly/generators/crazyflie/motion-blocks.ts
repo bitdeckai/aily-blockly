@@ -116,6 +116,8 @@ export function motionFlowTimeoutMs(code: string): number {
       height = 0.3;
     } else if (/^cf_land\s*\(/.test(line)) {
       height = 0;
+    } else if (/^cf_test_crazyflie_link\s*\(/.test(line)) {
+      duration += 20;
     } else {
       const delay = /^cf_delay\(\s*([0-9.e+-]+)\s*\)/i.exec(line);
       if (delay) duration += Number(delay[1]);

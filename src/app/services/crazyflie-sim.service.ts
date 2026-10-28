@@ -262,9 +262,9 @@ export class CrazyflieSimService {
             await this.waitWithControl(150, true);
             break;
           case 'test_crazyflie_link':
-            this.appendLog('sim: test_crazyflie_link (Crazyflie Basic Test)');
+            this.appendLog('sim: self-test (estimated 5 seconds; simulation only, no firmware result)');
             executed.push('test_crazyflie_link');
-            await this.waitWithControl(200, true);
+            await this.waitWithControl(5000, true);
             break;
           case 'detect_flow_v2':
             this.connectionService.setDeckDetected('flow-v2', true);

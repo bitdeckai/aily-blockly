@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import time
+from queue import Empty, Queue
 from threading import Event, Thread
 from pathlib import Path
 from contextlib import contextmanager, ExitStack, nullcontext
@@ -522,6 +523,101 @@ def test_link(uri, address_hex: str | None, stop_requested=None):
     return radio_status, links, scan_error, normalized_address
 
 
+def wait_for_propeller_test(scf, log_config_class, ensure_running, timeout_sec=20.0, stale_sec=3.0):
+    ensure_running()
+    for toc, names in [
+        (scf.cf.param.toc, ("health.startPropTest",)),
+        (scf.cf.log.toc, ("health.motorTestCount", "health.motorPass")),
+    ]:
+        for name in names:
+            if toc.get_element_by_complete_name(name) is None:
+                raise RuntimeError(f"SELF_TEST_UNSUPPORTED: firmware does not expose {name}; test not started")
+
+    config = log_config_class(name="AilySelfTest", period_in_ms=100)
+    config.add_variable("health.motorTestCount", "uint16_t")
+    config.add_variable("health.motorPass", "uint8_t")
+    updates = Queue()
+    closed = Event()
+
+    def on_data(timestamp, data, _config):
+        if not closed.is_set():
+            updates.put(("sample", (timestamp, data.get("health.motorTestCount"), data.get("health.motorPass"))))
+
+    def on_error(_config, message):
+        updates.put(("error", f"Self-test logging failed: {message}"))
+
+    def on_disconnect(*args):
+        updates.put(("error", f"Self-test disconnected: {args}"))
+
+    callbacks = [
+        (config.data_received_cb, on_data),
+        (config.error_cb, on_error),
+        (scf.cf.disconnected, on_disconnect),
+        (scf.cf.connection_lost, on_disconnect),
+    ]
+    scf.cf.log.add_config(config)
+    for callback, handler in callbacks:
+        callback.add_callback(handler)
+    triggered = False
+    completed = False
+    baseline = None
+    last_timestamp = None
+    last_sample = time.monotonic()
+    deadline = last_sample + timeout_sec
+    try:
+        config.start()
+        while True:
+            ensure_running()
+            now = time.monotonic()
+            if now >= deadline:
+                raise TimeoutError("SELF_TEST_TIMEOUT: firmware did not confirm completion; remaining commands skipped")
+            if now - last_sample >= stale_sec:
+                raise TimeoutError("SELF_TEST_NO_FEEDBACK: no fresh self-test telemetry; remaining commands skipped")
+            try:
+                kind, payload = updates.get(timeout=0.05)
+            except Empty:
+                continue
+            if kind == "error":
+                raise RuntimeError(payload)
+            timestamp, count, motor_pass = payload
+            if (type(timestamp) is not int or not 0 <= timestamp <= 0xffffff
+                    or type(count) is not int or not 0 <= count <= 0xffff
+                    or type(motor_pass) is not int or not 0 <= motor_pass <= 0xff):
+                raise RuntimeError("Invalid self-test telemetry; remaining commands skipped")
+            if last_timestamp is not None:
+                elapsed = (timestamp - last_timestamp) & 0xffffff
+                if elapsed == 0 or elapsed >= 0x800000:
+                    continue
+            last_timestamp = timestamp
+            last_sample = time.monotonic()
+            if baseline is None:
+                baseline = count
+                ensure_running()
+                print("self_test_waiting: waiting for firmware motorTestCount to advance", flush=True)
+                triggered = True
+                scf.cf.param.set_value("health.startPropTest", "1")
+            elif count == ((baseline + 1) & 0xffff):
+                ensure_running()
+                completed = True
+                # The counter also works with firmware without motorPass's newer completion bit.
+                print(f"self_test_completed: motorTestCount={count}, motorPass=0x{motor_pass & 0x0f:02x}", flush=True)
+                return
+            elif count != baseline:
+                raise RuntimeError("Unexpected self-test counter; remaining commands skipped")
+    finally:
+        closed.set()
+        if triggered and not completed:
+            print("self_test_unconfirmed: firmware motor test may still be running; wait for motors to stop before operating", flush=True)
+        try:
+            try:
+                config.stop()
+            finally:
+                config.delete()
+        finally:
+            for callback, handler in callbacks:
+                callback.remove_callback(handler)
+
+
 def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow_position=False,
              stop_requested=None, connection=None):
     validate_motion_sequence(commands)
@@ -868,15 +964,6 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             return False
         return True
 
-    def run_propeller_test_like_cfclient(scf):
-        # Match crazyflie-clients-python ConsoleTab propeller test trigger.
-        try:
-            scf.cf.param.set_value("health.startPropTest", "1")
-            time.sleep(0.05)
-            return True, None
-        except Exception as exc:
-            return False, str(exc)
-
     def refresh_radio_status_fast():
         nonlocal radio_status
         if connection is not None:
@@ -902,19 +989,12 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             raise RuntimeError(f"TEST_RADIO_FAILED: uri={active_uri}, address={active_address}, radioStatus={radio_status}, scanError={scan_error}")
 
         if existing_scf is not None:
-            ok, err = run_propeller_test_like_cfclient(existing_scf)
+            wait_for_propeller_test(existing_scf, LogConfig, ensure_running)
             links = [active_uri]
         else:
-            try:
-                with open_connection(active_uri) as scf_tmp:
-                    ok, err = run_propeller_test_like_cfclient(scf_tmp)
-                links = [active_uri]
-            except Exception as exc:
-                ok, err = False, str(exc)
-                links = []
-
-        if not ok:
-            raise RuntimeError(f"TEST_CRAZYFLIE_FAILED: uri={active_uri}, address={active_address}, error={err}")
+            with open_connection(active_uri) as scf_tmp:
+                wait_for_propeller_test(scf_tmp, LogConfig, ensure_running)
+            links = [active_uri]
 
     def strict_crazyflie_connect_or_raise(existing_scf=None):
         nonlocal links

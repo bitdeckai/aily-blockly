@@ -546,6 +546,35 @@ test('simulation executes the expanded branch and decodes printed text exactly',
   assert.equal(sim.logs$.value.filter(line => line.includes('高度：3\\n')).length, 2);
 });
 
+test('simulated self-test stays on its step until the estimated test ends, then starts the separate delay', async () => {
+  const sim = simulator();
+  const waits = [];
+  const steps = [];
+  let finishSelfTest;
+  const pendingSelfTest = new Promise(resolve => { finishSelfTest = resolve; });
+  sim.waitWithControl = async (ms, speedAware) => {
+    waits.push([ms, speedAware]);
+    if (ms === 5000) await pendingSelfTest;
+  };
+  const subscription = sim.step$.subscribe(step => { if (step) steps.push(step.current); });
+  try {
+    const pending = sim.runCode('cf_test_crazyflie_link()\ncf_delay(3)');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(waits, [[5000, true]]);
+    assert.deepEqual(steps, [1]);
+    assert.match(sim.logs$.value.at(-1), /simulation only, no firmware result/);
+    finishSelfTest();
+    const result = await pending;
+    assert.equal(result.success, true);
+    assert.deepEqual(waits, [[5000, true], [3000, false]]);
+    assert.deepEqual(steps, [1, 2]);
+    assert.deepEqual(Array.from(result.executed), ['test_crazyflie_link', 'delay:3']);
+  } finally {
+    finishSelfTest();
+    subscription.unsubscribe();
+  }
+});
+
 test('eight motion block templates generate valid commands and preserve saved inputs', () => {
   const toolbox = createCrazyflieMotionToolbox(true);
   assert.equal(toolbox.contents.length, 8);
@@ -619,6 +648,8 @@ test('motion and hover durations extend IPC timeout including the requested land
     'cf_delay(2)', 'cf_motion("land", [0.1])',
   ].join('\n');
   assert.equal(motionFlowTimeoutMs(code), 147000);
+  assert.equal(motionFlowTimeoutMs('cf_test_crazyflie_link()\ncf_delay(3)'), 83000);
+  assert.equal(motionFlowTimeoutMs('cf_test_crazyflie_link()\ncf_test_crazyflie_link()'), 100000);
   assert.equal(motionDurationSeconds({ kind: 'circle', values: [0.5, 360, 0.5] }), 2 * Math.PI);
   assert.throws(() => motionFlowTimeoutMs('cf_motion("hover", [1e20])'), /计时器/);
 });
