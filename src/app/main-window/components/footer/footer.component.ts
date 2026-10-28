@@ -52,6 +52,11 @@ export class FooterComponent implements OnDestroy {
     return inEditor && boardName.includes('crazyflie');
   }
 
+  get projectName(): string {
+    const project = this.projectService.currentPackageData;
+    return project?.nickname || project?.name || '';
+  }
+
   get batteryPercent(): number | null {
     const value = this.telemetryState?.batteryPercent;
     return typeof value === 'number' && Number.isFinite(value)

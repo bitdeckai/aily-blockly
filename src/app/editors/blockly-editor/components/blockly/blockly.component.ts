@@ -71,6 +71,7 @@ import { NzModalModule, NzModalService } from 'ng-zorro-antd/modal';
 import { NzResizableModule, NzResizeEvent } from 'ng-zorro-antd/resizable';
 import * as BlockDynamicConnection from '@blockly/block-dynamic-connection';
 import { CommonModule } from '@angular/common';
+import { UiService } from '../../../../services/ui.service';
 import { BitmapUploadService } from '../../services/bitmap-upload.service';
 import { ImageUploadDialogComponent } from './components/image-upload-dialog/image-upload-dialog.component';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -388,6 +389,7 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     private platformService: PlatformService,
     private codeViewerIpcService: CodeViewerIpcService,
     private crazyflieSimService: CrazyflieSimService,
+    private uiService: UiService,
   ) {
     // Initialize GlobalServiceManager with BitmapUploadService
     const globalServiceManager = GlobalServiceManager.getInstance();
@@ -432,6 +434,7 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   ngOnInit(): void {
+    this.uiService.blocklyToolboxWidth = this.toolboxWidth;
     this.initAiWritingSubscription();
     this.initPrompt();
     this.initCodeGenerationDebounce();
@@ -564,6 +567,7 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     }
 
     this.toolboxWidth = nextWidth;
+    this.uiService.blocklyToolboxWidth = nextWidth;
     this.applyToolboxWidth(nextWidth);
     this.resizeWorkspace();
   }

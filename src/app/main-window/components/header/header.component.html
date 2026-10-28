@@ -1,5 +1,6 @@
 <div class="header-box" [class.darwin]="isMac" [class.full-screen]="isMacFullScreen"
   [class.crazyflie-header]="canShowSimulatorControls()">
+  <div class="board-controls" [style.width.px]="boardControlsWidth">
   <div class="menu ccenter" (click)="openMenu()">
     <div class="btn ccenter" nz-tooltip nzTooltipTitle="{{ 'MENU.MENU' | translate }}">
       <i class="fa-regular fa-bars"></i>
@@ -8,16 +9,19 @@
 
   @if(isLoaded()){
   <div class="board ccenter" (click)="openPortList($event)">
-    {{currentBoard}}
+    <span class="board-name" [title]="currentBoard">{{currentBoard}}
     @if(currentPort){
     ({{currentPort}})
     }@else{
     (-)
     }
+    </span>
     <div class="down ccenter"><i class="fa-regular fa-angle-down"></i></div>
   </div>
   }
+  </div>
   @if (canShowSimulatorControls()) {
+  <div class="cf-flight-controls">
   <div class="cf-connection-control cf-connection-control--board">
     <button type="button" class="cf-connection-status cf-link-check"
       [attr.data-status]="connectionState.status" [title]="connectionState.message"
@@ -28,47 +32,53 @@
         [class.fa-link-slash]="connectionState.status === 'ready'"
         [class.fa-spinner-third]="connectionState.status === 'checking'" aria-hidden="true"></i>
     </button>
-    <select class="cf-radio-selector" aria-label="选择 Crazyradio 无线收发器" [title]="crazyradioDiscoveryError || connectionState.message"
+    <select class="cf-radio-selector" aria-label="选择 Crazyradio 无线收发器" [title]="crazyradioSelectorTooltip"
       [ngModel]="selectedCrazyradio" [disabled]="connectionState.status === 'ready' || connectionState.status === 'checking' || crazyflieRunInProgress"
       (focus)="refreshCrazyradios()" (ngModelChange)="selectCrazyradio($event)">
       <option value="">选择无线收发器</option>
       @for (radio of crazyradioInterfaces; track radio.serial) {
-        <option [value]="radio.serial">{{ radio.index }} · {{ radio.serial }}</option>
+        <option [ngValue]="radio.serial" [title]="radio.serial">{{ crazyradioLabel(radio.index) }}</option>
       }
       @if (connectionState.radioSerial && !crazyradioInterfaces.length) {
-        <option [value]="connectionState.radioSerial">{{ connectionState.radioIndex }} · {{ connectionState.radioSerial }}</option>
+        <option [ngValue]="connectionState.radioSerial" [title]="connectionState.radioSerial">{{ crazyradioLabel(connectionState.radioIndex) }}</option>
       }
     </select>
   </div>
-  }
-  <div class="null-box drag" (dblclick)="maximize()"></div>
-  <div class="project-box ccenter">{{ projectData?.nickname || projectData?.name}}</div>
-  <div class="toolbox">
-    <div class="zone ccenter">
-      @if (canShowSimulatorControls()) {
-      <div class="btn ccenter" nz-tooltip nzTooltipTitle="显示/隐藏三维模拟区" (click)="toggleSimulatorPanel()"
-        [ngClass]="{ selected: simulatorPanelVisible }">
-        <i class="fa-light fa-cube"></i>
-      </div>
       <div class="cf-runtime-control" role="group" aria-label="Crazyflie 运行模式">
         <span class="cf-runtime-control__label">运行模式</span>
         <div class="cf-mode-segments">
           <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'sim-only'"
-            (click)="setCrazyflieRuntimeMode('sim-only')">模拟</button>
+            [attr.aria-pressed]="runtimePolicy === 'sim-only'" aria-label="模拟" title="仅模拟，不执行真机操作"
+            (click)="setCrazyflieRuntimeMode('sim-only')">
+            <i class="fa-light fa-desktop" aria-hidden="true"></i><span class="cf-mode-label">模拟</span>
+          </button>
           <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'real-only'"
-            (click)="setCrazyflieRuntimeMode('real-only')">真机飞行</button>
+            [attr.aria-pressed]="runtimePolicy === 'real-only'" aria-label="真机飞行" title="真机飞行"
+            (click)="setCrazyflieRuntimeMode('real-only')">
+            <i class="fa-light fa-drone" aria-hidden="true"></i><span class="cf-mode-label">真机飞行</span>
+          </button>
           <button type="button" [disabled]="crazyflieRunInProgress" [class.active]="runtimePolicy === 'sim-real'"
-            (click)="setCrazyflieRuntimeMode('sim-real')" title="执行真机流程，同时用真机位置和姿态更新三维场景">模拟+真机</button>
+            [attr.aria-pressed]="runtimePolicy === 'sim-real'" aria-label="模拟+真机"
+            (click)="setCrazyflieRuntimeMode('sim-real')" title="执行真机流程，同时用真机位置和姿态更新三维场景">
+            <i class="fa-light fa-arrows-rotate" aria-hidden="true"></i><span class="cf-mode-label">模拟+真机</span>
+          </button>
         </div>
         <button type="button" class="cf-run-button" [disabled]="crazyflieRunInProgress"
           nz-tooltip nzTooltipTitle="运行当前模式"
           (click)="runSelectedCrazyflieMode()">
           <i class="fa-light" [class.fa-play]="!crazyflieRunInProgress"
-            [class.fa-spinner-third]="crazyflieRunInProgress"></i>
+            [class.fa-spinner-third]="crazyflieRunInProgress" aria-hidden="true"></i>
           <span>{{ crazyflieRunInProgress ? '运行中' : '运行' }}</span>
         </button>
       </div>
-      }
+  </div>
+  }
+  <div class="null-box drag" (dblclick)="maximize()"></div>
+  @if (!canShowSimulatorControls()) {
+  <div class="project-box ccenter">{{ projectData?.nickname || projectData?.name}}</div>
+  }
+  <div class="toolbox">
+    <div class="zone ccenter">
       @for (btn of headerBtns; track $index) {
       @if(showInRouter(btn) && shouldShowHeaderButton(btn)){
       <app-act-btn [icon]="btn.icon" [color]="btn.color" [(state)]="btn.state" nz-tooltip
@@ -79,6 +89,13 @@
     </div>
     <!-- 动态 App 列表 -->
     <div class="zone ccenter">
+      @if (canShowSimulatorControls()) {
+      <button type="button" class="btn ccenter cf-simulator-toggle" aria-label="显示/隐藏三维模拟区"
+        [attr.aria-pressed]="simulatorPanelVisible" nz-tooltip nzTooltipTitle="显示/隐藏三维模拟区"
+        (click)="toggleSimulatorPanel()" [class.selected]="simulatorPanelVisible">
+        <i class="fa-light fa-cube" aria-hidden="true"></i>
+      </button>
+      }
       @for (app of headerApps; track app.id) {
       @if(!app.dev||isDevMode) {
       @if(showInRouter(app)){

@@ -152,6 +152,11 @@ export class HeaderComponent implements OnDestroy {
     return this.crazyflieSimService.panelVisible$.value;
   }
 
+  get boardControlsWidth(): number | null {
+    return this.canShowSimulatorControls() && this.router.url.includes('/main/blockly-editor')
+      ? this.uiService.blocklyToolboxWidth - (this.isMac && !this.isMacFullScreen ? 80 : 0) : null;
+  }
+
   canShowSimulatorControls(): boolean {
     const inEditor = this.router.url.indexOf('/main/blockly-editor') > -1 || this.router.url.indexOf('/main/code-editor') > -1;
     const boardName = String(this.projectService.currentBoardConfig?.name || this.currentBoard || '').toLowerCase();
@@ -255,6 +260,16 @@ export class HeaderComponent implements OnDestroy {
 
   get crazyradioInterfaces() { return this.crazyflieConnectionService.radios; }
   get selectedCrazyradio() { return this.crazyflieConnectionService.selectedRadioSerial; }
+  crazyradioLabel(index?: number): string {
+    return index === undefined ? 'Crazyradio' : `Crazyradio ${index + 1}`;
+  }
+
+  get crazyradioSelectorTooltip(): string {
+    if (this.crazyradioDiscoveryError) return this.crazyradioDiscoveryError;
+    const serial = this.selectedCrazyradio || this.connectionState.radioSerial;
+    return serial ? `Crazyradio · USB ${serial}` : '选择无线收发器';
+  }
+
   selectCrazyradio(serial: string): void {
     this.crazyflieConnectionService.selectedRadioSerial = serial;
   }

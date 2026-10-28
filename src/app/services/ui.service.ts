@@ -36,6 +36,7 @@ export class UiService {
   currentBottomTab = '';
   theme = 'dark';
   isMainWindow = false;
+  blocklyToolboxWidth = 185;
 
   /**
    * 向 aily-chat 发送消息的 Subject。

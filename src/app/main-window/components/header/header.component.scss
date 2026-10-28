@@ -24,11 +24,24 @@ $header-inner-height: 38px;
   }
 
   .menu {
+    flex-shrink: 0;
     width: $header-inner-height;
     height: $header-inner-height;
 
     :hover {
       background: var(--aily-bg-tertiary);
+    }
+  }
+
+  .board-controls {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    min-width: 0;
+
+    .board-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   }
 
@@ -87,42 +100,37 @@ $header-inner-height: 38px;
     align-items: center;
     gap: 6px;
     flex: 0 0 auto;
-    margin: 0 6px;
+    margin: 0;
   }
 
-  .cf-connection-control--board {
-    margin: 0 4px 0 20px;
+  .cf-flight-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .cf-radio-selector {
     width: 140px;
     min-width: 0;
-    height: 30px;
+    height: 32px;
+    padding: 0 6px;
     border: 1px solid var(--aily-border-input);
     border-radius: 6px;
     background: var(--aily-bg-secondary);
     color: var(--aily-text-primary);
-    font-size: 11px;
+    font-size: 14px;
     text-overflow: ellipsis;
-  }
-
-  @media (max-width: 1100px) {
-    .cf-radio-selector {
-      width: 104px;
-    }
   }
 
   .cf-runtime-control__label,
   .cf-connection-status {
     color: var(--aily-text-secondary);
-    font-size: 11px;
+    font-size: 14px;
     white-space: nowrap;
-  }
-
-  @media (max-width: 1100px) {
-    .cf-runtime-control__label {
-      display: none;
-    }
   }
 
   .cf-mode-segments {
@@ -133,19 +141,28 @@ $header-inner-height: 38px;
     background: var(--aily-bg-secondary);
 
     button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
       min-height: 26px;
       padding: 0 8px;
       border: 0;
       border-radius: 4px;
       background: transparent;
       color: var(--aily-text-secondary);
-      font-size: 11px;
+      font-size: 14px;
       white-space: nowrap;
       cursor: pointer;
 
       &.active {
         background: color-mix(in srgb, #3f9b75 32%, var(--aily-bg-primary));
         color: var(--aily-text-primary);
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: wait;
       }
     }
   }
@@ -156,13 +173,13 @@ $header-inner-height: 38px;
     align-items: center;
     justify-content: center;
     gap: 5px;
-    min-height: 30px;
+    height: 32px;
     padding: 0 8px;
     border: 1px solid color-mix(in srgb, var(--aily-border-input) 78%, transparent);
     border-radius: 6px;
     background: var(--aily-bg-secondary);
     color: var(--aily-text-primary);
-    font-size: 11px;
+    font-size: 14px;
     white-space: nowrap;
     cursor: pointer;
 
@@ -181,11 +198,11 @@ $header-inner-height: 38px;
   }
 
   .cf-link-check {
-    width: 34px;
-    min-width: 34px;
+    width: 38px;
+    min-width: 38px;
     padding: 0;
     gap: 3px;
-    font-size: 14px;
+    font-size: 17px;
   }
 
   .cf-connection-status {
@@ -217,6 +234,7 @@ $header-inner-height: 38px;
     position: relative;
     z-index: 2;
     display: flex;
+    flex-shrink: 0;
     height: 100%;
     background: var(--aily-bg-primary);
 
@@ -231,49 +249,68 @@ $header-inner-height: 38px;
     }
   }
 
-  @media (max-width: 1100px) {
+  &.crazyflie-header {
+    .board-controls .board {
+      flex: 1;
+      justify-content: flex-start;
+      min-width: 0;
+      padding: 0 8px;
+
+      .down {
+        flex-shrink: 0;
+      }
+    }
+
+    .null-box {
+      min-width: 32px;
+    }
+
+    .toolbox .zone:first-child:empty {
+      display: none;
+    }
+
+    .cf-simulator-toggle {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+  }
+
+  @media (max-width: 1200px) {
     &.crazyflie-header {
-      .project-box {
-        max-width: 12vw;
-        margin: 0 4px;
+      .null-box {
+        min-width: 16px;
       }
 
-      .cf-runtime-control {
-        gap: 4px;
-        margin: 0 4px;
+      .cf-runtime-control__label,
+      .cf-mode-label {
+        display: none;
+      }
+
+      .cf-flight-controls {
+        gap: 8px;
       }
 
       .cf-mode-segments button {
-        padding: 0 6px;
+        width: 32px;
+        padding: 0;
+        font-size: 16px;
       }
 
-      .toolbox {
-        min-width: 0;
+      .cf-radio-selector {
+        width: 124px;
+      }
 
-        .zone {
-          padding: 2px;
-          margin-left: 4px;
+      .toolbox .zone {
+        padding: 2px;
+        margin-left: 0;
+      }
 
-          &:first-child {
-            flex-shrink: 0;
-            margin-left: 0;
-          }
-
-          &:last-child {
-            min-width: 0;
-            justify-content: flex-start;
-            overflow-x: auto;
-            overflow-y: hidden;
-            scrollbar-width: thin;
-          }
-        }
-
-        .btn {
-          flex: 0 0 30px;
-          width: 30px;
-          margin-right: 4px;
-          font-size: 17px;
-        }
+      .toolbox .btn {
+        flex: 0 0 30px;
+        width: 30px;
+        margin-right: 4px;
+        font-size: 17px;
       }
 
       .win-btns {

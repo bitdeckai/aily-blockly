@@ -12,6 +12,7 @@ $footer-inner-height: 28px;
 }
 
 .btn {
+  flex-shrink: 0;
   width: $footer-inner-height;
   height: $footer-inner-height;
 
@@ -22,6 +23,29 @@ $footer-inner-height: 28px;
   &.active {
     background: var(--aily-bg-active);
     color: var(--aily-text-primary);
+  }
+}
+
+.project-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 30vw;
+  margin: 0 12px;
+  color: var(--aily-text-secondary);
+  font-size: 13px;
+
+  i {
+    flex-shrink: 0;
+  }
+
+  &__text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 }
 

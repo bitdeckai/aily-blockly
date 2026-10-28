@@ -1079,7 +1079,7 @@ test('student desks leave clearance from the teaching area and keep chairs, bags
   near(getClassroomDeskLayout().firstRowX, -1.3);
 });
 
-test('classroom helipad uses a distinct matte orange surface with high-contrast markings at the original position', async () => {
+test('classroom helipad uses a distinct matte orange surface with warm ivory markings at the original position', async () => {
   const THREE = require('three');
   const panel = panelHarness({
     globals: {
@@ -1102,14 +1102,14 @@ test('classroom helipad uses a distinct matte orange surface with high-contrast 
     const base = root.getObjectByName('Classroom desk helipad');
     const top = root.children.find(part => part.geometry?.parameters.radiusTop === 0.126);
     const plate = root.children.find(part => part.geometry?.parameters.width === 0.284);
-    const marks = root.children.filter(part => part.material?.color.getHexString() === '203a46');
+    const marks = root.children.filter(part => part.material?.color.getHexString() === 'fff3d6');
     assert.equal(base.material.color.getHexString(), 'ad5b2b');
     assert.equal(plate.material.color.getHexString(), 'f6c76a');
     assert.equal(top.material.color.getHexString(), 'ee923a');
     assert.equal(marks.length, 19, 'keep sixteen safety dashes and three H bars');
     const luminance = color => 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
-    const contrast = (luminance(top.material.color) + 0.05) / (luminance(marks[0].material.color) + 0.05);
-    assert.ok(contrast >= 4.5, 'markings must contrast clearly with the orange landing surface');
+    assert.ok(marks.every(part => luminance(part.material.color) > luminance(top.material.color)),
+      'warm ivory markings must be brighter than the orange landing surface');
     assert.ok(top.material.roughness >= 0.75 && top.material.envMap === null);
     const deskColor = new THREE.Color('#efd0a0');
     const colorDistance = top.material.color.toArray().reduce((sum, value, index) =>

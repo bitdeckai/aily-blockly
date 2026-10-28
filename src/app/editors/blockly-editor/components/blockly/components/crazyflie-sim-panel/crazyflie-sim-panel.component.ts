@@ -3007,7 +3007,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       helipadTop.position.set(helipadX, deskSurfaceY + 0.035, helipadZ);
       group.add(helipadTop);
 
-      const safetyDashMaterial = new MeshStandardMaterial({ color: '#203a46', roughness: 0.64, metalness: 0.04 });
+      const safetyDashMaterial = new MeshStandardMaterial({ color: '#fff3d6', roughness: 0.64, metalness: 0.04 });
       const safetyDashCount = 16;
       for (let dashIndex = 0; dashIndex < safetyDashCount; dashIndex += 1) {
         const angle = (dashIndex / safetyDashCount) * Math.PI * 2;
@@ -3018,7 +3018,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         group.add(dash);
       }
 
-      const hMarkMaterial = new MeshStandardMaterial({ color: '#203a46', roughness: 0.74, metalness: 0.01 });
+      const hMarkMaterial = new MeshStandardMaterial({ color: '#fff3d6', roughness: 0.74, metalness: 0.01 });
       const hBarLeft = new Mesh(new BoxGeometry(0.014, 0.004, 0.095), hMarkMaterial);
       hBarLeft.position.set(helipadX - 0.034, deskSurfaceY + 0.040, helipadZ);
       group.add(hBarLeft);

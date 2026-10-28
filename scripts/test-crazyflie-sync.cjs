@@ -489,6 +489,95 @@ test('Crazyflie hides duplicate generic buttons and routes menu/F6 run through t
   assert.equal(header.shouldShowHeaderButton({ action: 'upload' }), true);
 });
 
+test('header groups flight controls by the radio and keeps the simulator toggle next to code viewing', () => {
+  const headerDir = path.join(root, 'src', 'app', 'main-window', 'components', 'header');
+  const html = fs.readFileSync(path.join(headerDir, 'header.component.html'), 'utf8');
+  const radio = html.indexOf('class="cf-radio-selector"');
+  const runtime = html.indexOf('class="cf-runtime-control"');
+  const spacer = html.indexOf('class="null-box drag"');
+  const toggle = html.indexOf('cf-simulator-toggle');
+  assert.ok(radio < runtime && runtime < spacer && spacer < toggle);
+  assert.ok(toggle < html.indexOf('@for (app of headerApps;'));
+  assert.match(html, /\[style\.width\.px\]="boardControlsWidth"/);
+  assert.doesNotMatch(html, /\{\{\s*radio\.serial\s*\}\}/);
+  assert.match(html, /\[ngValue\]="radio\.serial"/);
+  assert.match(html, /\[ngValue\]="connectionState\.radioSerial"/);
+  assert.match(html, /\[attr\.aria-pressed\]="simulatorPanelVisible"/);
+  const scss = fs.readFileSync(path.join(headerDir, 'header.component.scss'), 'utf8');
+  assert.doesNotMatch(scss, /font-size:\s*11px/);
+  assert.match(scss, /\.cf-mode-label/);
+  const blockly = fs.readFileSync(path.join(root, 'src', 'app', 'editors', 'blockly-editor',
+    'components', 'blockly', 'blockly.component.ts'), 'utf8');
+  assert.match(blockly, /this\.uiService\.blocklyToolboxWidth = nextWidth/);
+});
+
+test('header uses simple radio names while retaining serial-based selection and responsive alignment', () => {
+  const { HeaderComponent } = load(path.join(root, 'src', 'app', 'main-window', 'components',
+    'header', 'header.component.ts'));
+  const header = Object.create(HeaderComponent.prototype);
+  Object.assign(header, {
+    uiService: { blocklyToolboxWidth: 185 },
+    router: { url: '/main/blockly-editor' },
+    platformService: { isMac: () => false },
+    crazyflieConnectionService: { selectedRadioSerial: 'AABBCCDD0002' },
+    connectionState: { status: 'disconnected', message: '', radioSerial: 'AABBCCDD0001' },
+  });
+  header.canShowSimulatorControls = () => true;
+  assert.equal(header.crazyradioLabel(0), 'Crazyradio 1');
+  assert.equal(header.crazyradioLabel(1), 'Crazyradio 2');
+  assert.equal(header.crazyradioLabel(), 'Crazyradio');
+  assert.equal(header.boardControlsWidth, 185);
+  header.uiService.blocklyToolboxWidth = 260;
+  assert.equal(header.boardControlsWidth, 260);
+  header.platformService.isMac = () => true;
+  assert.equal(header.boardControlsWidth, 180);
+  header.isMacFullScreen = true;
+  assert.equal(header.boardControlsWidth, 260);
+  header.platformService.isMac = () => false;
+  header.router.url = '/main/code-editor';
+  assert.equal(header.boardControlsWidth, null);
+  header.router.url = '/main/blockly-editor';
+  header.canShowSimulatorControls = () => false;
+  assert.equal(header.boardControlsWidth, null);
+  assert.match(header.crazyradioSelectorTooltip, /AABBCCDD0002/);
+  header.selectCrazyradio('AABBCCDD0001');
+  assert.equal(header.selectedCrazyradio, 'AABBCCDD0001');
+  header.crazyradioDiscoveryError = 'USB enumeration failed';
+  assert.equal(header.crazyradioSelectorTooltip, 'USB enumeration failed');
+  header.crazyradioDiscoveryError = null;
+  header.selectCrazyradio('');
+  assert.match(header.crazyradioSelectorTooltip, /AABBCCDD0001/);
+  header.connectionState.radioSerial = undefined;
+  assert.equal(header.crazyradioSelectorTooltip, '选择无线收发器');
+});
+
+test('footer shows the current Crazyflie project name with nickname preference and full-name tooltip', () => {
+  const { FooterComponent } = load(path.join(root, 'src', 'app', 'main-window', 'components',
+    'footer', 'footer.component.ts'));
+  const footer = Object.create(FooterComponent.prototype);
+  Object.assign(footer, {
+    projectService: { currentPackageData: { name: 'project_oct16a', nickname: 'Flight class' },
+      currentBoardConfig: { name: 'Crazyflie' } },
+    router: { url: '/main/blockly-editor' },
+  });
+  assert.equal(footer.showCrazyflieTelemetry, true);
+  assert.equal(footer.projectName, 'Flight class');
+  delete footer.projectService.currentPackageData.nickname;
+  assert.equal(footer.projectName, 'project_oct16a');
+  footer.projectService.currentPackageData = null;
+  assert.equal(footer.projectName, '');
+  footer.projectService.currentBoardConfig.name = 'Arduino';
+  assert.equal(footer.showCrazyflieTelemetry, false);
+  const html = fs.readFileSync(path.join(root, 'src', 'app', 'main-window', 'components',
+    'footer', 'footer.component.html'), 'utf8');
+  assert.match(html, /showCrazyflieTelemetry && projectName/);
+  assert.match(html, /\[title\]="projectName"/);
+  const styles = require('sass').compile(path.join(root, 'src', 'app', 'main-window', 'components',
+    'footer', 'footer.component.scss')).css;
+  assert.doesNotMatch(styles, /\.btn \.project-name/);
+  assert.match(styles, /\.project-name__text\s*\{[^}]*text-overflow: ellipsis/);
+});
+
 test('header automatically detects inserted radios every two seconds, pauses while connected and stops on teardown', async ({ mock }) => {
   mock.timers.enable({ apis: ['setTimeout'] });
   const { HeaderComponent } = load(path.join(root, 'src', 'app', 'main-window', 'components',
