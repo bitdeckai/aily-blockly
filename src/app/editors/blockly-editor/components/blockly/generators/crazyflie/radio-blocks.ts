@@ -6,20 +6,20 @@ export const crazyradioBlockTypes = ['cf_test_link', 'cf_scan_links', 'cf_radio_
 export function registerCrazyradioBlocks(generator: Blockly.CodeGenerator, chinese: boolean): void {
   Blockly.defineBlocksWithJsonArray([
     {
-      type: 'cf_test_link', message0: chinese ? '检测电台' : 'Check radio',
+      type: 'cf_test_link', message0: chinese ? '检测无线收发器' : 'Check radio',
       previousStatement: null, nextStatement: null, colour: CRAZYRADIO_COLOUR,
-      tooltip: chinese ? '检查 Crazyradio USB 电台，输出版本信息，不连接飞行器。'
+      tooltip: chinese ? '检查 Crazyradio USB 无线收发器，输出版本信息，不连接飞行器。'
         : 'Check the Crazyradio USB dongle and print its version without connecting to an aircraft.',
     },
     {
       type: 'cf_scan_links', message0: chinese ? '扫描飞行器' : 'Scan aircraft',
       previousStatement: null, nextStatement: null, colour: CRAZYRADIO_COLOUR,
-      tooltip: chinese ? '使用电台 0，按当前地址扫描并输出 URI；放在流程开头、连接之前，不启动电机。'
+      tooltip: chinese ? '使用无线收发器 0，按当前地址扫描并输出 URI；放在流程开头、连接之前，不启动电机。'
         : 'Scan with radio 0 at the configured address and print URIs. Place at the start, before connecting. No motors.',
     },
     {
       type: 'cf_radio_config',
-      message0: chinese ? '电台 %1 信道 %2 速率 %3 地址 %4' : 'Radio %1 channel %2 rate %3 address %4',
+      message0: chinese ? '无线收发器 %1 信道 %2 速率 %3 地址 %4' : 'Radio %1 channel %2 rate %3 address %4',
       args0: [
         { type: 'field_number', name: 'RADIO', value: 0, min: 0, max: 15, precision: 1 },
         { type: 'field_number', name: 'CHANNEL', value: 80, min: 0, max: 125, precision: 1 },
@@ -37,7 +37,7 @@ export function registerCrazyradioBlocks(generator: Blockly.CodeGenerator, chine
         { type: 'field_input', name: 'ADDRESS', text: 'E7E7E7E7E7' },
       ],
       previousStatement: null, nextStatement: null, colour: CRAZYRADIO_COLOUR,
-      tooltip: chinese ? '使用完整 URI 设置连接；与电台参数积木二选一，放在连接前。'
+      tooltip: chinese ? '旧版连接设置积木；新流程使用无线收发器参数积木，放在连接前。'
         : 'Configure the full link URI before connecting; use this or the radio parameter block.',
     },
   ]);
@@ -71,7 +71,7 @@ export function createCrazyradioToolbox() {
   return {
     kind: 'category', name: 'Crazyradio', categoryId: 'crazyradio',
     icon: 'fa-light fa-tower-broadcast', colour: CRAZYRADIO_COLOUR,
-    contents: crazyradioBlockTypes.map(type => ({
+    contents: crazyradioBlockTypes.filter(type => type !== 'cf_link_config').map(type => ({
       kind: 'block', type,
       ...(type === 'cf_radio_config' ? { fields: { RATE: '2M' } } : {}),
     })),

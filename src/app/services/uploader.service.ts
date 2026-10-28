@@ -75,6 +75,16 @@ export class UploaderService {
     return result;
   }
 
+  async getCrazyflieConnectionOptions(): Promise<{ uri: string; addressHex: string }> {
+    const feedback = await this.actionService.dispatchWithFeedback('crazyflie-connection-options', {}, 10000).toPromise();
+    const result = feedback?.data?.result;
+    if (feedback?.success === false || feedback?.data?.success === false
+      || typeof result?.uri !== 'string' || typeof result?.addressHex !== 'string') {
+      throw new Error(feedback?.data?.error || feedback?.error || '无法读取工程中的无线连接参数');
+    }
+    return result;
+  }
+
   async flyCrazyflieRealOnly() {
     const feedback = await this.actionService.dispatchWithFeedback('fly-crazyflie-real-begin', {}, 600000).toPromise();
     const result = feedback?.data?.result;
@@ -150,4 +160,3 @@ export class UploaderService {
     }
   }
 }
-

@@ -17,9 +17,9 @@ export class CrazyflieTelemetryService {
   setTelemetry(data: Partial<CrazyflieTelemetryState>): void {
     const current = this.telemetry$.value;
     this.telemetry$.next({
-      batteryPercent: this.normalizePercent(data.batteryPercent ?? current?.batteryPercent ?? null),
-      batteryVolts: this.normalizeVolts(data.batteryVolts ?? current?.batteryVolts ?? null),
-      linkQuality: this.normalizePercent(data.linkQuality ?? current?.linkQuality ?? null),
+      batteryPercent: this.normalizePercent('batteryPercent' in data ? data.batteryPercent : current?.batteryPercent),
+      batteryVolts: this.normalizeVolts('batteryVolts' in data ? data.batteryVolts : current?.batteryVolts),
+      linkQuality: this.normalizePercent('linkQuality' in data ? data.linkQuality : current?.linkQuality),
       updatedAt: Date.now(),
     });
   }
@@ -29,6 +29,7 @@ export class CrazyflieTelemetryService {
   }
 
   private normalizePercent(input: any): number | null {
+    if (input === null || input === undefined || input === '') return null;
     const value = Number(input);
     if (!Number.isFinite(value)) {
       return null;
@@ -37,6 +38,7 @@ export class CrazyflieTelemetryService {
   }
 
   private normalizeVolts(input: any): number | null {
+    if (input === null || input === undefined || input === '') return null;
     const value = Number(input);
     if (!Number.isFinite(value)) {
       return null;

@@ -36,7 +36,6 @@ import {
   PerspectiveCamera,
   PlaneGeometry,
   Path,
-  PCFSoftShadowMap,
   QuadraticBezierCurve3,
   RepeatWrapping,
   Raycaster,
@@ -63,7 +62,15 @@ import { getClassroomDeskLayout } from '../../../../../../services/crazyflie-cla
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
 import { BlocklyService } from '../../../../services/blockly.service';
 import { NzMessageService } from 'ng-zorro-antd/message';
-import { AttitudeReception, attitudeQuaternion, getAttitudeApi } from '../../../../../../services/crazyflie-attitude';
+import { AttitudeReception, attitudeQuaternion, CRAZYFLIE_BODY_AXES } from '../../../../../../services/crazyflie-attitude';
+import { CrazyflieAttitudePreview } from '../../../../../../services/crazyflie-attitude-preview';
+
+const CLASSROOM_WOOD_FINISHES = {
+  floor: { tint: '#eee5d3', opacity: 0.68, roughness: 0.88 },
+  desk: { tint: '#efd0a0', opacity: 0.32, roughness: 0.74 },
+  chair: { tint: '#b7c9bd', opacity: 0.82, roughness: 0.82 },
+} as const;
+type ClassroomWoodFinish = 'honey' | keyof typeof CLASSROOM_WOOD_FINISHES;
 
 @Component({
   selector: 'app-crazyflie-sim-panel',
@@ -74,7 +81,7 @@ import { AttitudeReception, attitudeQuaternion, getAttitudeApi } from '../../../
 })
 export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('canvasHost', { static: true }) private canvasHostRef!: ElementRef<HTMLDivElement>;
-  @ViewChild('orientationCanvas', { static: true }) private orientationCanvasRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('attitudeViewport', { static: true }) private attitudeViewportRef!: ElementRef<HTMLDivElement>;
 
   running = false;
   paused = false;
@@ -90,23 +97,14 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   detectedDeckLabels: string[] = [];
   axesVisible = true;
   selectedView = 'iso';
-  attitudeActive = false;
-  attitudePending = false;
-  attitudeUri = 'radio://0/80/2M';
-  attitudeAddress = 'E7E7E7E7E7';
-  attitudeStatus = '未开启';
-  attitudeReception = new AttitudeReception();
-  attitudeMetrics = this.attitudeReception.metrics(performance.now());
-  private disposeAttitude: (() => void) | null = null;
+  attitudeMetrics: ReturnType<AttitudeReception['metrics']>;
+  private attitudePreview: CrazyflieAttitudePreview | null = null;
+  private attitudeViewport = { x: 0, y: 0, width: 0, height: 0 };
   private destroyed = false;
   private lastAttitudeMetricsTs = 0;
   private flightAxes: Group | null = null;
   private aircraftYaw = 0;
-  private readonly flightDirections = [
-    { label: 'X', color: '#ed5353', direction: new Vector3(-1, 0, 0) },
-    { label: 'Y', color: '#32b86a', direction: new Vector3(0, 0, 1) },
-    { label: 'Z', color: '#399cec', direction: new Vector3(0, 1, 0) },
-  ];
+  private readonly flightDirections = CRAZYFLIE_BODY_AXES;
 
   private scene: Scene | null = null;
   private camera: PerspectiveCamera | null = null;
@@ -146,6 +144,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private classroomDeskAssetPromise: Promise<{ geometry: BufferGeometry; material: MeshStandardMaterial }> | null = null;
   private readonly classroomProtoAssetPromises = new Map<string, Promise<Group>>();
   private varnishedPineMaterialPromise: Promise<MeshStandardMaterial> | null = null;
+  private readonly classroomWoodMaterialPromises = new Map<ClassroomWoodFinish, Promise<MeshStandardMaterial>>();
   private readonly measureRaycaster = new Raycaster();
   private readonly measurePointer = new Vector2();
   private readonly measureFloor = new Plane(new Vector3(0, 1, 0), 0);
@@ -176,7 +175,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     private blocklyService: BlocklyService,
     private message: NzMessageService,
     private zone: NgZone,
-  ) {}
+  ) {
+    this.attitudeMetrics = connectionService.attitudeReception.metrics(performance.now());
+  }
 
   ngOnInit(): void {
     this.setupSubscriptions();
@@ -194,15 +195,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   ngOnDestroy(): void {
     this.destroyed = true;
-    this.disposeAttitude?.();
-    this.disposeAttitude = null;
-    if (this.attitudeActive || this.attitudePending) {
-      void getAttitudeApi()?.stopAttitude().then(result => {
-        if (!result.success) this.message.error(result.message || '停止姿态监测失败');
-      }).catch((error: unknown) => {
-        this.message.error(error instanceof Error ? error.message : String(error));
-      });
-    }
+    this.attitudePreview?.dispose();
+    this.attitudePreview = null;
     this.subscriptions.forEach((sub) => sub.unsubscribe());
     this.subscriptions = [];
     this.flightAxes?.children.forEach((axis) => {
@@ -254,69 +248,40 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   get displayedAttitude() {
     return this.realPoseShown ? this.simService.realAttitude$.value
-      : this.attitudeActive ? this.attitudeReception.sample : null;
+      : this.attitudeActive ? this.liveAttitude : null;
   }
 
-  async toggleAttitude(): Promise<void> {
-    if (this.attitudePending) return;
-    const api = getAttitudeApi();
-    if (!api) {
-      this.message.error('未找到真机姿态接口，请重启应用');
-      return;
+  get attitudeActive(): boolean {
+    return this.connectionService.state$.value.status === 'ready' && !this.running;
+  }
+
+  get liveAttitude() { return this.connectionService.attitude$.value; }
+
+  get attitudePreviewState(): 'connecting' | 'disconnected' | 'waiting' | 'error' | 'stale' | 'live' {
+    const state = this.connectionService.state$.value;
+    if (state.status === 'checking') return 'connecting';
+    if (state.status !== 'ready') return 'disconnected';
+    if (this.connectionService.attitudeError$.value) return 'error';
+    if (!this.liveAttitude) return 'waiting';
+    return this.attitudeMetrics.stale ? 'stale' : 'live';
+  }
+
+  get attitudeStatus(): string {
+    switch (this.attitudePreviewState) {
+      case 'connecting': return '连接中';
+      case 'disconnected': return '未连接';
+      case 'waiting': return '等待姿态';
+      case 'error': return '姿态异常';
+      case 'stale': return '数据过期';
+      case 'live': return '实时';
     }
-    this.attitudePending = true;
-    try {
-      if (this.attitudeActive) {
-        const result = await api.stopAttitude();
-        if (!result.success) throw new Error(result.message || '停止姿态监测失败');
-        this.attitudeActive = false;
-        this.attitudeStatus = '未开启';
-        this.disposeAttitude?.();
-        this.disposeAttitude = null;
-      } else {
-        this.attitudeReception = new AttitudeReception();
-        this.attitudeMetrics = this.attitudeReception.metrics(performance.now());
-        this.attitudeStatus = '正在连接真机…';
-        this.disposeAttitude = api.onAttitude(event => this.zone.run(() => {
-          if (this.destroyed) return;
-          if (event.type === 'sample') {
-            if (this.attitudeReception.receive(event, performance.now())) {
-              this.aircraftYaw = MathUtils.degToRad(event.yaw);
-              this.attitudeStatus = '真实姿态（位置仍为模拟）';
-            }
-          } else if (event.type === 'error') {
-            this.attitudeStatus = `姿态数据异常：${event.message}`;
-            this.message.error(this.attitudeStatus);
-          } else if (event.type === 'state') {
-            this.attitudeReception = new AttitudeReception();
-            this.attitudeStatus = event.state === 'flow' ? '使用流程连接，等待姿态数据…' : '正在连接真机…';
-          } else if (event.type === 'stopped') {
-            this.attitudeStatus = '姿态连接已停止';
-          }
-        }));
-        const result = await api.startAttitude({ uri: this.attitudeUri.trim(), addressHex: this.attitudeAddress.trim() });
-        if (!result.success) {
-          this.disposeAttitude();
-          this.disposeAttitude = null;
-          throw new Error(result.message || '开启姿态监测失败');
-        }
-        if (this.destroyed) {
-          const stopped = await api.stopAttitude();
-          if (!stopped.success) throw new Error(stopped.message || '停止姿态监测失败');
-        } else {
-          this.attitudeActive = true;
-        }
-      }
-    } catch (error: unknown) {
-      this.attitudeStatus = error instanceof Error ? error.message : String(error);
-      this.message.error(this.attitudeStatus);
-      if (!this.attitudeActive) {
-        this.disposeAttitude?.();
-        this.disposeAttitude = null;
-      }
-    } finally {
-      this.attitudePending = false;
-    }
+  }
+
+  get attitudePreviewMessage(): string {
+    if (this.attitudePreviewState === 'error') return this.connectionService.attitudeError$.value || '姿态数据异常';
+    if (this.attitudePreviewState === 'disconnected') return '点击顶部连接按钮后自动读取真机姿态；预览不控制电机';
+    if (this.attitudePreviewState === 'stale') return '超过 500 ms 未收到新姿态，保持末次实测值';
+    return `${this.connectionService.state$.value.message}；仅显示姿态，不代表真实位置`;
   }
 
   resetDronePose(): void {
@@ -588,46 +553,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
   }
 
-  private drawOrientationCompass(): void {
-    if (!this.camera) {
-      return;
-    }
-    const canvas = this.orientationCanvasRef.nativeElement;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      return;
-    }
-    context.clearRect(0, 0, 112, 112);
-    const inverseCamera = this.camera.quaternion.clone().invert();
-    const directions = this.flightDirections.map((axis) => ({ ...axis,
-      projected: axis.direction.clone()
-        .applyQuaternion(this.flightAxes?.quaternion || attitudeQuaternion(0, 0, MathUtils.radToDeg(this.aircraftYaw)))
-        .applyQuaternion(inverseCamera),
-    })).sort((left, right) => left.projected.z - right.projected.z);
-    context.lineWidth = 3;
-    context.font = 'bold 14px sans-serif';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    for (const axis of directions) {
-      const x = 56 + axis.projected.x * 34;
-      const y = 56 - axis.projected.y * 34;
-      context.strokeStyle = axis.color;
-      context.beginPath();
-      context.moveTo(56, 56);
-      context.lineTo(x, y);
-      context.stroke();
-      context.fillStyle = axis.color;
-      context.beginPath();
-      context.arc(x, y, 10, 0, Math.PI * 2);
-      context.fill();
-      context.fillStyle = '#ffffff';
-      context.fillText(axis.label, x, y);
-    }
-  }
-
   private initThreeScene(): void {
     const host = this.canvasHostRef.nativeElement;
-    const width = Math.max(320, host.clientWidth || 420);
+    const width = Math.max(1, host.clientWidth || 420);
     const height = Math.max(220, host.clientHeight || 300);
 
     this.scene = new Scene();
@@ -640,8 +568,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.renderer = new WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(width, height);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.enabled = false;
     host.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -659,20 +586,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     const ambientLight = new AmbientLight(0xffffff, 1.0);
     const hemiLight = new HemisphereLight('#f6f8ff', '#e0ddd2', 0.8);
-    const directionalLight = new DirectionalLight(0xffffff, 1.15);
-    directionalLight.position.set(5, 7, 3);
-    directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.set(1024, 1024);
-    directionalLight.shadow.camera.left = -6;
-    directionalLight.shadow.camera.right = 6;
-    directionalLight.shadow.camera.top = 6;
-    directionalLight.shadow.camera.bottom = -6;
-    directionalLight.shadow.camera.near = 0.1;
-    directionalLight.shadow.camera.far = 18;
-    const fillLight = new DirectionalLight('#fff6ea', 0.55);
-    fillLight.position.set(-4, 4, -2);
     this.defaultLighting = new Group();
-    this.defaultLighting.add(ambientLight, hemiLight, directionalLight, fillLight);
+    this.defaultLighting.add(ambientLight, hemiLight);
     this.scene.add(this.defaultLighting);
 
     const floorGeometry = new PlaneGeometry(20, 20);
@@ -690,6 +605,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.droneGroup = this.createDroneMesh();
     this.scene.add(this.droneGroup);
+    this.attitudePreview = new CrazyflieAttitudePreview();
+    this.attitudePreview.setModel(this.droneGroup);
     this.flightAxes = new Group();
     this.flightAxes.name = 'Aircraft coordinates: X forward, Y left, Z up';
     for (const axis of this.flightDirections) {
@@ -705,6 +622,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.rebuildPresetInterior(this.simService.roomPreset$.value, room);
     this.applyFloorPlanTexture(this.simService.floorPlanUrl$.value);
     this.applySceneModel(this.simService.sceneModelUrl$.value);
+    this.updateAttitudeViewport();
   }
 
   private createDroneMesh(): Group {
@@ -833,7 +751,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.loadDetectedDeckShell(deck, url);
     }
   }
-
   private updateDetectedDeckShells(decks: CrazyflieDeckType[]): void {
     this.detectedDeckTypes = [...decks];
     this.detectedDeckLabels = decks.map((deck) => this.deckLabels[deck]);
@@ -845,6 +762,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.deckLoadTokens.set(deck, (this.deckLoadTokens.get(deck) || 0) + 1);
       }
     }
+    if (this.droneGroup) this.attitudePreview?.setModel(this.droneGroup);
     if (!this.deckMountGroup) {
       return;
     }
@@ -881,6 +799,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         }
         this.deckMountGroup?.add(gltf.scene);
         this.deckShellRoots.set(deck, { root: gltf.scene, url });
+        if (this.droneGroup) this.attitudePreview?.setModel(this.droneGroup);
       },
       undefined,
       (error) => {
@@ -896,7 +815,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.colladaLoader.load(
       assemblyUrl,
       (collada) => {
-        if (!this.scene || this.droneGroup !== group) {
+        if (this.destroyed || !this.scene || this.droneGroup !== group) {
           return;
         }
 
@@ -917,6 +836,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.deckMountGroup.position.y = -0.015;
         group.add(this.deckMountGroup);
         this.updateDetectedDeckShells(this.detectedDeckTypes);
+        this.attitudePreview?.setModel(group);
         this.loadBitcrazePropellers(group);
       },
       undefined,
@@ -929,7 +849,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.colladaLoader.load(
       propellerUrl,
       (collada) => {
-        if (!this.scene || this.droneGroup !== group) {
+        if (this.destroyed || !this.scene || this.droneGroup !== group) {
           return;
         }
         const positions: Array<{ x: number; z: number; direction: number }> = [
@@ -949,6 +869,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           this.propellerMeshes.push(rotor);
           this.propellerDirections.push(direction);
         });
+        this.attitudePreview?.setModel(group);
       },
       undefined,
       (error) => console.warn('Failed to load Bitcraze Crazyflie propeller:', error),
@@ -1342,14 +1263,16 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
           const textureLoader = new TextureLoader();
           const textureUrl = (name: string) => new URL(`./models/classroom/${name}`, window.location.href).href;
-          const [map, roughnessMap, metalnessMap, normalMap] = await Promise.all([
-            textureLoader.loadAsync(textureUrl('desk.jpg')),
+          const [woodMaterial, roughnessMap, metalnessMap, normalMap] = await Promise.all([
+            this.loadVarnishedPineMaterial('desk'),
             textureLoader.loadAsync(textureUrl('desk_roughness.jpg')),
             textureLoader.loadAsync(textureUrl('desk_metalness.jpg')),
             textureLoader.loadAsync(textureUrl('desk_normal.jpg')),
           ]);
-          map.colorSpace = SRGBColorSpace;
-          const lightMap = this.createLightClassroomTexture(map, '#f1dfbf', 0.65);
+          if (!woodMaterial.map) {
+            throw new Error('Varnished pine material is missing its wood color texture');
+          }
+          const lightMap = this.createLightClassroomTexture(woodMaterial.map, '#ffffff', 0);
           const context = lightMap.image.getContext('2d')!;
           const maskCanvas = document.createElement('canvas');
           maskCanvas.width = lightMap.image.width;
@@ -1367,7 +1290,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           }
           context.putImageData(colorPixels, 0, 0);
           lightMap.needsUpdate = true;
-          map.dispose();
           const material = new MeshStandardMaterial({ map: lightMap, roughnessMap, metalnessMap, normalMap, roughness: 0.7, metalness: 0.5 });
           return { geometry, material };
         });
@@ -1401,46 +1323,20 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return texture;
   }
 
-  private loadParquetryFloor(group: Group, room: { width: number; depth: number }): void {
+  private createClassroomWoodFloor(group: Group, room: { width: number; depth: number }): void {
     const geometry = new PlaneGeometry(room.width, room.depth);
     geometry.setAttribute('uv2', geometry.getAttribute('uv').clone());
-    const material = new MeshStandardMaterial({ color: '#d8b88c', roughness: 0.88, metalness: 0 });
+    const material = new MeshStandardMaterial({
+      color: CLASSROOM_WOOD_FINISHES.floor.tint, roughness: CLASSROOM_WOOD_FINISHES.floor.roughness, metalness: 0,
+    });
     const floor = new Mesh(geometry, material);
-    floor.name = 'Webots parquetry classroom floor';
+    floor.name = 'Webots pine classroom floor';
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = 0.012;
     floor.receiveShadow = true;
     group.add(floor);
 
-    const texturesRoot = './models/classroom/appearances/protos/textures/parquetry/';
-    const textureUrl = (name: string) => new URL(`${texturesRoot}${name}`, window.location.href).href;
-    const loader = new TextureLoader();
-    void Promise.all([
-      loader.loadAsync(textureUrl('light_strip_parquetry_base_color.jpg')),
-      loader.loadAsync(textureUrl('light_strip_parquetry_roughness.jpg')),
-      loader.loadAsync(textureUrl('light_strip_parquetry_normal.jpg')),
-    ]).then(([map, roughnessMap, normalMap]) => {
-      if (this.presetInteriorRoot !== group) {
-        [map, roughnessMap, normalMap].forEach((texture) => texture.dispose());
-        return;
-      }
-      map.colorSpace = SRGBColorSpace;
-      [map, roughnessMap, normalMap].forEach((texture) => {
-        texture.wrapS = RepeatWrapping;
-        texture.wrapT = RepeatWrapping;
-        texture.repeat.set(room.width * 2, room.depth * 2);
-      });
-      const lightMap = this.createLightClassroomTexture(map, '#d7a968', 0.28);
-      lightMap.repeat.copy(map.repeat);
-      map.dispose();
-      material.map = lightMap;
-      material.roughnessMap = roughnessMap;
-      material.normalMap = normalMap;
-      material.normalScale.set(0.3, 0.3);
-      material.aoMap = null;
-      material.color.set('#ffffff');
-      material.needsUpdate = true;
-    }).catch((error) => console.error('Failed to load Webots parquetry classroom floor:', error));
+    this.applyVarnishedPineFinish(floor, 'floor');
   }
 
   private extractVrmlBlocks(source: string, pattern: RegExp): string[] {
@@ -1503,7 +1399,30 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return faces;
   }
 
-  private loadVarnishedPineMaterial(): Promise<MeshStandardMaterial> {
+  private loadVarnishedPineMaterial(finish: ClassroomWoodFinish = 'honey'): Promise<MeshStandardMaterial> {
+    if (finish !== 'honey') {
+      const cached = this.classroomWoodMaterialPromises.get(finish);
+      if (cached) return cached;
+      const loadPromise = this.loadVarnishedPineMaterial().then((template) => {
+        if (!template.map) {
+          throw new Error('Varnished pine material is missing its wood color texture');
+        }
+        const palette = CLASSROOM_WOOD_FINISHES[finish];
+        const map = this.createLightClassroomTexture(template.map, palette.tint, palette.opacity);
+        map.repeat.copy(template.map.repeat);
+        const material = template.clone();
+        material.map = map;
+        material.roughness = palette.roughness;
+        return material;
+      });
+      this.classroomWoodMaterialPromises.set(finish, loadPromise);
+      void loadPromise.catch(() => {
+        if (this.classroomWoodMaterialPromises.get(finish) === loadPromise) {
+          this.classroomWoodMaterialPromises.delete(finish);
+        }
+      });
+      return loadPromise;
+    }
     if (!this.varnishedPineMaterialPromise) {
       const protoUrl = new URL('./models/classroom/appearances/protos/VarnishedPine.proto', window.location.href).href;
       const loadPromise = fetch(protoUrl)
@@ -1560,8 +1479,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
     return this.varnishedPineMaterialPromise;
   }
-  private applyVarnishedPineFinish(root: Object3D, tint = '#ffffff'): void {
-    void this.loadVarnishedPineMaterial().then((template) => {
+  private applyVarnishedPineFinish(root: Object3D, finish: ClassroomWoodFinish = 'honey'): void {
+    void this.loadVarnishedPineMaterial(finish).then((template) => {
       if (!this.presetInteriorRoot || !this.presetInteriorRoot.children.includes(root)) {
         let isInCurrentPreset = false;
         this.presetInteriorRoot?.traverse((node) => {
@@ -1575,7 +1494,6 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       }
 
       const material = template.clone();
-      material.color.set(tint);
       root.traverse((node) => {
         const mesh = node as Mesh;
         if (!mesh.isMesh) {
@@ -2339,36 +2257,22 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return outdoors;
   }
 
-  private createClassroomLighting(room: { width: number; depth: number; height: number }): Group {
+  private createClassroomLighting(): Group {
     const lights = new Group();
-    lights.name = 'Classroom daylight';
+    lights.name = 'Classroom soft ambient lighting';
     lights.add(
-      new AmbientLight('#fff7eb', 0.35),
+      new AmbientLight('#fff7eb', 0.65),
       new HemisphereLight('#e5f0ff', '#9a8166', 0.85),
     );
-    const sunlight = new DirectionalLight('#fff3dd', 2.4);
-    sunlight.position.set(room.width * 0.3, room.height + 4, -room.depth / 2 - 3);
-    sunlight.target.position.set(0, 0.4, 0);
-    sunlight.castShadow = true;
-    sunlight.shadow.mapSize.set(2048, 2048);
-    const extent = Math.hypot(room.width, room.depth) / 2 + 1;
-    Object.assign(sunlight.shadow.camera, {
-      left: -extent, right: extent, top: extent, bottom: -extent,
-      near: 0.1, far: sunlight.position.length() + extent + room.height,
-    });
-    sunlight.shadow.bias = -0.00015;
-    sunlight.shadow.normalBias = 0.008;
-    lights.add(sunlight, sunlight.target);
-    const fill = new DirectionalLight('#dbeaff', 0.45);
-    fill.position.set(-room.width / 2, room.height, room.depth / 2);
-    lights.add(fill);
     return lights;
   }
 
   private createClassroomChair(): Group {
     const chair = new Group();
     chair.name = 'School chair';
-    const wood = new MeshStandardMaterial({ color: '#c39560', roughness: 0.7 });
+    const wood = new MeshStandardMaterial({
+      color: CLASSROOM_WOOD_FINISHES.chair.tint, roughness: CLASSROOM_WOOD_FINISHES.chair.roughness,
+    });
     const steel = new MeshStandardMaterial({ color: '#b9c7cd', roughness: 0.32, metalness: 0.65 });
     const rubber = new MeshStandardMaterial({ color: '#454b4e', roughness: 0.95 });
     const seat = new Mesh(new RoundedBoxGeometry(0.32, 0.032, 0.33, 2, 0.012), wood);
@@ -2424,7 +2328,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private createClassroomDeskDrawer(): Group {
     const drawer = new Group();
     drawer.name = 'School desk drawer';
-    const wood = new MeshStandardMaterial({ color: '#c39560', roughness: 0.7 });
+    const wood = new MeshStandardMaterial({
+      color: CLASSROOM_WOOD_FINISHES.desk.tint, roughness: CLASSROOM_WOOD_FINISHES.desk.roughness,
+    });
     const body = new Mesh(new BoxGeometry(0.31, 0.085, 0.47), wood);
     body.name = 'Drawer wood body';
     body.position.set(0.025, 0.643, 0);
@@ -2592,7 +2498,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     const group = new Group();
     if (preset === 'classroom') {
-      group.add(this.createClassroomLighting(room));
+      group.add(this.createClassroomLighting());
     }
     const wallColor = preset === 'classroom' ? '#f7f5ed' : '#5a5148';
     const accentColor = preset === 'classroom' ? '#7fb3df' : '#c89266';
@@ -2688,7 +2594,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       teachingTools.rotation.y = Math.PI / 2;
       group.add(teachingTools);
       const trimMat = new MeshStandardMaterial({ color: '#83b8e5', roughness: 0.58, metalness: 0.04 });
-      void this.loadParquetryFloor(group, room);
+      this.createClassroomWoodFloor(group, room);
 
       const wallTrim = new MeshStandardMaterial({ color: '#b9d9df', roughness: 0.58, metalness: 0.02 });
       const baseboardHeight = 0.12;
@@ -2812,7 +2718,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       teacherDesk.rotation.y = Math.PI / 2;
       const teacherDeskFallback = new Mesh(
         new BoxGeometry(1.4, 0.74, 0.62),
-        new MeshStandardMaterial({ color: '#e0c39d', roughness: 0.78, metalness: 0.01 }),
+        new MeshStandardMaterial({ color: CLASSROOM_WOOD_FINISHES.desk.tint, roughness: 0.78, metalness: 0.01 }),
       );
       teacherDeskFallback.position.y = 0.37;
       teacherDesk.add(teacherDeskFallback);
@@ -2951,9 +2857,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         instances.setMatrixAt(index, instanceTransform.matrix);
       };
 
-      for (const [template, offsetX] of [
-        [this.createClassroomChair(), chairOffsetX],
-        [this.createClassroomDeskDrawer(), 0],
+      for (const [template, offsetX, finish] of [
+        [this.createClassroomChair(), chairOffsetX, 'chair'],
+        [this.createClassroomDeskDrawer(), 0, 'desk'],
       ] as const) {
         for (const part of template.children) {
           if (!(part instanceof Mesh)) {
@@ -2977,7 +2883,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           instances.receiveShadow = true;
           group.add(instances);
           if (part.name.includes('wood')) {
-            this.applyVarnishedPineFinish(instances);
+            this.applyVarnishedPineFinish(instances, finish);
           }
         }
       }
@@ -3109,16 +3015,29 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       if (!this.camera || !this.renderer) {
         return;
       }
-      const width = Math.max(320, host.clientWidth || 420);
+      const width = Math.max(1, host.clientWidth || 420);
       const height = Math.max(220, host.clientHeight || 300);
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height);
+      this.updateAttitudeViewport();
       if (this.controls) {
         this.controls.update();
       }
     });
     this.resizeObserver.observe(host);
+    this.resizeObserver.observe(this.attitudeViewportRef.nativeElement);
+  }
+
+  private updateAttitudeViewport(): void {
+    if (!this.renderer) return;
+    const canvas = this.renderer.domElement.getBoundingClientRect();
+    const inset = this.attitudeViewportRef.nativeElement.getBoundingClientRect();
+    if (!canvas.width || !canvas.height) return;
+    const size = this.renderer.getSize(new Vector2());
+    const scaleX = size.x / canvas.width, scaleY = size.y / canvas.height;
+    this.attitudeViewport = { x: (inset.left - canvas.left) * scaleX, y: (canvas.bottom - inset.bottom) * scaleY,
+      width: inset.width * scaleX, height: inset.height * scaleY };
   }
 
   private startRenderLoop(): void {
@@ -3136,6 +3055,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.droneGroup.position.z = MathUtils.lerp(this.droneGroup.position.z, this.targetPosition.z, 0.16);
       const sample = this.displayedAttitude;
       if (sample) {
+        this.aircraftYaw = MathUtils.degToRad(sample.yaw);
         this.droneGroup.quaternion.slerp(
           attitudeQuaternion(sample.roll, sample.pitch, sample.yaw, this.defaultDroneYawOffset),
           1 - Math.exp(-Math.max(0, deltaSec) / 0.035),
@@ -3147,10 +3067,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           1 - Math.exp(-Math.max(0, deltaSec) / 0.035),
         );
       }
-      if ((this.attitudeActive || this.realPoseShown) && now - this.lastAttitudeMetricsTs >= 200) {
+      if (now - this.lastAttitudeMetricsTs >= 200) {
         this.lastAttitudeMetricsTs = now;
         this.zone.run(() => {
-          this.attitudeMetrics = (this.realPoseShown ? this.simService.realReception : this.attitudeReception).metrics(now);
+          this.attitudeMetrics = this.connectionService.attitudeReception.metrics(now);
         });
       }
       this.updatePropellerAnimation(deltaSec);
@@ -3164,9 +3084,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.flightAxes.quaternion.copy(this.droneGroup.quaternion)
           .multiply(attitudeQuaternion(0, 0, 0, -this.defaultDroneYawOffset));
       }
-      this.drawOrientationCompass();
-
       this.renderer.render(this.scene, this.camera);
+      this.attitudePreview?.update(this.liveAttitude, deltaSec);
+      this.attitudePreview?.render(this.renderer, this.attitudeViewport);
       this.animationFrameId = requestAnimationFrame(animate);
     };
 

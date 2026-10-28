@@ -91,7 +91,7 @@ const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string
   en: {
     cf_link_config: { message0: 'Set link URI %1 address %2', tooltip: 'Configure the radio URI and address' },
     cf_test_link: { message0: 'Check radio', tooltip: 'Check whether the Crazyradio is available' },
-    cf_crazyflie_link: { message0: 'Connect', tooltip: 'Connect to the aircraft before running flight blocks' },
+    cf_crazyflie_link: { message0: 'Ensure connected', tooltip: 'Reuse the current aircraft connection, or connect before execution. Flight runs connect automatically.' },
     cf_test_crazyflie_link: { message0: 'Self-test', tooltip: 'Test the connection and motors without taking off; remove propellers first' },
     cf_detect_flow_v2: { message0: 'Detect Flow deck v2', tooltip: 'Check whether the Flow deck v2 is installed' },
     cf_detect_multiranger: { message0: 'Detect Multiranger deck', tooltip: 'Check whether the Multiranger deck is installed' },
@@ -132,8 +132,8 @@ const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string
   },
   zh: {
     cf_link_config: { message0: '设置连接 URI %1 地址 %2', tooltip: '设置无线连接地址和编号' },
-    cf_test_link: { message0: '检测电台', tooltip: '检查 Crazyradio 是否可用' },
-    cf_crazyflie_link: { message0: '连接', tooltip: '执行飞行积木前先连接飞行器' },
+    cf_test_link: { message0: '检测无线收发器', tooltip: '检查 Crazyradio 无线收发器是否可用' },
+    cf_crazyflie_link: { message0: '确保连接', tooltip: '复用当前飞行器连接，未连接时先连接；飞行流程也会自动连接，不会重复连接。' },
     cf_test_crazyflie_link: { message0: '自检', tooltip: '测试连接与电机，不起飞；请先卸下螺旋桨' },
     cf_detect_flow_v2: { message0: '探测 Flow 定位甲板 v2', tooltip: '检测是否安装 Flow 定位甲板 v2' },
     cf_detect_multiranger: { message0: '探测多向测距甲板', tooltip: '检测是否安装多向测距甲板' },

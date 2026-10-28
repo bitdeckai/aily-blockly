@@ -11,7 +11,7 @@ import sys
 import time
 from threading import Event, Thread
 from pathlib import Path
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, nullcontext
 
 
 MOVE_DISTANCE = {
@@ -59,18 +59,13 @@ def validate_motion_sequence(commands):
                    for cmd, arg in items)
     if not contains_motion(commands):
         return
-    connected = False
     flying = False
     for cmd, arg in commands:
-        if cmd == "crazyflie_link":
-            connected = True
         if cmd == "if_mr_obstacle":
             raise ValueError("Extended motion cannot be mixed with legacy live sensor branches")
         kind = arg["kind"] if cmd == "motion" else cmd
         if kind not in {"takeoff", "land", "move", "turn", "circle", "hover"}:
             continue
-        if not connected:
-            raise ValueError("CRAZYFLIE_LINK_REQUIRED: Connect before motion")
         if kind == "takeoff":
             if flying:
                 raise ValueError("Already flying: duplicate takeoff")
@@ -484,36 +479,51 @@ def _normalize_address_hex(value: str | None):
     return normalized
 
 
-def _parse_scan_address(value: str | None):
-    normalized = _normalize_address_hex(value)
-    return int(normalized, 16), normalized
+@contextmanager
+def _selected_radio(uri):
+    from cflib.crtp.radiodriver import RadioDriver, RadioManager
+    device_index = RadioDriver.parse_uri(uri)[0]
+    radio = RadioManager.open(device_index)
+    try:
+        yield radio
+    finally:
+        radio.close()
 
 
-def test_link(cflib_module, radio_driver_cls, address_hex: str | None):
+def _radio_status(uri):
+    with _selected_radio(uri) as radio:
+        return f"Crazyradio version {radio.version}"
+
+
+def test_link(uri, address_hex: str | None, stop_requested=None):
+    from cflib.drivers.crazyradio import Crazyradio
     radio_status = "unknown"
     links = []
     scan_error = None
-    scan_address, normalized_address = _parse_scan_address(address_hex)
+    normalized_address = _normalize_address_hex(address_hex)
+    radio_id = uri.split("/")[2].upper()
 
     try:
-        radio_status = radio_driver_cls().get_status()
-    except Exception as exc:
-        radio_status = f"error: {exc}"
-
-    try:
-        try:
-            scanned = cflib_module.crtp.scan_interfaces(address=scan_address)
-        except TypeError:
-            scanned = cflib_module.crtp.scan_interfaces()
-        links = [item[0] if isinstance(item, (list, tuple)) and len(item) > 0 else str(item) for item in scanned]
+        with _selected_radio(uri) as radio:
+            radio_status = f"Crazyradio version {radio.version}"
+            radio.set_address(tuple(bytes.fromhex(normalized_address)))
+            radio.set_arc(1)
+            for name, rate in [("250K", Crazyradio.DR_250KPS),
+                               ("1M", Crazyradio.DR_1MPS), ("2M", Crazyradio.DR_2MPS)]:
+                if stop_requested is not None and stop_requested.is_set():
+                    raise RuntimeError("Radio scan cancelled")
+                radio.set_data_rate(rate)
+                links.extend(f"radio://{radio_id}/{channel}/{name}/{normalized_address}"
+                             for channel in radio.scan_channels(0, 125, (0xff,)))
     except Exception as exc:
         scan_error = str(exc)
+        links = []
 
     return radio_status, links, scan_error, normalized_address
 
 
 def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow_position=False,
-             stop_requested=None):
+             stop_requested=None, connection=None):
     validate_motion_sequence(commands)
     radio_prefix_length = 0
     for cmd, _ in commands:
@@ -527,7 +537,6 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     from cflib.crazyflie.log import LogConfig
     from cflib.crazyflie.syncLogger import SyncLogger
     from cflib.positioning.motion_commander import MotionCommander
-    from cflib.crtp.radiodriver import RadioDriver
     from cflib.utils.multiranger import Multiranger
     pose_health = None
 
@@ -541,7 +550,9 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     def open_connection(connection_uri):
         nonlocal pose_health
         ensure_running()
-        with SyncCrazyflie(connection_uri) as scf:
+        if connection is not None and connection_uri != uri:
+            raise ValueError("Cannot change the aircraft URI while connected")
+        with (nullcontext(connection) if connection is not None else SyncCrazyflie(connection_uri)) as scf:
             if attitude or follow_position:
                 from crazyflie_attitude import attitude_logging
                 def emit(sample):
@@ -814,7 +825,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
         "spin_motors",
     })
 
-    if requires_crazyflie_link_cmd and not has_crazyflie_link_cmd:
+    if requires_crazyflie_link_cmd and not has_crazyflie_link_cmd and connection is None:
         return {
             "success": False,
             "message": "CRAZYFLIE_LINK_REQUIRED: Run 'Crazyflie link' block before Crazyflie operations",
@@ -830,7 +841,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     executed = []
     active_uri = uri
     active_address = normalized_address
-    link_gate_open = False
+    link_gate_open = connection is not None
 
     def set_active_link(link_args):
         nonlocal active_uri, active_address
@@ -868,8 +879,11 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
 
     def refresh_radio_status_fast():
         nonlocal radio_status
+        if connection is not None:
+            radio_status = "Crazyflie connected"
+            return
         try:
-            radio_status = RadioDriver().get_status()
+            radio_status = _radio_status(active_uri)
         except Exception as exc:
             radio_status = f"error: {exc}"
 
@@ -903,13 +917,15 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             raise RuntimeError(f"TEST_CRAZYFLIE_FAILED: uri={active_uri}, address={active_address}, error={err}")
 
     def strict_crazyflie_connect_or_raise(existing_scf=None):
+        nonlocal links
         refresh_radio_status_fast()
         if not radio_present(radio_status):
             raise RuntimeError(f"CRAZYFLIE_LINK_FAILED: uri={active_uri}, address={active_address}, radioStatus={radio_status}")
         if existing_scf is not None:
+            links = [active_uri]
             return
         with open_connection(active_uri):
-            pass
+            links = [active_uri]
 
     def _normalize_pct(value):
         try:
@@ -965,6 +981,8 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             return None
 
     def emit_live_telemetry(existing_scf=None):
+        if connection is not None:
+            return
         telem = _sample_live_telemetry(existing_scf)
         if not telem:
             return
@@ -997,9 +1015,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             print(radio_status, flush=True)
             executed.append("test_link")
         elif cmd == "scan_links":
-            if not active_uri.startswith("radio://0/"):
-                raise ValueError("Crazyradio: scanning supports radio 0; use radio://0/... for scanning")
-            radio_status, links, scan_error, active_address = test_link(cflib, RadioDriver, active_address)
+            radio_status, links, scan_error, active_address = test_link(active_uri, active_address, stop_requested)
             ensure_running()
             if not radio_present(radio_status) or scan_error:
                 raise RuntimeError(f"RADIO_SCAN_FAILED: radioStatus={radio_status}, scanError={scan_error}")
@@ -1824,15 +1840,6 @@ def main():
     parser.add_argument("--control-stdin", action="store_true", help="Accept graceful cancellation on stdin")
     args = parser.parse_args()
     stop_requested = Event()
-    if args.control_stdin:
-        def watch_control():
-            for line in sys.stdin:
-                if line.strip() == "stop":
-                    stop_requested.set()
-                    return
-            stop_requested.set()
-        Thread(target=watch_control, daemon=True).start()
-
     loaded_from = _append_cflib_path(args.lib_path)
     if not loaded_from:
         print(json.dumps({
@@ -1854,6 +1861,17 @@ def main():
                 "executed": [],
             }, ensure_ascii=False))
             return 2
+
+        # On Windows, NumPy's native initialization can deadlock with a blocked stdin reader.
+        import cflib.crtp
+        if args.control_stdin:
+            def watch_control():
+                for line in sys.stdin:
+                    if line.strip() == "stop":
+                        stop_requested.set()
+                        return
+                stop_requested.set()
+            Thread(target=watch_control, daemon=True).start()
 
         result = run_flow(args.uri, commands, args.address_hex, attitude=args.attitude,
                           follow_position=args.follow_position, stop_requested=stop_requested)

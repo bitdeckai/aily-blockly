@@ -1233,7 +1233,7 @@ function rectsOverlap(a, b) {
   );
 }
 
-/** Windows：持久化坐标可能落在已移除的显示器上；electron-win-state 不会按当前屏幕校验。macOS 不处理。 */
+/** Windows：恢复的窗口需留在显示器工作区内，避开任务栏和已移除的显示器。 */
 function ensureWinStateOnVisibleDisplay(winState) {
   if (!isWin32) {
     return;
@@ -1249,22 +1249,20 @@ function ensureWinStateOnVisibleDisplay(winState) {
   const winRect = { x, y, width: w, height: h };
   const displays = screen.getAllDisplays();
   const visible = displays.some((d) => rectsOverlap(winRect, d.workArea));
-  if (visible) {
+  const wa = visible ? screen.getDisplayMatching(winRect).workArea : screen.getPrimaryDisplay().workArea;
+  const nw = Math.min(w, wa.width);
+  const nh = Math.min(h, wa.height);
+  const nx = visible ? Math.min(Math.max(x, wa.x), wa.x + wa.width - nw)
+    : Math.round(wa.x + (wa.width - nw) / 2);
+  const ny = visible ? Math.min(Math.max(y, wa.y), wa.y + wa.height - nh)
+    : Math.round(wa.y + (wa.height - nh) / 2);
+  if (w === nw && h === nh && x === nx && y === ny) {
     return;
-  }
-  const wa = screen.getPrimaryDisplay().workArea;
-  let nw = w;
-  let nh = h;
-  if (nw > wa.width) {
-    nw = wa.width;
-  }
-  if (nh > wa.height) {
-    nh = wa.height;
   }
   s.width = nw;
   s.height = nh;
-  s.x = Math.round(wa.x + Math.max(0, (wa.width - nw) / 2));
-  s.y = Math.round(wa.y + Math.max(0, (wa.height - nh) / 2));
+  s.x = nx;
+  s.y = ny;
   try {
     winState.saveState();
   } catch (e) {
@@ -1286,6 +1284,10 @@ function createWindow() {
     },
   });
   ensureWinStateOnVisibleDisplay(winState);
+  if (isWin32 && winState.state.isFullScreen) {
+    winState.state.isFullScreen = false;
+    winState.saveState();
+  }
 
   mainWindow = new BrowserWindow({
     ...winState.winOptions,
@@ -1314,11 +1316,11 @@ function createWindow() {
 
   mainWindow.setBounds(winState.state);
 
-  // electron-win-state 未持久化 isMaximized / isFullScreen，关闭前写入 store，供下次 ready-to-show 恢复
+  // Windows 不恢复独占全屏，避免启动时遮住任务栏。
   mainWindow.on('close', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       winState.state.isMaximized = mainWindow.isMaximized();
-      winState.state.isFullScreen = mainWindow.isFullScreen();
+      winState.state.isFullScreen = !isWin32 && mainWindow.isFullScreen();
       winState.saveState();
     }
   });

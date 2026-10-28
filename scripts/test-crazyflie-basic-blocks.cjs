@@ -97,9 +97,27 @@ test('Crazyradio parameters generate addressed official URIs and round-trip save
     URI: 'radio://0/80/2M/E7E7E7E7E7?safelink=1', ADDRESS: 'ABCDEF1234',
   } }]);
   assert.match(compile(uri), /radio:\/\/0\/80\/2M\/ABCDEF1234\?safelink=1/);
+  const restoredUri = workspace([]);
+  Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(uri), restoredUri);
+  assert.equal(compile(restoredUri), compile(uri), 'hidden legacy URI blocks still round-trip');
   for (const fields of [{ ADDRESS: 'bad' }, { URI: 'radio://0/999/2M' }, { URI: 'usb://0' }]) {
     assert.throws(() => compile(workspace([{ type: 'cf_link_config', fields }])), /Crazyradio/);
   }
+});
+
+test('Crazyradio toolbox hides the legacy URI block and uses wireless transceiver terminology', () => {
+  const toolbox = radio.createCrazyradioToolbox();
+  assert.deepEqual(toolbox.contents.map(block => block.type),
+    ['cf_test_link', 'cf_scan_links', 'cf_radio_config']);
+  const ws = workspace(toolbox.contents);
+  assert.equal(ws.getBlocksByType('cf_test_link')[0].toString(), '检测无线收发器');
+  assert.match(ws.getBlocksByType('cf_radio_config')[0].toString(), /^无线收发器 0 信道 80 速率 2M/);
+  for (const block of ws.getAllBlocks(false)) {
+    assert.doesNotMatch(block.toString(), /电台/);
+    assert.doesNotMatch(block.getTooltip(), /电台/);
+  }
+  assert.ok(Blockly.Blocks['cf_link_config']);
+  assert.equal(typeof crazyflieGenerator.forBlock['cf_link_config'], 'function');
 });
 
 test('radio scans run only in the initial radio prefix and simulation never invents hardware results', async () => {
@@ -114,11 +132,12 @@ test('radio scans run only in the initial radio prefix and simulation never inve
   await assert.rejects(sim.runCode('cf_crazyflie_link()\ncf_scan_links()'), /before connecting/);
 });
 
-test('Python radio prefix scans before connecting, reports empty/error results, and never starts motors', () => {
+test('Python radio prefix scans the selected radio before connecting, closes it on errors and cancellation, and never starts motors', () => {
   const python = process.platform === 'win32' ? 'py' : 'python3';
   const args = process.platform === 'win32' ? ['-3'] : [];
   const result = spawnSync(python, [...args, '-B', '-c', `
 import io, runpy, sys, types
+from threading import Event
 from pathlib import Path
 from contextlib import redirect_stdout
 ns = runpy.run_path(str(Path('child') / 'scripts' / 'crazyflie_run_flow.py'), run_name='radio_test')
@@ -126,7 +145,7 @@ modules = {}
 for name in ['cflib', 'cflib.crtp', 'cflib.crazyflie', 'cflib.crazyflie.syncCrazyflie',
              'cflib.crazyflie.log', 'cflib.crazyflie.syncLogger', 'cflib.positioning',
              'cflib.positioning.motion_commander', 'cflib.crtp.radiodriver',
-             'cflib.utils', 'cflib.utils.multiranger']:
+             'cflib.utils', 'cflib.utils.multiranger', 'cflib.drivers', 'cflib.drivers.crazyradio']:
     module = types.ModuleType(name)
     modules[name] = sys.modules[name] = module
     if '.' in name:
@@ -134,52 +153,104 @@ for name in ['cflib', 'cflib.crtp', 'cflib.crazyflie', 'cflib.crazyflie.syncCraz
         setattr(modules[parent], attr, module)
 calls = []
 mode = ['found']
+serials = ['1798949C5F', 'AABBCCDD0002', '001122334455']
+opened = []
+stop = Event()
 class Connection:
     def __init__(self, uri):
+        assert all(radio.closed for radio in opened), 'scan did not release the radio before connecting'
         calls.append(('connect', uri))
         self.cf = types.SimpleNamespace()
     def __enter__(self): return self
     def __exit__(self, *args): pass
 def forbidden(*args, **kwargs):
     raise AssertionError('motor or motion API called during radio scan')
-def scan(address):
-    assert not any(call[0] == 'connect' for call in calls), calls
-    calls.append(('scan', address))
-    if mode[0] == 'error': raise RuntimeError('USB scan failed')
-    return [('radio://0/42/2M/ABCDEF1234', '')] if mode[0] == 'found' else []
+class Radio:
+    DR_250KPS, DR_1MPS, DR_2MPS = 0, 1, 2
+    version = 0.53
+    def __init__(self, index):
+        self.index, self.closed = index, False
+        opened.append(self)
+    def set_address(self, address): self.address = address
+    def set_arc(self, arc): assert arc == 1
+    def set_data_rate(self, rate): self.rate = rate
+    def scan_channels(self, start, end, packet):
+        assert (start, end, packet) == (0, 125, (0xff,))
+        assert self.address == tuple(bytes.fromhex('ABCDEF1234'))
+        assert not any(call[0] == 'connect' for call in calls), calls
+        calls.append(('scan', self.index, self.rate))
+        if mode[0] == 'error': raise RuntimeError('USB scan failed')
+        if mode[0] == 'cancel': stop.set()
+        return [42] if mode[0] == 'found' and self.rate == 2 else []
+    def close(self): self.closed = True
+class Driver:
+    @staticmethod
+    def parse_uri(uri):
+        radio_id = uri.split('/')[2]
+        return (int(radio_id) if len(radio_id) < 10 and radio_id.isdigit() else serials.index(radio_id.upper()),)
 modules['cflib.crtp'].init_drivers = lambda **kwargs: None
-modules['cflib.crtp'].scan_interfaces = scan
+modules['cflib.crtp'].scan_interfaces = forbidden
 modules['cflib.crazyflie.syncCrazyflie'].SyncCrazyflie = Connection
 modules['cflib.crazyflie.log'].LogConfig = forbidden
 modules['cflib.crazyflie.syncLogger'].SyncLogger = forbidden
 modules['cflib.positioning.motion_commander'].MotionCommander = forbidden
-modules['cflib.crtp.radiodriver'].RadioDriver = lambda: types.SimpleNamespace(get_status=lambda: 'Crazyradio version 0.53')
+modules['cflib.crtp.radiodriver'].RadioDriver = Driver
+modules['cflib.crtp.radiodriver'].RadioManager = types.SimpleNamespace(open=Radio)
+modules['cflib.drivers.crazyradio'].Crazyradio = Radio
 modules['cflib.utils.multiranger'].Multiranger = forbidden
 code = 'cf_set_link("radio://0/42/2M/ABCDEF1234", "ABCDEF1234")\\ncf_test_link()\\ncf_scan_links()'
 commands = ns['parse_commands'](code)
 assert [cmd for cmd, _ in commands] == ['set_link', 'test_link', 'scan_links']
-for state in ['found', 'empty', 'error']:
+for state in ['found', 'empty', 'error', 'cancel']:
     mode[0] = state
     calls.clear()
     output = io.StringIO()
+    stop.clear()
     try:
         with redirect_stdout(output):
-            result = ns['run_flow']('radio://0/80/2M', commands, 'E7E7E7E7E7')
+            result = ns['run_flow']('radio://0/80/2M', commands, 'E7E7E7E7E7', stop_requested=stop)
     except RuntimeError as error:
-        assert state == 'error' and 'RADIO_SCAN_FAILED' in str(error), error
+        assert (state == 'error' and 'RADIO_SCAN_FAILED' in str(error)
+                or state == 'cancel' and 'cancelled' in str(error)), error
     else:
-        assert state != 'error'
+        assert state in ('found', 'empty')
         assert result['success'], result
         assert result['addressHex'] == 'ABCDEF1234'
         assert result['uri'] == 'radio://0/42/2M/ABCDEF1234'
         assert result['executed'][-1] == 'scan_links'
         assert len(result['links']) == (1 if state == 'found' else 0)
-    assert calls == [('scan', int('ABCDEF1234', 16))], calls
+    assert calls == [('scan', 0, rate) for rate in range(1 if state in ('error', 'cancel') else 3)], calls
+    assert all(radio.closed for radio in opened)
 mode[0] = 'found'
+for radio_id in ['1798949C5F', '1', 'AABBCCDD0002', '001122334455']:
+    calls.clear()
+    uri = f'radio://{radio_id}/42/2M/ABCDEF1234'
+    with redirect_stdout(io.StringIO()):
+        result = ns['run_flow'](uri, commands[1:], 'ABCDEF1234')
+    index = Driver.parse_uri(uri)[0]
+    assert calls == [('scan', index, rate) for rate in range(3)], calls
+    assert result['links'] == [f'radio://{radio_id}/42/2M/ABCDEF1234'], result
+    assert all(radio.closed for radio in opened)
+serials.reverse()
+calls.clear()
+with redirect_stdout(io.StringIO()):
+    result = ns['run_flow']('radio://1798949C5F/42/2M/ABCDEF1234', commands[1:], 'ABCDEF1234')
+assert calls == [('scan', 2, rate) for rate in range(3)], calls
+assert result['links'] == ['radio://1798949C5F/42/2M/ABCDEF1234'], result
+calls.clear()
+with redirect_stdout(io.StringIO()):
+    try:
+        ns['run_flow']('radio://DEADBEEF0000/42/2M/ABCDEF1234', commands[1:], 'ABCDEF1234')
+    except RuntimeError as error:
+        assert 'TEST_RADIO_FAILED' in str(error), error
+    else:
+        raise AssertionError('missing selected radio accepted')
+assert not calls
 calls.clear()
 with redirect_stdout(io.StringIO()):
     result = ns['run_flow']('radio://0/80/2M', commands + [('crazyflie_link', None)], 'E7E7E7E7E7')
-assert calls[0][0] == 'scan' and calls[1][0] == 'connect', calls
+assert calls[:3] == [('scan', 0, rate) for rate in range(3)], calls
+assert len(calls) > 3 and all(call[0] == 'connect' for call in calls[3:]), calls
 calls.clear()
 try:
     ns['run_flow']('radio://0/80/2M', [('crazyflie_link', None), ('scan_links', None)], 'E7E7E7E7E7')
@@ -468,9 +539,10 @@ test('motion inputs accept variables and arithmetic, and repeated calls retain h
   assert.match(crazyflieGenerator.workspaceToCode(ws), /cf_motion\("move", \[0, -\(n\), 0, 1 \/ 5\]\)/);
 });
 
-test('new motion sequence requires connection and explicit takeoff before airborne commands', () => {
+test('new motion sequence permits automatic connection but still requires explicit takeoff', () => {
   const ws = workspace([{ type: 'cf_hover' }]);
-  assert.throws(() => compile(ws), /连接/);
+  assert.throws(() => compile(ws), /起飞/);
+  assert.doesNotThrow(() => compile(workspace([chain({ type: 'cf_takeoff_at' }, { type: 'cf_land_at_speed' })])));
   const groundMove = workspace([chain(flight('cf_crazyflie_link'), { type: 'cf_move_xyz' })]);
   assert.throws(() => compile(groundMove), /起飞/);
   const duplicate = workspace([chain(flight('cf_crazyflie_link'), { type: 'cf_takeoff_at' }, { type: 'cf_takeoff_at' })]);
@@ -620,12 +692,7 @@ for raw in ['cf_motion("move", [1,0,0,0])', 'cf_motion("hover", [-1])',
         raise AssertionError(raw)
 valid = ns['parse_commands']('cf_crazyflie_link()\\ncf_motion("takeoff", [0.5,0.2])\\ncf_motion("hover", [1])\\ncf_motion("land", [0.2])')
 ns['validate_motion_sequence'](valid)
-try:
-    ns['validate_motion_sequence'](valid[1:])
-except ValueError:
-    pass
-else:
-    raise AssertionError('missing connection accepted')
+ns['validate_motion_sequence'](valid[1:])
 import sys, types
 modules = {}
 for name in ['cflib', 'cflib.crtp', 'cflib.crazyflie', 'cflib.crazyflie.syncCrazyflie',
@@ -651,6 +718,7 @@ modules['cflib.crazyflie.log'].LogConfig = LogConfig
 modules['cflib.crazyflie.syncLogger'].SyncLogger = object
 modules['cflib.positioning.motion_commander'].MotionCommander = Commander
 modules['cflib.crtp.radiodriver'].RadioDriver = lambda: types.SimpleNamespace(get_status=lambda: 'mock radio')
+ns['run_flow'].__globals__['_radio_status'] = lambda uri: 'mock radio'
 modules['cflib.utils.multiranger'].Multiranger = object
 clock = [0]
 def now():

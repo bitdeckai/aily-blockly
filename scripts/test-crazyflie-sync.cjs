@@ -21,7 +21,7 @@ function load(filename) {
   }).outputText;
   vm.runInNewContext(code, {
     exports, window: bridgeWindow, document: { getElementsByTagName: () => [] },
-    performance, setTimeout, clearTimeout, console,
+    performance, setTimeout: (...args) => setTimeout(...args), clearTimeout: token => clearTimeout(token), console,
     require: name => {
       if (name === '@angular/core') return {
         Injectable: () => type => type, Component: () => type => type,
@@ -210,7 +210,7 @@ test('refreshing basic categories registers existing motion entries before any w
   assert.deepEqual(plain(loader.toolbox.contents.slice(-2).map(item => item.name)), ['Crazyflie', 'Crazyradio']);
   const radioCategory = loader.toolbox.contents.at(-1);
   assert.deepEqual(plain(radioCategory.contents.map(item => item.type)),
-    ['cf_test_link', 'cf_scan_links', 'cf_radio_config', 'cf_link_config']);
+    ['cf_test_link', 'cf_scan_links', 'cf_radio_config']);
 });
 
 test('flight and radio categories are separated from basic blocks with a themed accessible divider', () => {
@@ -247,8 +247,8 @@ test('legacy flight blocks use concise bilingual labels and the motion palette w
   const original = JSON.stringify(definitions);
   const Blockly = require('blockly');
   for (const [language, labels] of [
-    ['zh', ['连接', '检测电台', '自检']],
-    ['en', ['Connect', 'Check radio', 'Self-test']],
+    ['zh', ['确保连接', '检测无线收发器', '自检']],
+    ['en', ['Ensure connected', 'Check radio', 'Self-test']],
   ]) {
     loader.crazyflieBlockLanguage = language;
     const translated = loader.applyCrazyflieBlockLanguage(definitions);
@@ -288,6 +288,80 @@ test('Crazyflie hides duplicate generic buttons and routes menu/F6 run through t
   header.canShowSimulatorControls = () => false;
   assert.equal(header.shouldShowHeaderButton({ action: 'compile' }), true);
   assert.equal(header.shouldShowHeaderButton({ action: 'upload' }), true);
+});
+
+test('header automatically detects inserted radios every two seconds, pauses while connected and stops on teardown', async ({ mock }) => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const { HeaderComponent } = load(path.join(root, 'src', 'app', 'main-window', 'components',
+    'header', 'header.component.ts'));
+  const header = Object.create(HeaderComponent.prototype);
+  const errors = [];
+  let scans = 0, checks = 0, activeProject = true, plugged = false, fail = false, pendingRead;
+  const devices = { radios: [], async refreshRadios() {
+    scans++;
+    if (pendingRead) await pendingRead;
+    if (fail) throw new Error('USB enumeration failed');
+    this.radios = plugged ? [{ index: 0, serial: 'AABBCCDD0001' }] : [];
+  } };
+  Object.assign(header, {
+    crazyflieConnectionService: devices, connectionState: { status: 'disconnected' },
+    crazyflieRunInProgress: false, headerDestroyed: false, crazyradioDiscoveryError: null,
+    crazyradioRefreshTimer: null, electronService: { isElectron: false },
+    ngZone: { run: fn => fn(), runOutsideAngular: fn => fn() },
+    cd: { markForCheck() { checks++; } }, message: { error: text => errors.push(text) },
+    canShowSimulatorControls: () => activeProject,
+  });
+  const advance = async (ms = 2000) => {
+    mock.timers.tick(ms);
+    await new Promise(setImmediate);
+  };
+  await header.pollCrazyradios();
+  assert.equal(scans, 1, 'initial detection does not require focusing the selector');
+  plugged = true;
+  await advance(1999);
+  assert.equal(scans, 1);
+  await advance(1);
+  assert.equal(scans, 2);
+  assert.equal(header.crazyradioInterfaces[0].serial, 'AABBCCDD0001');
+  plugged = false;
+  await advance();
+  assert.equal(header.crazyradioInterfaces.length, 0, 'unplug removes the option without user interaction');
+  const idleScans = scans;
+  for (const status of ['checking', 'ready']) {
+    header.connectionState.status = status;
+    await advance();
+    assert.equal(scans, idleScans, 'enumeration must not compete with the active radio link');
+  }
+  header.connectionState.status = 'disconnected';
+  header.crazyflieRunInProgress = true;
+  await advance();
+  header.crazyflieRunInProgress = false;
+  activeProject = false;
+  await advance();
+  assert.equal(scans, idleScans, 'other boards and running flows do not trigger background USB reads');
+  activeProject = true;
+  fail = true;
+  await advance();
+  await advance();
+  assert.equal(errors.length, 1, 'repeated polling failures must not spam notifications');
+  assert.match(header.crazyradioDiscoveryError, /USB enumeration failed/);
+  fail = false;
+  await advance();
+  assert.equal(header.crazyradioDiscoveryError, null, 'a successful retry clears the visible error');
+  let finishRead;
+  pendingRead = new Promise(resolve => { finishRead = resolve; });
+  await advance();
+  const inFlight = scans;
+  await advance(10000);
+  assert.equal(scans, inFlight, 'slow enumeration does not create overlapping polling calls');
+  const checksBeforeDestroy = checks;
+  header.ngOnDestroy();
+  finishRead();
+  await new Promise(setImmediate);
+  await advance(10000);
+  assert.equal(scans, inFlight);
+  assert.equal(checks, checksBeforeDestroy, 'a late enumeration cannot update a destroyed header');
+  assert.equal(header.crazyradioRefreshTimer, null);
 });
 
 function uploaderHarness(run) {
@@ -360,6 +434,25 @@ test('combined mode compiles once, executes once, follows telemetry during fligh
   assert.equal(h.flowLog, null);
 });
 
+test('combined mode ignores automatic idle RPY/error packets but still requires flow XYZ, preserving radio selection', async () => {
+  const h = uploaderHarness(async ({ options, emit, sim }) => {
+    assert.equal(options.radioId, 'AABBCCDD0002');
+    emit({ type: 'sample', source: 'idle', timestampMs: 25, roll: 10, pitch: 5, yaw: 20 });
+    emit({ type: 'error', source: 'idle', message: 'idle log ended' });
+    assert.equal(h.cancelled, 0);
+    assert.equal(sim.realAttitude$.value, null);
+    emit(sample(50, { source: 'flow' }));
+    return { success: true, executed: [] };
+  });
+  h.uploader.crazyflieConnectionService.selectedRadioSerial = 'AABBCCDD0002';
+  assert.equal((await h.uploader.runCrazyflieSimAndReal()).state, 'done');
+  assert.equal(h.cancelled, 0);
+  const idleOnly = uploaderHarness(async ({ emit }) => {
+    emit({ type: 'sample', source: 'idle', timestampMs: 25, roll: 10, pitch: 5, yaw: 20 });
+    return { success: true, executed: [] };
+  });
+  assert.equal((await idleOnly.uploader.runCrazyflieSimAndReal()).state, 'error');
+});
 test('real-only does not start synchronization, while simulation does not call the flight bridge', async () => {
   let flights = 0;
   const h = uploaderHarness(async ({ options, sim }) => {

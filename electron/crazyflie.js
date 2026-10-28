@@ -2,7 +2,7 @@ const { ipcMain } = require("electron");
 const { execFile, spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const { startAttitudeMonitor } = require("./crazyflie-attitude");
+const { startCrazyflieSession } = require("./crazyflie-session");
 
 const DEFAULT_CRAZYFLIE_URI = "radio://0/80/2M";
 const DEFAULT_CRAZYFLIE_ADDRESS_HEX = "E7E7E7E7E7";
@@ -411,6 +411,10 @@ async function runFlowStream(event, options = {}, onAttitude = () => {}, onChild
 
   const sendLog = (payload) => {
     try {
+      const step = /^__STEP__:(\d+)\/(\d+):(.+)$/.exec(payload.line);
+      if (step && options.stepTotal) {
+        payload = { ...payload, line: `__STEP__:${Number(step[1]) + (options.stepOffset || 0)}/${options.stepTotal}:${step[3]}` };
+      }
       event?.sender?.send("crazyflie-flow-log", payload);
     } catch (_error) {
       // ignore renderer dispatch failures
@@ -575,179 +579,248 @@ async function listRadios() {
   });
 }
 
+async function listInterfaces() {
+  const pythonCmd = getPythonCandidates()[0];
+  if (!pythonCmd) throw new Error("Cannot find Python for Crazyflie");
+  const { stdout } = await runScript(pythonCmd, resolveChildPath("scripts", "crazyflie_session.py"),
+    10000, getCrazyflieLibPathHint(), ["--list-radios"], false);
+  const result = parseLastJsonLine(stdout);
+  if (!result?.success || !Array.isArray(result.radios)) {
+    throw new Error(result?.message || "Cannot enumerate Crazyradio USB serial numbers");
+  }
+  return result.radios;
+}
+
+function canonicalConnection(options, radios) {
+  const match = /^radio:\/\/([A-Za-z0-9]+)\/(\d+)\/(250K|1M|2M)(?:\/([A-Fa-f0-9]{10}))?(\?[^ \r\n]*)?$/
+    .exec(String(options.uri || DEFAULT_CRAZYFLIE_URI));
+  const addressHex = String(options.addressHex || match?.[4] || DEFAULT_CRAZYFLIE_ADDRESS_HEX).toUpperCase();
+  if (!match || Number(match[2]) > 125 || !/^[A-F0-9]{10}$/.test(addressHex)) {
+    throw new Error("Invalid Crazyflie radio URI or address");
+  }
+  const radioId = String(options.radioId || match[1]).toUpperCase();
+  const radio = radios.find(item => /^\d{1,9}$/.test(radioId)
+    ? item.index === Number(radioId) : item.serial === radioId);
+  if (!radio) throw new Error("Selected wireless transceiver is not available; select it again");
+  if (!radio.serial || !/^[A-Fa-f0-9]{10,}$/.test(radio.serial)
+      || radios.filter(item => item.serial === radio.serial).length !== 1) {
+    throw new Error("The selected wireless transceiver does not have a usable unique USB serial number");
+  }
+  return { uri: `radio://${radio.serial}/${Number(match[2])}/${match[3]}/${addressHex}${match[5] || ''}`,
+    addressHex, radioIndex: radio.index, radioSerial: radio.serial };
+}
+
 function registerCrazyflieHandlers() {
-  let session = null;
-  let radioOperation = false;
-  let operationSenderId = null;
-  let monitorShutdown = null;
-  let flowControl = null;
-
-  const sendAttitude = payload => {
-    if (session && !session.sender.isDestroyed()) {
-      session.sender.send("crazyflie-attitude", payload);
-    }
+  let owner = null;
+  let operation = null;
+  const failure = error => ({ success: false, radioStatus: "error",
+    message: error?.message || String(error), links: [], executed: [] });
+  const send = (sender, channel, payload) => {
+    if (!sender.isDestroyed()) sender.send(channel, payload);
   };
-  const stopIdleMonitor = async () => {
-    const monitor = session?.monitor;
-    if (monitor && !monitorShutdown) {
-      monitorShutdown = monitor.stop().finally(() => { monitorShutdown = null; });
-    }
-    if (monitorShutdown) await monitorShutdown;
+  const busy = sender => (operation || (owner && owner.sender.id !== sender.id))
+    ? { success: false, radioStatus: "busy", message: "Crazyradio is busy; wait for this operation or close the other window", executed: [] } : null;
+  const closeOwner = async current => {
+    if (current?.worker) await current.worker.stop();
   };
-  const startIdleMonitor = () => {
-    if (!session || radioOperation || session.monitor || session.sender.isDestroyed()) return;
-    const owner = session;
-    const pythonCmd = getPythonCandidates()[0];
-    if (!pythonCmd) {
-      sendAttitude({ type: "error", message: "Cannot find Python for attitude monitoring" });
-      return;
+  const ensureConnection = async (event, options) => {
+    const radios = await listInterfaces();
+    if (operation?.cancelled || event.sender.isDestroyed()) throw new Error("Connection cancelled before opening the radio");
+    if (!owner && radios.length > 1 && !options.radioId && !options.explicitRadio) {
+      throw new Error("Multiple wireless transceivers detected; select one before connecting");
     }
-    sendAttitude({ type: "state", state: "connecting" });
-    owner.monitor = startAttitudeMonitor({
-      sender: owner.sender,
-      pythonCmd,
-      scriptPath: resolveChildPath("scripts", "crazyflie_attitude.py"),
-      libPathHint: getCrazyflieLibPathHint(),
-      connectionArgs: buildConnectionArgs(owner.options).args,
-      onEvent: payload => {
-        if (session === owner && payload.type !== "stopped") sendAttitude(payload);
-      },
-      onClose: () => { owner.monitor = null; },
-    });
-  };
-  const removeSession = async () => {
-    const owner = session;
-    session = null;
-    if (!owner) return;
-    owner.sender.removeListener("destroyed", owner.onDestroyed);
-    owner.sender.removeListener("render-process-gone", owner.onDestroyed);
-    owner.sender.removeListener("did-start-navigation", owner.onNavigation);
-    if (owner.monitor && !monitorShutdown) {
-      monitorShutdown = owner.monitor.stop().finally(() => { monitorShutdown = null; });
+    const connection = canonicalConnection(options, radios);
+    if (options.explicitRadio && options.radioId
+        && canonicalConnection({ ...options, radioId: undefined }, radios).radioSerial !== connection.radioSerial) {
+      throw new Error("Selected wireless transceiver does not match the block configuration");
     }
-    if (monitorShutdown) await monitorShutdown;
-  };
-  const withRadio = async (event, options, run, flight = false) => {
-    if (radioOperation || (session && session.sender.id !== event.sender.id)) {
-      return { success: false, radioStatus: "busy", message: "Crazyradio is busy in another operation or window", links: [], executed: [] };
-    }
-    radioOperation = true;
-    operationSenderId = event.sender.id;
-    const requestStop = () => {
-      if (!flowControl) return;
-      flowControl.stopping = true;
-      if (flowControl.child?.stdin.writable) flowControl.child.stdin.write("stop\n");
-    };
-    const onNavigation = (_event, _url, _inPlace, isMainFrame) => {
-      if (isMainFrame) requestStop();
-    };
-    if (flight) {
-      flowControl = { child: null, stopping: false, requestStop };
-      event.sender.once("destroyed", requestStop);
-      event.sender.once("render-process-gone", requestStop);
-      event.sender.on("did-start-navigation", onNavigation);
-    }
-    try {
-      sendAttitude({ type: "state", state: "flow" });
-      await stopIdleMonitor();
-      if (session) session.options = buildConnectionArgs(options);
-      return await run();
-    } finally {
-      if (flight) {
-        event.sender.removeListener("destroyed", requestStop);
-        event.sender.removeListener("render-process-gone", requestStop);
-        event.sender.removeListener("did-start-navigation", onNavigation);
-        flowControl = null;
+    if (owner) {
+      if (owner.sender.id !== event.sender.id || owner.connection.uri !== connection.uri) {
+        throw new Error("A different aircraft or wireless transceiver is connected; disconnect it before changing");
       }
-      radioOperation = false;
-      operationSenderId = null;
-      startIdleMonitor();
+      await owner.worker.ready;
+      return owner;
+    }
+    const current = { sender: event.sender, connection, worker: null, observing: true, status: "checking" };
+    const onDestroyed = () => {
+      void closeOwner(current).catch(error => console.error("Crazyflie session cleanup failed:", error));
+    };
+    const onNavigation = (_event, _url, inPlace, isMainFrame) => {
+      if (isMainFrame && !inPlace) onDestroyed();
+    };
+    owner = current;
+    current.sender.once("destroyed", onDestroyed);
+    current.sender.once("render-process-gone", onDestroyed);
+    current.sender.on("did-start-navigation", onNavigation);
+    send(current.sender, "crazyflie-connection", { status: "checking", ...connection });
+    const cleanup = () => {
+      current.sender.removeListener("destroyed", onDestroyed);
+      current.sender.removeListener("render-process-gone", onDestroyed);
+      current.sender.removeListener("did-start-navigation", onNavigation);
+      if (owner === current) owner = null;
+    };
+    try {
+      current.worker = startCrazyflieSession({
+      pythonCmd: getPythonCandidates()[0], scriptPath: resolveChildPath("scripts", "crazyflie_session.py"),
+      libPathHint: getCrazyflieLibPathHint(), connectionArgs: buildConnectionArgs(connection).args,
+      onEvent: payload => {
+        if (owner !== current) return;
+        if (payload.type === "state") {
+          current.status = payload.state === "flow" ? "ready" : payload.state;
+          send(current.sender, "crazyflie-connection", {
+            ...connection, status: payload.state === "flow" ? "ready" : payload.state,
+            busy: payload.state === "flow", message: payload.message,
+          });
+        } else if (payload.type === "telemetry") {
+          send(current.sender, "crazyflie-telemetry", payload.payload);
+        } else if (payload.type === "attitude") {
+          send(current.sender, "crazyflie-attitude", { ...payload.payload, source: "idle" });
+        } else if (payload.type === "log") {
+          if (payload.line.startsWith("__ATTITUDE__:")) {
+            const attitude = parseJsonOutput(payload.line.slice(13));
+            if (attitude) send(current.sender, "crazyflie-attitude", { ...attitude, source: "flow" });
+          } else if (!payload.line.startsWith("__TELEM__:")) {
+            const step = /^__STEP__:(\d+)\/(\d+):(.+)$/.exec(payload.line);
+            const line = step && operation?.stepTotal
+              ? `__STEP__:${Number(step[1]) + (operation.stepOffset || 0)}/${operation.stepTotal}:${step[3]}`
+              : payload.line;
+            send(current.sender, "crazyflie-flow-log", { source: "stdout", line });
+          }
+        }
+      },
+        onClose: cleanup,
+      });
+      await current.worker.ready;
+      return current;
+    } catch (error) {
+      if (!current.worker) cleanup();
+      throw error;
     }
   };
-
-  ipcMain.handle("crazyflie-start-attitude", (event, options = {}) => {
-    if (session || monitorShutdown || (radioOperation && operationSenderId !== event.sender.id)) {
-      return { success: false, message: "Attitude monitoring is already active or Crazyradio belongs to another window" };
-    }
-    if (!/^radio:\/\/\d+\/\d+\/(?:250K|1M|2M)(?:\/[0-9a-fA-F]{10})?$/.test(String(options.uri || ""))
-        || !/^[0-9a-fA-F]{10}$/.test(String(options.addressHex || ""))) {
-      return { success: false, message: "Invalid Crazyflie radio URI or address" };
-    }
-    const onDestroyed = () => { void removeSession(); };
-    const onNavigation = (_event, _url, _inPlace, isMainFrame) => {
-      if (isMainFrame) void removeSession();
+  const exclusive = async (event, action, run) => {
+    const blocked = busy(event.sender);
+    if (blocked) return blocked;
+    const current = { senderId: event.sender.id, action, cancelled: false };
+    operation = current;
+    const onDestroyed = () => {
+      current.cancelled = true;
+      try { current.cancel?.(); }
+      catch (error) { console.error("Crazyflie operation cancellation failed:", error); }
+      if (owner?.sender.id === event.sender.id) {
+        void closeOwner(owner).catch(error => console.error("Crazyflie session cleanup failed:", error));
+      }
     };
-    session = { sender: event.sender, options, monitor: null, onDestroyed, onNavigation };
+    const onNavigation = (_event, _url, inPlace, isMainFrame) => {
+      if (isMainFrame && !inPlace) onDestroyed();
+    };
     event.sender.once("destroyed", onDestroyed);
     event.sender.once("render-process-gone", onDestroyed);
     event.sender.on("did-start-navigation", onNavigation);
-    if (radioOperation) sendAttitude({ type: "state", state: "flow" });
-    else startIdleMonitor();
+    try { return await run(); }
+    catch (error) { return failure(error); }
+    finally {
+      event.sender.removeListener("destroyed", onDestroyed);
+      event.sender.removeListener("render-process-gone", onDestroyed);
+      event.sender.removeListener("did-start-navigation", onNavigation);
+      operation = null;
+    }
+  };
+
+  ipcMain.handle("crazyflie-list-interfaces", async () => {
+    try { return { success: true, radios: await listInterfaces() }; }
+    catch (error) { return failure(error); }
+  });
+  ipcMain.handle("crazyflie-connect", (event, options = {}) => exclusive(event, "connect", async () => {
+    const current = await ensureConnection(event, options);
+    if (operation.cancelled) return failure(new Error("Connection cancelled"));
+    return { success: true, ...current.connection };
+  }));
+  ipcMain.handle("crazyflie-disconnect", async event => {
+    const blocked = busy(event.sender);
+    if (blocked) return blocked;
+    await closeOwner(owner);
     return { success: true };
+  });
+  ipcMain.handle("crazyflie-connection-state", event => owner?.sender.id === event.sender.id
+    ? { ...owner.connection, status: owner.status, busy: owner.worker.running }
+    : { status: "disconnected" });
+  ipcMain.handle("crazyflie-start-attitude", async (event, options = {}) => {
+    if (owner?.sender.id === event.sender.id && operation?.action === "flow") {
+      return { success: false, message: "Enable idle attitude display after the flight finishes" };
+    }
+    return exclusive(event, "observe", async () => {
+      const current = await ensureConnection(event, options);
+      if (current.observing) return { success: true };
+      const result = await current.worker.request("observe", { enabled: true });
+      if (result.success) current.observing = true;
+      return result;
+    });
   });
   ipcMain.handle("crazyflie-stop-attitude", async event => {
-    if (session && session.sender.id !== event.sender.id) {
-      return { success: false, message: "Only the monitoring window can stop attitude display" };
-    }
-    await removeSession();
-    return { success: true };
+    if (owner && owner.sender.id !== event.sender.id) return failure(new Error("The connection belongs to another window"));
+    if (!owner) return { success: true };
+    const result = await owner.worker.request("observe", { enabled: false });
+    if (result.success && owner) owner.observing = false;
+    return result;
   });
-
-  ipcMain.handle("crazyflie-test-link", async (_event, options) => {
-    try {
-      return await withRadio(_event, options || {}, () => testLink(options || {}));
-    } catch (error) {
-      return {
-        success: false,
-        message: error?.message || "crazyflie test link failed",
-        radioStatus: "error",
-        links: [],
-        loadedFrom: null,
-      };
+  ipcMain.handle("crazyflie-test-link", (event, options = {}) => exclusive(event, "test", async () => {
+    if (owner) return { success: true, message: "Crazyflie is connected", links: [owner.connection.uri] };
+    return testLink(options);
+  }));
+  ipcMain.handle("crazyflie-run-flow", (event, options = {}) => exclusive(event, "flow", async () => {
+    const code = String(options.code || "");
+    const needsAircraft = /cf_(?:crazyflie_link|test_crazyflie_link|motion|takeoff|land|move|motor_ramp_test|detect_|mr_|led_ring_|buzzer_)/.test(code);
+    if (!needsAircraft && !owner) {
+      return runFlowStream(event, options, payload => send(event.sender, "crazyflie-attitude", payload),
+        child => { operation.cancel = () => child.stdin.writable && child.stdin.write("stop\n"); });
     }
-  });
-
-  ipcMain.handle("crazyflie-run-flow", async (event, options) => {
-    try {
-      return await withRadio(event, options || {}, () => runFlowStream(event, options || {}, payload => {
-        sendAttitude(payload);
-        if (options?.followPosition && session?.sender.id !== event.sender.id && !event.sender.isDestroyed()) {
-          event.sender.send("crazyflie-attitude", payload);
-        }
-      }, child => {
-        flowControl.child = child;
-        if (flowControl.stopping && child.stdin.writable) child.stdin.write("stop\n");
-      }), true);
-    } catch (error) {
-      return {
-        success: false,
-        message: error?.message || "crazyflie run flow failed",
-        radioStatus: "error",
-        links: [],
-        executed: [],
-        loadedFrom: null,
-      };
+    const lines = code.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#"));
+    operation.stepTotal = lines.length;
+    let remaining = code;
+    let prefixResult = null;
+    if (/cf_scan_links\s*\(/.test(code)) {
+      if (owner) throw new Error("Disconnect the aircraft before scanning the wireless transceiver");
+      let prefixLength = 0;
+      while (prefixLength < lines.length && /^cf_(?:set_link|test_link|scan_links)\s*\(/.test(lines[prefixLength])) prefixLength++;
+      if (lines.slice(prefixLength).some(line => /^cf_scan_links\s*\(/.test(line))) throw new Error("Place scans before connecting");
+      prefixResult = await runFlowStream(event, { ...options, code: lines.slice(0, prefixLength).join("\n"),
+        stepTotal: lines.length }, () => {}, child => {
+        operation.cancel = () => child.stdin.writable && child.stdin.write("stop\n");
+      });
+      if (!prefixResult.success) return prefixResult;
+      if (operation.cancelled) return failure(new Error("Flow cancelled after radio scanning"));
+      operation.stepOffset = prefixLength;
+      remaining = lines.slice(prefixLength).join("\n");
     }
-  });
-
+    const current = await ensureConnection(event, options);
+    if (operation.cancelled) return failure(new Error("Flow cancelled before execution"));
+    const radios = await listInterfaces();
+    remaining = remaining.replace(/cf_set_link\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/g,
+      (_call, _quote, uri, _quote2, addressHex) => {
+        const configured = canonicalConnection({ uri, addressHex }, radios);
+        if (configured.uri !== current.connection.uri) throw new Error("Block connection settings do not match the connected aircraft");
+        return `cf_set_link(${JSON.stringify(configured.uri)}, ${JSON.stringify(configured.addressHex)})`;
+      });
+    operation.cancel = () => current.worker.cancel();
+    const result = await current.worker.request("run", { code: remaining, followPosition: options.followPosition,
+      timeoutMs: options.timeoutMs });
+    return { ...result, connected: owner === current && current.status === "ready", ...current.connection,
+      executed: [...(prefixResult?.executed || []), ...(result.executed || [])] };
+  }));
   ipcMain.handle("crazyflie-cancel-flow", event => {
-    if (!flowControl || operationSenderId !== event.sender.id) {
-      return { success: false, message: "No flight owned by this window is running" };
+    if (!operation || operation.action !== "flow" || operation.senderId !== event.sender.id) {
+      return failure(new Error("No flight owned by this window is running"));
     }
-    flowControl.requestStop();
-    return { success: true };
-  });
-
-  ipcMain.handle("crazyflie-list-radios", async () => {
+    operation.cancelled = true;
     try {
-      return await listRadios();
-    } catch (error) {
-      return {
-        success: false,
-        radios: [],
-        message: error?.message || "crazyflie list radios failed",
-      };
-    }
+      if (operation.cancel) operation.cancel();
+      else if (owner) void owner.worker.stop();
+      return { success: true };
+    } catch (error) { return failure(error); }
+  });
+  ipcMain.handle("crazyflie-list-radios", async () => {
+    try { return await listRadios(); }
+    catch (error) { return { ...failure(error), radios: [] }; }
   });
 }
 

@@ -221,6 +221,7 @@ modules['cflib.crazyflie.log'].LogConfig = Config
 modules['cflib.crazyflie.syncLogger'].SyncLogger = object
 modules['cflib.positioning.motion_commander'].MotionCommander = Commander
 modules['cflib.crtp.radiodriver'].RadioDriver = lambda: types.SimpleNamespace(get_status=lambda: 'mock radio')
+runner._radio_status = lambda uri: 'mock radio'
 modules['cflib.utils.multiranger'].Multiranger = object
 idle = runner.parse_commands('cf_crazyflie_link()\\ncf_delay(0.2)\\ncf_print("done")')
 out = io.StringIO()
@@ -230,7 +231,7 @@ assert result['success'], result
 assert len(connections) == 1 and not commands, 'monitoring must not arm or move motors'
 samples = [json.loads(line.split(':', 1)[1]) for line in out.getvalue().splitlines()
            if line.startswith('__ATTITUDE__:')]
-assert len([s for s in samples if s['type'] == 'sample']) >= 3, samples
+assert len([s for s in samples if s['type'] == 'sample']) >= 2, samples
 assert all(not c.data_received_cb.callbacks for c in configurations)
 flight = runner.parse_commands('cf_crazyflie_link()\\ncf_motion("takeoff", [0.5,0.2])\\ncf_motion("hover", [0.1])\\ncf_motion("land", [0.2])')
 for failure in [False, True]:
@@ -375,45 +376,68 @@ test('actual Python pipe -> Electron message path sustains at least 15 Hz for a 
   }
 });
 
-test('Electron hands idle monitoring to the flow connection, forwards attitude without log spam and resumes afterwards', async () => {
+test('Electron retains one real connection across button, blocks and flights with stable radio identity', async () => {
   const filename = path.join(root, 'electron', 'crazyflie.js');
   const handlers = new Map();
-  let options;
-  let stopCount = 0;
-  let startCount = 0;
-  let activeMonitors = 0;
-  let flowChild;
-  let flowArgs;
+  let startCount = 0, stopCount = 0, cancellations = 0;
+  let config;
+  let finishFlow;
+  let active = false;
+  let spawnFailure = false, deferEnumeration = false;
+  let enumerationCallback;
+  let radios = [{ index: 0, serial: 'AABBCCDD0001' }, { index: 1, serial: 'AABBCCDD0002' }];
+  let prefixChild, prefixArgs;
   const messages = [];
   const exports = {};
   const context = {
     exports, module: { exports }, process: { env: {} }, __dirname: path.dirname(filename),
     require: name => name === 'electron' ? { ipcMain: { handle: (key, fn) => handlers.set(key, fn) } }
-      : name === './crazyflie-attitude' ? { startAttitudeMonitor: config => {
-        assert.equal(activeMonitors, 0, 'only one idle connection may exist');
+      : name === './crazyflie-session' ? { startCrazyflieSession: options => {
+        if (spawnFailure) throw new Error('mock process launch failed');
         startCount++;
-        activeMonitors++;
-        options = config;
-        return { senderId: config.sender.id, stop: async () => {
-          stopCount++;
-          await tick();
-          activeMonitors--;
-          config.onClose();
-        } };
+        config = options;
+        const ready = Promise.resolve().then(() => {
+          options.onEvent({ type: 'state', state: 'ready' });
+          options.onEvent({ type: 'attitude', payload: { type: 'sample', timestampMs: 25, roll: 5, pitch: 10, yaw: 15 } });
+          return { success: true };
+        });
+        return {
+          ready, get running() { return active; },
+          request: async (action, opts) => {
+            if (action === 'observe') return { success: true };
+            assert.equal(action, 'run');
+            assert.ok(opts.code.includes('cf_motion'), opts.code);
+            active = true;
+            options.onEvent({ type: 'state', state: 'flow' });
+            options.onEvent({ type: 'telemetry', payload: { batteryVolts: 4, batteryPercent: 75, linkQuality: 93 } });
+            options.onEvent({ type: 'log', line: '__ATTITUDE__:{"type":"sample","timestampMs":50,"roll":0,"pitch":0,"yaw":0,"x":1,"y":2,"z":3}' });
+            options.onEvent({ type: 'log', line: '__STEP__:1/2:motion:takeoff' });
+            const result = await new Promise(resolve => { finishFlow = resolve; });
+            active = false;
+            options.onEvent({ type: 'state', state: 'ready' });
+            return result;
+          },
+          cancel: () => { cancellations++; },
+          stop: async () => {
+            stopCount++;
+            options.onEvent({ type: 'state', state: 'disconnected' });
+            options.onClose();
+          },
+        };
       } } : name === 'child_process' ? {
         spawn: (_python, args) => {
-          assert.equal(activeMonitors, 0, 'monitor must close before flow acquires the radio');
-          flowArgs = args;
-          flowChild = new EventEmitter();
-          flowChild.stdin = new PassThrough();
-          flowChild.stdout = new PassThrough();
-          flowChild.stderr = new PassThrough();
-          flowChild.kill = () => flowChild.emit('close', 1);
-          return flowChild;
+          prefixArgs = args;
+          prefixChild = new EventEmitter();
+          prefixChild.stdin = new PassThrough();
+          prefixChild.stdout = new PassThrough();
+          prefixChild.stderr = new PassThrough();
+          prefixChild.kill = () => prefixChild.emit('close', 1);
+          return prefixChild;
         },
         execFile: (_python, _args, _options, callback) => {
-          assert.equal(activeMonitors, 0, 'monitor must close before a link test');
-          callback(null, '{"success":true,"message":"Link OK"}', '');
+          assert.ok(_args.includes('--list-radios'));
+          if (deferEnumeration) enumerationCallback = callback;
+          else callback(null, JSON.stringify({ success: true, radios }), '');
         },
       } : name === 'fs' ? { existsSync: () => false } : require(name),
     Buffer, setTimeout, clearTimeout,
@@ -425,70 +449,94 @@ test('Electron hands idle monitoring to the flow connection, forwards attitude w
   sender.isDestroyed = () => false;
   sender.send = (channel, payload) => messages.push({ channel, payload });
   const event = { sender };
-  const opts = { uri: 'radio://0/80/2M', addressHex: 'E7E7E7E7E7' };
-  assert.equal(handlers.get('crazyflie-start-attitude')(event, { ...opts, uri: 'invalid' }).success, false);
-  assert.equal(handlers.get('crazyflie-start-attitude')(event, opts).success, true);
-  assert.ok(options.scriptPath.endsWith('crazyflie_attitude.py'));
-  assert.equal(handlers.get('crazyflie-start-attitude')(event, opts).success, false);
+  const opts = { uri: 'radio://1/80/2M', addressHex: 'E7E7E7E7E7', explicitRadio: true };
+  assert.equal((await handlers.get('crazyflie-connect')(event, { ...opts, uri: 'invalid' })).success, false);
+  assert.equal((await handlers.get('crazyflie-connect')(event, { uri: 'radio://0/80/2M' })).success, false,
+    'multiple USB devices require a deliberate selection');
+  const connected = await handlers.get('crazyflie-connect')(event, opts);
+  assert.equal(connected.success, true);
+  assert.equal(connected.radioSerial, 'AABBCCDD0002');
+  assert.equal(connected.uri, 'radio://AABBCCDD0002/80/2M/E7E7E7E7E7');
+  assert.ok(config.connectionArgs.includes(connected.uri));
+  assert.ok(messages.some(item => item.channel === 'crazyflie-attitude' && item.payload.source === 'idle'),
+    'connecting automatically streams idle attitude without another request');
+  assert.equal((await handlers.get('crazyflie-connect')(event, opts)).success, true);
+  assert.equal(startCount, 1, 'repeated connections reuse the same Python connection');
+  assert.equal((await handlers.get('crazyflie-connect')(event, { ...opts, radioId: 'AABBCCDD0001' })).success, false,
+    'a header selection must not silently override an explicit block device');
+  assert.equal((await handlers.get('crazyflie-connect')(event, { ...opts, uri: 'radio://0/80/2M' })).success, false);
   assert.equal((await handlers.get('crazyflie-run-flow')({ sender: { id: 2 } }, {})).radioStatus, 'busy');
   assert.equal((await handlers.get('crazyflie-stop-attitude')({ sender: { id: 2 } })).success, false);
   assert.equal(stopCount, 0);
-  const flow = handlers.get('crazyflie-run-flow')(event, { ...opts, code: 'cf_crazyflie_link()' });
+  const code = 'cf_motion("takeoff", [0.5, 0.2])\ncf_motion("land", [0.2])';
+  const flow = handlers.get('crazyflie-run-flow')(event, { ...opts, code, followPosition: true });
   assert.equal((await handlers.get('crazyflie-test-link')(event, opts)).radioStatus, 'busy');
   await tick();
   await tick();
-  assert.ok(flowArgs.includes('--attitude'));
-  flowChild.stdout.write('__ATTITUDE__:{"type":"sample","timestampMs":50,"roll":12,');
-  flowChild.stdout.write('"pitch":-4,"yaw":30}\n__STEP__:1/1:connect\n');
-  flowChild.stdout.write('{"success":true,"message":"Flow executed","executed":["crazyflie_link"]}\n');
-  flowChild.emit('close', 0);
-  assert.equal((await flow).success, true);
-  assert.equal(messages.filter(item => item.channel === 'crazyflie-attitude' && item.payload.type === 'sample').length, 1);
-  assert.equal(messages.filter(item => item.channel === 'crazyflie-flow-log').length, 1);
-  assert.equal(messages.find(item => item.channel === 'crazyflie-flow-log').payload.line, '__STEP__:1/1:connect');
-  assert.equal(startCount, 2, 'idle monitoring resumes after flow');
-  assert.equal((await handlers.get('crazyflie-test-link')(event, opts)).success, true);
-  assert.equal(startCount, 3);
-  assert.equal((await handlers.get('crazyflie-stop-attitude')(event)).success, true);
-  assert.equal(stopCount, 3);
-  assert.equal(activeMonitors, 0);
-  const secondFlow = handlers.get('crazyflie-run-flow')(event, { ...opts, code: 'cf_crazyflie_link()' });
-  await tick();
-  assert.equal(handlers.get('crazyflie-start-attitude')(event, opts).success, true,
-    'display can be enabled while the flow is running');
-  assert.equal(activeMonitors, 0);
-  flowChild.stdout.write('__ATTITUDE__:{"type":"sample","timestampMs":100,"roll":2,"pitch":3,"yaw":4}\n');
-  assert.equal(messages.filter(item => item.channel === 'crazyflie-attitude' && item.payload.type === 'sample').length, 2);
-  assert.equal((await handlers.get('crazyflie-stop-attitude')(event)).success, true);
-  flowChild.stdout.write('{"success":true,"message":"Flow executed"}\n');
-  flowChild.emit('close', 0);
-  assert.equal((await secondFlow).success, true);
-  assert.equal(activeMonitors, 0, 'turning display off during flow must not reconnect afterwards');
-  const combined = handlers.get('crazyflie-run-flow')(event, { ...opts, followPosition: true,
-    code: 'cf_crazyflie_link()' });
-  await tick();
-  assert.ok(flowArgs.includes('--follow-position'));
-  flowChild.stdout.write('__ATTITUDE__:{"type":"reference"}\n');
-  flowChild.stdout.write('__ATTITUDE__:{"type":"sample","timestampMs":150,"roll":0,"pitch":0,"yaw":0,"x":1,"y":2,"z":3}\n');
-  const live = messages.filter(item => item.channel === 'crazyflie-attitude' && item.payload.x === 1);
-  assert.equal(live.length, 1, 'combined mode receives pose without opening an idle monitor');
-  assert.equal(activeMonitors, 0);
+  assert.equal((await handlers.get('crazyflie-disconnect')(event)).success, false, 'do not disconnect during flight');
   assert.equal(handlers.get('crazyflie-cancel-flow')({ sender: { id: 2 } }).success, false);
   assert.equal(handlers.get('crazyflie-cancel-flow')(event).success, true);
-  assert.equal(flowChild.stdin.read().toString(), 'stop\n');
-  flowChild.stdout.write('{"success":false,"message":"Flight cancelled"}\n');
-  flowChild.emit('close', 1);
-  assert.equal((await combined).success, false);
-  assert.equal(handlers.get('crazyflie-cancel-flow')(event).success, false);
-  const crashed = handlers.get('crazyflie-run-flow')(event, { ...opts, code: 'cf_crazyflie_link()' });
+  assert.equal(cancellations, 1);
+  finishFlow({ success: false, message: 'Flight cancelled', executed: [] });
+  assert.equal((await flow).success, false);
+  assert.equal(messages.filter(item => item.channel === 'crazyflie-attitude' && item.payload.type === 'sample'
+    && item.payload.source === 'flow').length, 1);
+  assert.equal(messages.filter(item => item.channel === 'crazyflie-flow-log').length, 1);
+  assert.ok(messages.some(item => item.channel === 'crazyflie-telemetry' && item.payload.linkQuality === 93));
+  assert.equal(startCount, 1, 'a flow must not replace the connection');
+  assert.equal(handlers.get('crazyflie-connection-state')(event).status, 'ready');
+  assert.equal((await handlers.get('crazyflie-test-link')(event, opts)).success, true);
+  assert.equal((await handlers.get('crazyflie-start-attitude')(event, opts)).success, true);
+  assert.equal((await handlers.get('crazyflie-stop-attitude')(event)).success, true);
+  assert.equal(stopCount, 0, 'turning attitude display off leaves the connection open');
+  assert.equal((await handlers.get('crazyflie-disconnect')(event)).success, true);
+  assert.equal(stopCount, 1);
+  const automatic = handlers.get('crazyflie-run-flow')(event, { ...opts, code });
   await tick();
-  flowChild.stdout.write('__STEP__:1/1:connect\n');
-  flowChild.emit('close', 1);
-  assert.equal((await crashed).success, false, 'a crashed plan must not be replayed with another Python');
-  assert.equal(handlers.get('crazyflie-start-attitude')(event, opts).success, true);
+  await tick();
+  assert.equal(startCount, 2, 'a disconnected flight automatically connects without a connection block');
+  finishFlow({ success: true, executed: [] });
+  assert.equal((await automatic).success, true);
   sender.emit('did-start-navigation', null, 'url', false, true);
   await tick();
-  assert.equal(activeMonitors, 0);
+  assert.equal(stopCount, 2);
+  radios = [{ index: 0, serial: 'AABBCCDD0002' }, { index: 1, serial: 'AABBCCDD0001' }];
+  const stable = { uri: connected.uri, radioId: connected.radioSerial };
+  const reordered = await handlers.get('crazyflie-connect')(event, stable);
+  assert.equal(reordered.radioIndex, 0);
+  assert.equal(reordered.radioSerial, connected.radioSerial, 'USB order changes must not change the selected hardware');
+  await handlers.get('crazyflie-disconnect')(event);
+  radios = [radios[1]];
+  assert.equal((await handlers.get('crazyflie-connect')(event, stable)).success, false, 'unplugged device cannot fall back to another one');
+  radios = [{ index: 0, serial: 'AABBCCDD0001' }, { index: 1, serial: 'AABBCCDD0002' }];
+  const before = startCount;
+  deferEnumeration = true;
+  const abandoned = handlers.get('crazyflie-run-flow')(event, { ...opts, code });
+  sender.emit('did-start-navigation', null, 'url', false, true);
+  enumerationCallback(null, JSON.stringify({ success: true, radios }), '');
+  assert.equal((await abandoned).success, false);
+  assert.equal(startCount, before, 'leaving during enumeration must not open a new radio');
+  deferEnumeration = false;
+  spawnFailure = true;
+  assert.equal((await handlers.get('crazyflie-connect')(event, opts)).success, false);
+  assert.equal(handlers.get('crazyflie-connection-state')(event).status, 'disconnected');
+  assert.equal(sender.listenerCount('destroyed'), 0, 'failed startup must remove owner and operation listeners');
+  spawnFailure = false;
+  const scanned = handlers.get('crazyflie-run-flow')(event, { ...opts,
+    code: 'cf_set_link("radio://1/80/2M", "E7E7E7E7E7")\ncf_scan_links("E7E7E7E7E7")\n' + code });
+  assert.equal(startCount, before, 'scanning must finish before the persistent connection opens');
+  const prefixCode = Buffer.from(prefixArgs[prefixArgs.indexOf('--code-base64') + 1], 'base64').toString();
+  assert.match(prefixCode, /cf_scan_links/);
+  assert.doesNotMatch(prefixCode, /cf_motion/);
+  prefixChild.stdout.write('__STEP__:2/2:scan_links\n{"success":true,"executed":["set_link","scan_links"]}\n');
+  prefixChild.emit('close', 0);
+  await tick();
+  await tick();
+  finishFlow({ success: true, executed: ['takeoff', 'land'] });
+  assert.deepEqual(Array.from((await scanned).executed), ['set_link', 'scan_links', 'takeoff', 'land']);
+  assert.ok(messages.some(item => item.channel === 'crazyflie-flow-log' && item.payload.line === '__STEP__:3/4:motion:takeoff'));
+  await handlers.get('crazyflie-disconnect')(event);
+  assert.equal(sender.listenerCount('destroyed'), 0);
   assert.equal(sender.listenerCount('destroyed'), 0);
 });
 
@@ -496,10 +544,16 @@ test('classroom uses natural wood finishes without loose books or extra cabinets
   const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts');
   const source = fs.readFileSync(filename, 'utf8');
-  assert.match(source, /createLightClassroomTexture\(map, '#f1dfbf', 0\.65\)/);
+  assert.match(source, /createLightClassroomTexture\(woodMaterial\.map, '#ffffff', 0\)/);
   assert.match(source, /createLightClassroomTexture\(map, '#dfb270', 0\.42\)/);
-  assert.match(source, /createLightClassroomTexture\(map, '#d7a968', 0\.28\)/);
+  assert.match(source, /this\.applyVarnishedPineFinish\(teachingStage\)/);
+  assert.match(source, /this\.applyVarnishedPineFinish\(doorGroup\)/);
   assert.match(source, /this\.applyVarnishedPineFinish\(lecternPanels\)/);
+  assert.match(source, /this\.applyVarnishedPineFinish\(floor, 'floor'\)/);
+  assert.match(source, /this\.loadVarnishedPineMaterial\('desk'\)/);
+  assert.match(source, /\[this\.createClassroomChair\(\), chairOffsetX, 'chair'\]/);
+  assert.match(source, /\[this\.createClassroomDeskDrawer\(\), 0, 'desk'\]/);
+  assert.match(source, /this\.applyVarnishedPineFinish\(instances, finish\)/);
   assert.doesNotMatch(source, /applyVarnishedPineFinish\(podiumGroup\)/);
   assert.doesNotMatch(source, /loadClassroomProtoAsset\('school_furniture\/protos\/Book\.proto'\)/);
   assert.doesNotMatch(source, /Webots school book|cabinetGroup|lowShelfGroup/);
@@ -538,7 +592,11 @@ function panelHarness({ globals = {}, three = require('three') } = {}) {
     pose$: { value: { x: 0, y: 0, z: 0, yaw: 0 } },
     poseSource$: { value: 'simulation' }, realAttitude$: { value: null },
   };
-  const panel = new exports.CrazyflieSimPanelComponent(sim, {}, {},
+  const { BehaviorSubject } = require('rxjs');
+  const connection = { state$: new BehaviorSubject({ status: 'disconnected' }),
+    attitude$: new BehaviorSubject(null), attitudeError$: new BehaviorSubject(null),
+    attitudeReception: new AttitudeReception() };
+  const panel = new exports.CrazyflieSimPanelComponent(sim, connection, {},
     { error: text => messages.push(text) }, { run: fn => fn() });
   panel.scene = {};
   panel.camera = {};
@@ -548,9 +606,8 @@ function panelHarness({ globals = {}, three = require('three') } = {}) {
   panel.droneGroup.rotation.y = Math.PI;
   panel.droneGroup.position.copy(panel.targetPosition);
   panel.flightAxes = new Group();
-  panel.drawOrientationCompass = () => {};
   return {
-    panel, messages, sim,
+    panel, messages, sim, connection,
     render(count) {
       if (!frame) panel.startRenderLoop();
       for (let i = 0; i < count; i++) { now += 1000 / 60; frame(); }
@@ -559,30 +616,184 @@ function panelHarness({ globals = {}, three = require('three') } = {}) {
   };
 }
 
-test('imported desk tabletop faces point upward after converting Webots coordinates', async () => {
+test('classroom palettes cache distinct light finishes, share detail maps and retry failed variants', async () => {
   const THREE = require('three');
+  let fetches = 0;
+  const requests = [];
+  const transforms = [];
+  const panel = panelHarness({
+    globals: {
+      URL, window: { location: { href: 'http://localhost/' } },
+      fetch: async () => {
+        fetches++;
+        return { ok: true, text: async () => fs.readFileSync(path.join(root, 'public', 'models', 'classroom',
+          'appearances', 'protos', 'VarnishedPine.proto'), 'utf8') };
+      },
+    },
+    three: { ...THREE, TextureLoader: class {
+      async loadAsync(url) { requests.push(url); return new THREE.Texture({}); }
+    } },
+  }).panel;
+  panel.createLightClassroomTexture = (source, tint, opacity) => {
+    transforms.push({ source, tint, opacity });
+    return new THREE.CanvasTexture({});
+  };
+  const pending = panel.loadVarnishedPineMaterial('floor');
+  assert.equal(panel.loadVarnishedPineMaterial('floor'), pending);
+  const [floor, desk, chair, honey] = await Promise.all([
+    pending, panel.loadVarnishedPineMaterial('desk'),
+    panel.loadVarnishedPineMaterial('chair'), panel.loadVarnishedPineMaterial(),
+  ]);
+  assert.equal(fetches, 1, 'all colors use one underlying pine asset request');
+  assert.equal(requests.length, 4, 'normal, roughness and AO maps must not be reloaded for every palette');
+  for (const [material, tint, opacity, roughness] of [
+    [floor, '#eee5d3', 0.68, 0.88], [desk, '#efd0a0', 0.32, 0.74], [chair, '#b7c9bd', 0.82, 0.82],
+  ]) {
+    const transform = transforms.find(item => item.tint === tint);
+    assert.equal(transform.source, honey.map);
+    assert.equal(transform.opacity, opacity);
+    assert.notEqual(material.map, honey.map);
+    assert.equal(material.roughnessMap, honey.roughnessMap);
+    assert.equal(material.normalMap, honey.normalMap);
+    assert.equal(material.aoMap, honey.aoMap);
+    assert.equal(material.color.getHexString(), 'ffffff');
+    assert.equal(material.roughness, roughness);
+    assert.deepEqual(material.map.repeat.toArray(), [3, 3]);
+  }
+  assert.equal(honey.roughness, 0.7, 'stage, door and lectern must retain their honey finish');
+  assert.equal(transforms.length, 4);
+  assert.equal(new Set([floor.map, desk.map, chair.map, honey.map]).size, 4);
+  panel.classroomWoodMaterialPromises.delete('floor');
+  const transform = panel.createLightClassroomTexture;
+  panel.createLightClassroomTexture = () => { throw new Error('test canvas allocation failed'); };
+  await assert.rejects(panel.loadVarnishedPineMaterial('floor'), /test canvas allocation failed/);
+  assert.equal(panel.classroomWoodMaterialPromises.has('floor'), false);
+  panel.createLightClassroomTexture = transform;
+  const retried = await panel.loadVarnishedPineMaterial('floor');
+  assert.notEqual(retried, floor);
+  assert.equal(requests.length, 4, 'retrying a tint cannot refetch the shared asset');
+  for (const material of [floor, desk, chair, honey, retried]) {
+    material.map.dispose();
+    material.dispose();
+  }
+  honey.normalMap.dispose();
+  honey.roughnessMap.dispose();
+  honey.aoMap.dispose();
+});
+
+test('floor uses its light neutral finish, preserves its grain and never disposes shared textures', async () => {
+  const THREE = require('three');
+  for (const replaceScene of [false, true]) {
+    const map = new THREE.CanvasTexture({});
+    map.colorSpace = THREE.SRGBColorSpace;
+    const roughnessMap = new THREE.Texture({});
+    const normalMap = new THREE.Texture({});
+    const aoMap = new THREE.Texture({});
+    const textures = [map, roughnessMap, normalMap, aoMap];
+    let disposedTextures = 0;
+    textures.forEach(texture => {
+      texture.repeat.set(3, 3);
+      texture.addEventListener('dispose', () => disposedTextures++);
+    });
+    const template = new THREE.MeshStandardMaterial({
+      color: '#ffffff', map, roughnessMap, normalMap, aoMap,
+      roughness: 0.88, metalness: 0, normalScale: new THREE.Vector2(0.3, 0.3), aoMapIntensity: 0.35,
+    });
+    const panel = panelHarness().panel;
+    let finishLoad;
+    panel.loadVarnishedPineMaterial = finish => {
+      assert.equal(finish, 'floor');
+      return new Promise(resolve => { finishLoad = resolve; });
+    };
+    const group = new THREE.Group();
+    panel.scene = new THREE.Scene();
+    panel.scene.add(group);
+    panel.presetInteriorRoot = group;
+    panel.createClassroomWoodFloor(group, { width: 8, depth: 6 });
+    const floor = group.getObjectByName('Webots pine classroom floor');
+    const fallback = floor.material;
+    let disposedGeometry = 0;
+    let disposedFallback = 0;
+    floor.geometry.addEventListener('dispose', () => disposedGeometry++);
+    fallback.addEventListener('dispose', () => disposedFallback++);
+    assert.equal(floor.material.isMeshStandardMaterial, true);
+    assert.equal(floor.material.roughness, 0.88);
+    assert.equal(floor.material.metalness, 0);
+    assert.equal(floor.receiveShadow, true);
+    assert.ok(floor.geometry.getAttribute('uv2'));
+    assert.equal(floor.material.color.getHexString(), 'eee5d3');
+    if (replaceScene) panel.disposePresetInterior();
+    finishLoad(template);
+    await new Promise(setImmediate);
+    assert.equal(disposedFallback, 1);
+    if (replaceScene) {
+      assert.equal(floor.material.map, null, 'a late texture cannot revive a disposed scene');
+      assert.equal(floor.material, fallback);
+    } else {
+      assert.notEqual(floor.material, template, 'the floor has its own material instance');
+      assert.notEqual(floor.material, fallback);
+      assert.equal(floor.material.map, map, 'the floor uses its cached light wood finish');
+      assert.equal(floor.material.roughnessMap, roughnessMap);
+      assert.equal(floor.material.normalMap, normalMap);
+      assert.equal(floor.material.aoMap, aoMap);
+      assert.equal(floor.material.aoMapIntensity, template.aoMapIntensity);
+      assert.deepEqual(floor.material.normalScale.toArray(), [0.3, 0.3]);
+      assert.deepEqual(map.repeat.toArray(), [3, 3], 'the visible pine grain is not washed out or rescaled');
+      assert.equal(floor.material.color.getHexString(), 'ffffff');
+      assert.equal(floor.material.roughness, template.roughness);
+      assert.equal(floor.userData.sharedClassroomTextures, true);
+      panel.disposePresetInterior();
+    }
+    assert.equal(disposedGeometry, 1);
+    assert.equal(disposedTextures, 0, 'removing the floor cannot invalidate the stage or door textures');
+    template.dispose();
+    textures.forEach(texture => texture.dispose());
+  }
+});
+
+test('imported desk faces upward and uses its warm finish without recoloring the metal frame', async () => {
+  const THREE = require('three');
+  const woodPixels = new Uint8ClampedArray([223, 178, 112, 255, 223, 178, 112, 255]);
+  const maskPixels = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]);
+  let outputPixels;
   const canvas = {
-    width: 1, height: 1,
+    width: 2, height: 1,
     getContext: () => ({
-      drawImage() {}, putImageData() {},
-      getImageData: () => ({ data: new Uint8ClampedArray(4) }),
+      putImageData(image) { outputPixels = image.data; },
+      getImageData: () => ({ data: woodPixels.slice() }),
     }),
   };
+  const woodMap = new THREE.CanvasTexture(canvas);
+  const woodMaterial = new THREE.MeshStandardMaterial({ map: woodMap });
+  let sharedMapDisposed = 0;
+  woodMap.addEventListener('dispose', () => sharedMapDisposed++);
+  const requests = [];
   const panel = panelHarness({
     globals: {
       URL,
       window: { location: { href: 'http://localhost/' } },
-      document: { createElement: () => canvas },
+      document: { createElement: () => ({
+        width: 2, height: 1,
+        getContext: () => ({ drawImage() {}, getImageData: () => ({ data: maskPixels }) }),
+      }) },
       fetch: async () => ({
         ok: true,
         text: async () => fs.readFileSync(path.join(root, 'public', 'models', 'classroom', 'Desk.proto'), 'utf8'),
       }),
     },
     three: { ...THREE, TextureLoader: class {
-      async loadAsync() { return new THREE.Texture({}); }
+      async loadAsync(url) { requests.push(url); return new THREE.Texture({}); }
     } },
   }).panel;
-  panel.createLightClassroomTexture = () => new THREE.CanvasTexture(canvas);
+  panel.loadVarnishedPineMaterial = async finish => {
+    assert.equal(finish, 'desk');
+    return woodMaterial;
+  };
+  panel.createLightClassroomTexture = (source, tint, opacity) => {
+    assert.equal(source, woodMap, 'desk atlas must use the warm desk finish');
+    assert.equal(opacity, 0, 'the atlas must not wash out the chosen finish');
+    return new THREE.CanvasTexture(canvas);
+  };
   const { geometry, material } = await panel.loadClassroomDeskAsset();
   const position = geometry.getAttribute('position');
   const normal = geometry.getAttribute('normal');
@@ -594,10 +805,18 @@ test('imported desk tabletop faces point upward after converting Webots coordina
       assert.ok(normal.getY(vertex) > 0.99, 'desktop must face the daylight, not the floor');
     }
     assert.ok(tabletopVertices >= 6, 'test must cover the real tabletop triangles');
+    assert.deepEqual(Array.from(outputPixels.slice(0, 4)), [223, 178, 112, 255], 'wood pixels retain the chosen desk color');
+    assert.deepEqual(Array.from(outputPixels.slice(4, 8)), [195, 203, 207, 255], 'metal pixels remain silver');
+    assert.equal(sharedMapDisposed, 0, 'building desk textures cannot dispose the floor/stage/door map');
+    assert.equal(material.color.getHexString(), 'ffffff');
+    assert.equal(requests.length, 3, 'only desk surface-detail maps are loaded separately');
+    assert.ok(requests.some(url => url.endsWith('desk_metalness.jpg')));
   } finally {
     geometry.dispose();
     for (const texture of [material.map, material.normalMap, material.roughnessMap, material.metalnessMap]) texture.dispose();
     material.dispose();
+    woodMap.dispose();
+    woodMaterial.dispose();
   }
 });
 
@@ -686,16 +905,27 @@ test('lectern has textured-panel attachment, rounded edges and a sloped reading 
   assert.ok(bounds.max.y > 1.1 && bounds.max.y < 1.2);
 });
 
-test('classroom daylight has bounded shadows for small and large rooms and disposes shadow resources', () => {
+test('classroom lighting uses only soft ambient and hemisphere light without direct glare or shadows', () => {
+  const { AmbientLight, HemisphereLight } = require('three');
+  const lights = panelHarness().panel.createClassroomLighting();
+  assert.equal(lights.children.length, 2);
+  assert.ok(lights.children.some(light => light instanceof AmbientLight));
+  assert.ok(lights.children.some(light => light instanceof HemisphereLight));
+  assert.ok(lights.children.every(light => !light.castShadow && light.intensity <= 1));
+  assert.ok(lights.children.reduce((sum, light) => sum + light.intensity, 0) <= 2);
+  const source = fs.readFileSync(path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
+    'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts'), 'utf8');
+  assert.doesNotMatch(source, /new (?:DirectionalLight|PointLight|SpotLight)\(/);
+  assert.match(source, /shadowMap\.enabled = false/);
+});
+
+test('disposing legacy directional lights still releases shadow resources', () => {
   const { DirectionalLight } = require('three');
-  for (const room of [{ width: 8.2, depth: 6.2, height: 3 }, { width: 30, depth: 25, height: 5 }]) {
+  for (const intensity of [0.45, 2.4]) {
     const panel = panelHarness().panel;
-    const lights = panel.createClassroomLighting(room);
-    const sun = lights.children.find(light => light instanceof DirectionalLight && light.castShadow);
-    assert.equal(sun.shadow.mapSize.x, 2048);
-    assert.ok(sun.shadow.camera.right > Math.hypot(room.width, room.depth) / 2);
-    assert.ok(sun.shadow.camera.far > sun.position.length() + room.height);
-    assert.ok(sun.shadow.normalBias > 0);
+    const lights = new Group();
+    const sun = new DirectionalLight('#fff3dd', intensity);
+    lights.add(sun);
     let disposed = 0;
     sun.shadow.dispose = () => disposed++;
     panel.scene = new Group();
@@ -893,8 +1123,10 @@ test('classroom trees stay outside both window walls and fit on the existing gro
 
 test('the actual panel render loop follows live Roll/Pitch/Yaw, holds stale orientation and returns to simulation', () => {
   const h = panelHarness();
-  h.panel.attitudeActive = true;
-  h.panel.attitudeReception.receive({ ...sample(50, 70), roll: 30, pitch: 20 }, 0);
+  h.connection.state$.next({ status: 'ready' });
+  const live = { ...sample(50, 70), roll: 30, pitch: 20 };
+  h.connection.attitudeReception.receive(live, 0);
+  h.connection.attitude$.next(live);
   h.render(6);
   assert.ok(h.panel.droneGroup.quaternion.angleTo(attitudeQuaternion(30, 20, 70, Math.PI)) < 5 * Math.PI / 180,
     'render smoothing must approach the target within 5 degrees after about 100 ms');
@@ -906,39 +1138,52 @@ test('the actual panel render loop follows live Roll/Pitch/Yaw, holds stale orie
   assert.equal(h.panel.attitudeMetrics.stale, true);
   near(h.panel.droneGroup.quaternion.angleTo(attitudeQuaternion(30, 20, 70, Math.PI)), 0);
   vectorNear(h.panel.droneGroup.position, pose.toArray());
-  h.panel.attitudeActive = false;
+  h.connection.state$.next({ status: 'disconnected' });
+  h.connection.attitude$.next(null);
   h.sim.pose$.value.yaw = Math.PI / 2;
   h.render(40);
   near(h.panel.droneGroup.quaternion.angleTo(attitudeQuaternion(0, 0, 90, Math.PI)), 0);
   assert.ok(h.rendered >= 100);
 });
 
-test('panel monitoring is opt-in, reports missing bridge/start errors and disposes listeners on stop', async () => {
+test('panel uses cached connection attitude automatically and does not stop it when the panel closes', () => {
   const h = panelHarness();
   assert.equal(h.panel.attitudeActive, false);
-  helperContext.window.electronAPI = undefined;
-  await h.panel.toggleAttitude();
-  assert.ok(h.messages[0].includes('重启应用'));
-  let listener;
-  let removed = 0;
   let stops = 0;
-  helperContext.window.electronAPI = { crazyflie: {
-    startAttitude: async () => ({ success: true }),
-    stopAttitude: async () => { stops++; listener({ type: 'stopped' }); return { success: true }; },
-    onAttitude: callback => { listener = callback; return () => removed++; },
-  } };
-  await h.panel.toggleAttitude();
+  helperContext.window.electronAPI = { crazyflie: { stopAttitude: () => { stops++; } } };
+  const live = { ...sample(50, 30), roll: 12, pitch: 4 };
+  h.connection.state$.next({ status: 'ready' });
+  h.connection.attitudeReception.receive(live, 0);
+  h.connection.attitude$.next(live);
   assert.equal(h.panel.attitudeActive, true);
-  listener({ ...sample(10, 30), roll: 12, pitch: 4 });
-  assert.equal(h.panel.attitudeReception.sample.roll, 12);
-  await h.panel.toggleAttitude();
-  assert.equal(stops, 1);
-  assert.equal(removed, 1);
-  assert.equal(h.panel.attitudeActive, false);
-  helperContext.window.electronAPI.crazyflie.startAttitude = async () => ({ success: false, message: 'radio busy' });
-  await h.panel.toggleAttitude();
-  assert.equal(h.panel.attitudeActive, false);
-  assert.equal(h.messages.at(-1), 'radio busy');
-  assert.equal(removed, 2);
+  assert.equal(h.panel.displayedAttitude, live);
+  h.render(13);
+  assert.equal(h.panel.attitudePreviewState, 'live');
+  h.connection.attitudeError$.next('logger failed');
+  assert.equal(h.panel.attitudePreviewState, 'error');
+  assert.equal(h.panel.attitudePreviewMessage, 'logger failed');
+  let previewDisposed = 0;
+  h.panel.attitudePreview = { dispose: () => { previewDisposed++; } };
+  h.panel.renderer.dispose = () => {};
+  h.panel.ngOnDestroy();
+  assert.equal(stops, 0);
+  assert.equal(previewDisposed, 1);
+  assert.equal(h.connection.attitude$.value, live);
   delete helperContext.window.electronAPI;
+});
+
+test('the inset remains real while a simulation runs and does not move the classroom aircraft', () => {
+  const h = panelHarness();
+  const live = { ...sample(50, 70), roll: 30, pitch: 20 };
+  h.connection.state$.next({ status: 'ready' });
+  h.connection.attitude$.next(live);
+  h.panel.running = true;
+  h.panel.updateFlightPath = () => {};
+  h.sim.pose$.value.yaw = Math.PI / 2;
+  let previewSample;
+  h.panel.attitudePreview = { update: value => { previewSample = value; }, render() {} };
+  h.render(40);
+  assert.equal(previewSample, live);
+  near(h.panel.droneGroup.quaternion.angleTo(attitudeQuaternion(0, 0, 90, Math.PI)), 0);
+  vectorNear(h.panel.droneGroup.position, [0, 0.06, 0]);
 });

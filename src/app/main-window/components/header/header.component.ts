@@ -38,6 +38,7 @@ import { CrazyflieConnectionService, CrazyflieConnectionState } from '../../../s
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     NzToolTipModule,
     MenuComponent,
     ActBtnComponent,
@@ -68,6 +69,9 @@ export class HeaderComponent implements OnDestroy {
   private bleDevicesSubscription?: Subscription;
   private runtimePolicySubscription?: Subscription;
   private connectionStateSubscription?: Subscription;
+  private crazyradioRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private headerDestroyed = false;
+  crazyradioDiscoveryError: string | null = null;
   private blePortListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private unsaveDialogOpen = false; // 标记未保存对话框是否已打开
   private selectDebounceTimer: ReturnType<typeof setTimeout> | null = null; // 防抖计时器
@@ -232,19 +236,58 @@ export class HeaderComponent implements OnDestroy {
   }
 
   async toggleCrazyflieConnection(): Promise<void> {
-    if (this.connectionState.status === 'checking') {
+    if (this.connectionState.status === 'checking' || this.crazyflieRunInProgress || this.connectionState.busy) {
       return;
     }
-    if (this.connectionState.status === 'ready') {
-      this.crazyflieConnectionService.disconnect();
-      return;
+    try {
+      if (this.connectionState.status === 'ready') {
+        await this.crazyflieConnectionService.disconnect();
+        return;
+      }
+      const options = this.router.url.includes('/main/blockly-editor')
+        ? await this.uploaderService.getCrazyflieConnectionOptions() : this.crazyflieConnectionService.connectionOptions;
+      const state = await this.crazyflieConnectionService.connect(options);
+      if (state.status === 'ready') this.message.success(state.message);
+    } catch (error) {
+      this.message.error(error instanceof Error ? error.message : String(error));
     }
+  }
 
-    const state = await this.crazyflieConnectionService.checkLink();
-    if (state.status === 'ready') {
-      this.message.success(state.message);
-    } else if (state.status === 'error') {
-      this.message.error(state.message);
+  get crazyradioInterfaces() { return this.crazyflieConnectionService.radios; }
+  get selectedCrazyradio() { return this.crazyflieConnectionService.selectedRadioSerial; }
+  selectCrazyradio(serial: string): void {
+    this.crazyflieConnectionService.selectedRadioSerial = serial;
+  }
+  async refreshCrazyradios(): Promise<void> {
+    try {
+      await this.crazyflieConnectionService.refreshRadios();
+      if (this.headerDestroyed) return;
+      this.ngZone.run(() => {
+        this.crazyradioDiscoveryError = null;
+        this.cd.markForCheck();
+      });
+    } catch (error) {
+      if (this.headerDestroyed) return;
+      this.ngZone.run(() => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== this.crazyradioDiscoveryError) this.message.error(message);
+        this.crazyradioDiscoveryError = message;
+        this.cd.markForCheck();
+      });
+    }
+  }
+
+  private async pollCrazyradios(): Promise<void> {
+    this.crazyradioRefreshTimer = null;
+    if (this.headerDestroyed) return;
+    if (this.canShowSimulatorControls() && !this.crazyflieRunInProgress
+      && !this.connectionState.busy && !['ready', 'checking'].includes(this.connectionState.status)) {
+      await this.refreshCrazyradios();
+    }
+    if (!this.headerDestroyed) {
+      this.ngZone.runOutsideAngular(() => {
+        this.crazyradioRefreshTimer = setTimeout(() => { void this.pollCrazyradios(); }, 2000);
+      });
     }
   }
 
@@ -269,7 +312,9 @@ export class HeaderComponent implements OnDestroy {
     if (this.connectionState.status === 'checking') {
       return '正在连接 Crazyflie';
     }
-    return this.connectionState.status === 'ready' ? '断开 Crazyflie' : '连接 Crazyflie';
+    return this.connectionState.status === 'ready'
+      ? `${this.connectionState.message}；${this.connectionState.busy ? '执行期间不能断开' : '点击断开'}`
+      : '连接飞行器并持续显示电量与信号质量（不启动电机）';
   }
 
   async ngAfterViewInit() {
@@ -282,6 +327,7 @@ export class HeaderComponent implements OnDestroy {
       this.connectionState = state;
       this.cd.markForCheck();
     });
+    this.ngZone.runOutsideAngular(() => { void this.pollCrazyradios(); });
 
     this.bleDevicesSubscription = this.uploaderBleService.scanStateChanged.subscribe((state) => {
       console.log('[BLE:header] scan state changed', state);
@@ -870,6 +916,11 @@ export class HeaderComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
+    this.headerDestroyed = true;
+    if (this.crazyradioRefreshTimer !== null) {
+      clearTimeout(this.crazyradioRefreshTimer);
+      this.crazyradioRefreshTimer = null;
+    }
     if (this.bleDevicesSubscription) {
       this.bleDevicesSubscription.unsubscribe();
     }

@@ -38,7 +38,7 @@
   }
   @if (showCrazyflieTelemetry) {
   <div class="cf-footer-telemetry" aria-label="Crazyflie 链路和电池状态">
-    <div class="cf-footer-telemetry__metric">
+    <div class="cf-footer-telemetry__metric" title="无线链路质量；无数据或过期时显示 --，不是距离或信号强度">
       <span class="cf-footer-telemetry__label">Link</span>
       <div class="cf-footer-telemetry__bar">
         <div class="cf-footer-telemetry__fill" [style.width.%]="linkQuality ?? 0"
@@ -46,7 +46,7 @@
       </div>
       <span class="cf-footer-telemetry__value">{{ linkQuality ?? '--' }}%</span>
     </div>
-    <div class="cf-footer-telemetry__metric">
+    <div class="cf-footer-telemetry__metric" title="电量百分比由实时电压估算，仅供参考；断开后清空">
       <span class="cf-footer-telemetry__label">Battery</span>
       <div class="cf-footer-telemetry__bar">
         <div class="cf-footer-telemetry__fill" [style.width.%]="batteryPercent ?? 0"

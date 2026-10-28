@@ -169,14 +169,11 @@ export function parseMotionCall(line: string): MotionCommand | null {
 
 export function validateMotionSequence(commands: Array<{ type: string; value?: unknown }>): void {
   if (!commands.some(command => command.type === 'motion')) return;
-  let connected = false;
   let flying = false;
   for (const command of commands) {
-    if (command.type === 'crazyflie_link') connected = true;
     const motion = command.type === 'motion' ? command.value as MotionCommand : null;
     const kind = motion?.kind || command.type;
     if (!['takeoff', 'land', 'move', 'turn', 'circle', 'hover'].includes(kind)) continue;
-    if (!connected) throw new Error('Crazyflie：请在运动指令前连接飞行器');
     if (kind === 'takeoff') {
       if (flying) throw new Error('Crazyflie：已经起飞，请勿重复起飞');
       flying = true;

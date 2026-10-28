@@ -109,6 +109,10 @@ export class _UploaderService {
       this.cancel();
     }, 'uploader-upload-cancel');
 
+    this.actionService.listen('crazyflie-connection-options', async () => {
+      try { return { success: true, result: this.getCrazyflieConnectionOptions() }; }
+      catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+    }, 'uploader-crazyflie-connection-options');
     this.actionService.listen('simulate-crazyflie-begin', async () => {
       try {
         const result = await this.simulateCrazyflie();
@@ -154,6 +158,7 @@ export class _UploaderService {
     this.actionService.unlisten('uploader-upload-begin');
     this.actionService.unlisten('uploader-upload-cancel');
     this.actionService.unlisten('uploader-simulate-crazyflie-begin');
+    this.actionService.unlisten('uploader-crazyflie-connection-options');
     this.actionService.unlisten('uploader-fly-crazyflie-real-begin');
     this.actionService.unlisten('uploader-fly-crazyflie-sim-real-begin');
     this.actionService.unlisten('uploader-flash-softdevice');
@@ -202,15 +207,12 @@ export class _UploaderService {
     const validationError = this.crazyflieFlowActive || this.crazyflieSimService.running$.value
       ? '已有运行中的流程，请先结束当前流程'
       : followPosition && !poseApi ? '未找到真机同步接口，请重启应用'
-      : followPosition && !/cf_crazyflie_link\s*\(\s*\)/.test(crazyflieCode)
-        ? '模拟+真机模式需要先添加 Crazyflie 连接积木' : null;
+      : null;
     if (validationError) {
       this.noticeService.update({ title, text: validationError, state: 'error' });
       return { state: 'error', text: validationError };
     }
     const timeoutMs = motionFlowTimeoutMs(crazyflieCode);
-    this.crazyflieConnectionService.setChecking();
-    this.crazyflieTelemetryService.clear();
     this.noticeService.update({
       title,
       text: '正在检测 Crazyradio / Crazyflie 链路...',
@@ -316,6 +318,7 @@ export class _UploaderService {
       if (followPosition && poseApi) {
         this.crazyflieSimService.beginRealFollow();
         disposePose = poseApi.onAttitude(event => this.zone.run(() => {
+          if (event.source === 'idle') return;
           try {
             if (event.type === 'sample') {
               this.crazyflieSimService.receiveRealPose(event, performance.now());
@@ -334,9 +337,8 @@ export class _UploaderService {
         }));
       }
       result = hasRunFlowCmd
-        ? await api.runFlow({ code: crazyflieCode, timeoutMs, uri: connectionOptions.uri,
-          addressHex: connectionOptions.addressHex, followPosition })
-        : await api.testLink({ timeoutMs: 5000, uri: connectionOptions.uri, addressHex: connectionOptions.addressHex });
+        ? await api.runFlow({ code: crazyflieCode, timeoutMs, ...connectionOptions, followPosition })
+        : await api.testLink({ timeoutMs: 5000, ...connectionOptions });
       if (followPosition && result?.success && (!receivedPose || synchronizationError)) {
         result = { ...result, success: false,
           message: synchronizationError || '未收到真机位置和姿态，未完成同步' };
@@ -368,16 +370,12 @@ export class _UploaderService {
     if (result?.success) {
       const links: string[] = Array.isArray(result?.links) ? result.links : [];
       const radioChecked = executed.some(entry => entry === 'test_link' || entry === 'scan_links');
-      const aircraftConnected = executed.includes('crazyflie_link');
+      const aircraftConnected = result?.connected === true;
       const connectionMessage = aircraftConnected ? '真机通信成功'
         : links.length > 0 ? `已发现 ${links.length} 台 Crazyflie`
         : radioChecked ? 'Crazyradio 已就绪，尚未发现飞行器' : '连接参数已设置，尚未检测链路';
       if (radioChecked || aircraftConnected || !hasRunFlowCmd) {
         this.crazyflieConnectionService.setResult(true, connectionMessage);
-      } else {
-        this.crazyflieConnectionService.state$.next({
-          status: 'unknown', message: connectionMessage, updatedAt: Date.now(),
-        });
       }
       if (!receivedRealtimeLog) {
         executed.forEach((line) => {
@@ -530,7 +528,17 @@ export class _UploaderService {
 
   private crazyflieHighlightedSvgGroup: any | null = null;
 
-  private resolveCrazyflieConnectionOptions(crazyflieCode: string): { uri: string; addressHex: string } {
+  getCrazyflieConnectionOptions(): { uri: string; addressHex: string } {
+    const generator = window['MPY'];
+    const code = this.getCrazyflieExecutionBlocksInOrder()
+      .filter(block => ['cf_radio_config', 'cf_link_config'].includes(block.type))
+      .map(block => generator.blockToCode(block, true)).join('\n');
+    return this.resolveCrazyflieConnectionOptions(code);
+  }
+
+  private resolveCrazyflieConnectionOptions(crazyflieCode: string): {
+    uri: string; addressHex: string; radioId?: string; explicitRadio: boolean;
+  } {
     const defaultUri = 'radio://0/80/2M';
     const defaultAddressHex = 'E7E7E7E7E7';
     const code = String(crazyflieCode || '');
@@ -538,7 +546,7 @@ export class _UploaderService {
     let uri: string | null = null;
     let addressHex: string | null = null;
 
-    const setLinkMatch = /cf_set_link\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/.exec(code);
+    const setLinkMatch = [...code.matchAll(/cf_set_link\s*\(\s*(['"])(.*?)\1\s*,\s*(['"])(.*?)\3\s*\)/g)].at(-1);
     if (setLinkMatch) {
       uri = setLinkMatch[2] || null;
       addressHex = setLinkMatch[4] || null;
@@ -551,8 +559,11 @@ export class _UploaderService {
     }
 
     return {
-      uri: this.normalizeCrazyflieUri(uri, defaultUri),
-      addressHex: this.normalizeCrazyflieAddressHex(addressHex, defaultAddressHex),
+      uri: this.normalizeCrazyflieUri(uri, this.crazyflieConnectionService.connectionOptions?.uri || defaultUri),
+      addressHex: this.normalizeCrazyflieAddressHex(addressHex,
+        this.crazyflieConnectionService.connectionOptions?.addressHex || defaultAddressHex),
+      radioId: setLinkMatch ? undefined : this.crazyflieConnectionService.selectedRadioSerial || undefined,
+      explicitRadio: !!setLinkMatch,
     };
   }
 

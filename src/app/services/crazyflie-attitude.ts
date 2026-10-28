@@ -1,5 +1,11 @@
 import { MathUtils, Quaternion, Vector3 } from 'three';
 
+export const CRAZYFLIE_BODY_AXES = [
+  { label: 'X', color: '#ed5353', direction: new Vector3(-1, 0, 0) },
+  { label: 'Y', color: '#32b86a', direction: new Vector3(0, 0, 1) },
+  { label: 'Z', color: '#399cec', direction: new Vector3(0, 1, 0) },
+] as const;
+
 export interface AttitudeSample {
   type: 'sample';
   timestampMs: number;
@@ -14,8 +20,9 @@ export interface FlightPoseSample extends AttitudeSample {
   z: number;
 }
 
-export type AttitudeEvent = AttitudeSample | { type: 'error'; message: string }
-  | { type: 'stopped' } | { type: 'reference' } | { type: 'state'; state: 'connecting' | 'flow' };
+export type AttitudeEvent = (AttitudeSample | { type: 'error'; message: string }
+  | { type: 'stopped' } | { type: 'reference' } | { type: 'state'; state: 'connecting' | 'flow' })
+  & { source?: 'idle' | 'flow' };
 export interface AttitudeApi {
   startAttitude(options: { uri: string; addressHex: string }): Promise<{ success: boolean; message?: string }>;
   stopAttitude(): Promise<{ success: boolean; message?: string }>;

@@ -712,6 +712,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * @returns {Promise<{success: boolean, message: string, radioStatus?: string, links?: string[]}>}
      */
     testLink: (options) => ipcRenderer.invoke("crazyflie-test-link", options || {}),
+    connect: (options) => ipcRenderer.invoke("crazyflie-connect", options || {}),
+    disconnect: () => ipcRenderer.invoke("crazyflie-disconnect"),
+    listInterfaces: () => ipcRenderer.invoke("crazyflie-list-interfaces"),
+    getConnectionState: () => ipcRenderer.invoke("crazyflie-connection-state"),
+    onConnection: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("crazyflie-connection", listener);
+      return () => ipcRenderer.removeListener("crazyflie-connection", listener);
+    },
+    onTelemetry: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("crazyflie-telemetry", listener);
+      return () => ipcRenderer.removeListener("crazyflie-telemetry", listener);
+    },
     /**
      * 执行 Crazyflie 飞行流程（由 Blockly 代码生成）
      * @param {Object} options

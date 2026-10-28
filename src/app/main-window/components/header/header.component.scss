@@ -91,7 +91,25 @@ $header-inner-height: 38px;
   }
 
   .cf-connection-control--board {
-    margin: 0 4px 0 8px;
+    margin: 0 4px 0 20px;
+  }
+
+  .cf-radio-selector {
+    width: 140px;
+    min-width: 0;
+    height: 30px;
+    border: 1px solid var(--aily-border-input);
+    border-radius: 6px;
+    background: var(--aily-bg-secondary);
+    color: var(--aily-text-primary);
+    font-size: 11px;
+    text-overflow: ellipsis;
+  }
+
+  @media (max-width: 1100px) {
+    .cf-radio-selector {
+      width: 104px;
+    }
   }
 
   .cf-runtime-control__label,
@@ -209,6 +227,62 @@ $header-inner-height: 38px;
 
       &:first-child {
         margin-left: 0;
+      }
+    }
+  }
+
+  @media (max-width: 1100px) {
+    &.crazyflie-header {
+      .project-box {
+        max-width: 12vw;
+        margin: 0 4px;
+      }
+
+      .cf-runtime-control {
+        gap: 4px;
+        margin: 0 4px;
+      }
+
+      .cf-mode-segments button {
+        padding: 0 6px;
+      }
+
+      .toolbox {
+        min-width: 0;
+
+        .zone {
+          padding: 2px;
+          margin-left: 4px;
+
+          &:first-child {
+            flex-shrink: 0;
+            margin-left: 0;
+          }
+
+          &:last-child {
+            min-width: 0;
+            justify-content: flex-start;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: thin;
+          }
+        }
+
+        .btn {
+          flex: 0 0 30px;
+          width: 30px;
+          margin-right: 4px;
+          font-size: 17px;
+        }
+      }
+
+      .win-btns {
+        flex-shrink: 0;
+        margin-left: 8px;
+
+        .btn {
+          width: 32px;
+        }
       }
     }
   }

@@ -6,10 +6,6 @@
       <option value="classroom">教室</option>
       <option value="home">家庭</option>
     </select>
-    <label class="attitude-switch">
-      <input type="checkbox" [checked]="attitudeActive" [disabled]="attitudePending || running" (change)="toggleAttitude()">
-      只读姿态
-    </label>
     <div class="sim-panel__status" [class.running]="running" [class.loading]="!sceneReady && !running">
       {{ running ? '运行中' : (sceneReady ? '已就绪' : '加载中') }}
     </div>
@@ -37,26 +33,45 @@
       <span>{{ realPoseShown ? '真机估计 X' : (attitudeActive ? '模拟位置 X' : 'X') }} {{ telemetry.xCm }} cm</span>
       <span>Y {{ telemetry.yCm }} cm</span>
       <span>高度 {{ telemetry.altitudeCm }} cm</span>
-      <span *ngIf="!displayedAttitude">模拟航向 {{ telemetry.yawDeg }}°</span>
-      <span *ngIf="displayedAttitude as sample">
-        Roll {{ sample.roll | number:'1.1-1' }}° · Pitch {{ sample.pitch | number:'1.1-1' }}° · Yaw {{ sample.yaw | number:'1.1-1' }}°
-      </span>
+      @if (displayedAttitude; as sample) {
+        <span>{{ realPoseShown ? '相对航向' : '真机航向' }} {{ sample.yaw | number:'1.0-0' }}°</span>
+      } @else {
+        <span>模拟航向 {{ telemetry.yawDeg }}°</span>
+      }
       <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel }}</span>
       <span *ngIf="measureStatus" class="sim-hud__measure">{{ measureStatus }}</span>
     </div>
-    <div #canvasHost class="sim-panel__canvas" tabindex="0" aria-label="三维场景" title="左键拖动旋转，右键拖动平移，滚轮缩放；点击场景后可用方向键旋转、Home 全景、F 聚焦" (keydown)="onViewportKeydown($event)" (click)="onCanvasClick($event)"></div>
-    <div class="sim-orientation">
-      <canvas #orientationCanvas width="112" height="112" aria-label="飞行器方向坐标：X 前、Y 左、Z 上" title="X 前（红）· Y 左（绿）· Z 上（蓝）"></canvas>
-      <select aria-label="标准视角" title="按飞行器坐标选择观察方向" [value]="selectedView" (change)="setCameraView($any($event.target).value)">
-        <option value="" disabled>自由视角</option>
-        <option value="iso">等轴视图</option>
-        <option value="front">前视图 (+X)</option>
-        <option value="back">后视图 (-X)</option>
-        <option value="left">左视图 (+Y)</option>
-        <option value="right">右视图 (-Y)</option>
-        <option value="top">俯视图 (+Z)</option>
-        <option value="bottom">仰视图 (-Z)</option>
-      </select>
+    <div #canvasHost class="sim-panel__canvas" tabindex="0" aria-label="三维场景" title="左键拖动旋转，右键拖动平移，滚轮缩放；点击场景后可用方向键旋转、Home 全景、F 聚焦" (keydown)="onViewportKeydown($event)" (click)="onCanvasClick($event)">
+      <div class="sim-attitude-inset" role="group" aria-label="真机姿态预览"
+        [attr.data-state]="attitudePreviewState" [title]="attitudePreviewMessage"
+        (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+        <div class="sim-attitude-inset__header">
+          <span>真机姿态</span>
+          <span class="sim-attitude-inset__status" role="status">{{ attitudeStatus }}</span>
+        </div>
+        <div #attitudeViewport class="sim-attitude-inset__viewport" role="img"
+          aria-label="真机姿态与机体坐标：X 前（红）、Y 左（绿）、Z 上（蓝）；仅显示真实姿态，不代表真实位置"></div>
+        <div class="sim-attitude-inset__values">
+          @if (liveAttitude; as sample) {
+            <span title="横滚 Roll">R {{ sample.roll | number:'1.0-0' }}°</span>
+            <span title="俯仰 Pitch">P {{ sample.pitch | number:'1.0-0' }}°</span>
+            <span title="航向 Yaw">Y {{ sample.yaw | number:'1.0-0' }}°</span>
+          } @else {
+            <span>R --°</span><span>P --°</span><span>Y --°</span>
+          }
+        </div>
+        <select class="sim-attitude-inset__view" aria-label="主场景标准视角" title="按飞行器坐标选择主场景观察方向，不改变真机姿态"
+          [value]="selectedView" (change)="setCameraView($any($event.target).value)">
+          <option value="" disabled>自由视角</option>
+          <option value="iso">等轴视图</option>
+          <option value="front">前视图 (+X)</option>
+          <option value="back">后视图 (-X)</option>
+          <option value="left">左视图 (+Y)</option>
+          <option value="right">右视图 (-Y)</option>
+          <option value="top">俯视图 (+Z)</option>
+          <option value="bottom">仰视图 (-Z)</option>
+        </select>
+      </div>
     </div>
     <div class="sim-quick-actions">
       <button class="sim-quick-btn" [class.active]="measureMode" (click)="toggleMeasureMode()">{{ measureMode ? '取消测距' : '测距' }}</button>
@@ -68,19 +83,12 @@
   </div>
 
   <div class="sim-panel__footer">
-    <details class="attitude-settings">
-      <summary>姿态连接设置 · {{ attitudeStatus }}</summary>
-      <div class="attitude-settings__inputs">
-        <label>URI <input [value]="attitudeUri" [disabled]="attitudeActive || attitudePending" (input)="attitudeUri = $any($event.target).value"></label>
-        <label>地址 <input [value]="attitudeAddress" [disabled]="attitudeActive || attitudePending" (input)="attitudeAddress = $any($event.target).value"></label>
-      </div>
-      <div>“只读姿态”仅监测姿态，不控制电机。“模拟+真机”自动共享流程连接，按真机 XYZ 和姿态更新模型、轨迹；首帧对齐场景起点。请关闭其他占用 Crazyradio 的客户端。</div>
-    </details>
-    <div *ngIf="attitudeActive || realPoseShown" class="attitude-metrics" [class.attitude-metrics--stale]="attitudeMetrics.stale" role="status">
-      {{ realPoseShown ? simService.realStatus$.value : attitudeStatus }} · 接收 {{ attitudeMetrics.hz | number:'1.0-1' }} Hz ·
+    <div *ngIf="liveAttitude" class="attitude-metrics" [class.attitude-metrics--stale]="attitudeMetrics.stale" [title]="attitudePreviewMessage">
+      真机姿态 · {{ attitudeStatus }} · 接收 {{ attitudeMetrics.hz | number:'1.0-1' }} Hz ·
       {{ attitudeMetrics.ageMs === null ? '等待数据' : ('距上次接收 ' + (attitudeMetrics.ageMs | number:'1.0-0') + ' ms') }}
       {{ attitudeMetrics.stale ? '（暂无新数据，保持末次实测值）' : '' }}
     </div>
+    <div *ngIf="realPoseShown" class="attitude-metrics">{{ simService.realStatus$.value }}</div>
     <div class="sim-panel__step" [title]="stepText">{{ stepText }}</div>
     <div *ngIf="logs.length" class="sim-panel__logs">
       @for (log of logs; track $index) {
