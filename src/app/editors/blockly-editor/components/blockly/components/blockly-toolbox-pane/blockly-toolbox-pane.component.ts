@@ -8,7 +8,6 @@ import {
   BlocklyToolboxFacadeItem,
 } from '../../../../services/blockly.service';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
-import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
 import { MenuComponent } from '../../../../../../components/menu/menu.component';
 import { IMenuItem } from '../../../../../../configs/menu.config';
 import { ElectronService } from '../../../../../../services/electron.service';
@@ -29,15 +28,13 @@ interface ToolboxContextMenuAction {
 interface DeckGroup {
   key: string;
   name: string;
-  description: string;
   iconClass: string;
-  expanded: boolean;
   allTargetKey?: string | null;
 }
 
 @Component({
   selector: 'app-blockly-toolbox-pane',
-  imports: [CommonModule, TranslateModule, MenuComponent, NzToolTipModule],
+  imports: [CommonModule, TranslateModule, MenuComponent],
   templateUrl: './blockly-toolbox-pane.component.html',
   styleUrl: './blockly-toolbox-pane.component.scss',
 })
@@ -49,41 +46,29 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   items: BlocklyToolboxFacadeItem[] = [];
   selectedKey: string | null = null;
   searchQuery = '';
-  crazyflieBlockLanguage: 'en' | 'zh' = 'en';
-  languageSwitching = false;
-  crazyflieIntroExpanded = false;
-  activeDeckKey: string | null = null;
   showContextMenu = false;
   dragVisualActive = false;
   hoverSuppressed = false;
   deckGroups: DeckGroup[] = [
     {
       key: 'flow-v2',
-      name: 'Flow 定位甲板 v2',
-      description: '利用光流和下视测距辅助定位，可配合起飞、移动、等待等积木编写飞行流程。',
+      name: 'CRAZYFLIE_TOOLBOX.FLOW_V2.NAME',
       iconClass: 'fa-light fa-arrows-up-down-left-right',
-      expanded: false,
     },
     {
       key: 'multiranger',
-      name: '多向测距甲板',
-      description: '读取前、后、左、右和上方的距离，可用于障碍物判断与避障逻辑。',
+      name: 'CRAZYFLIE_TOOLBOX.MULTIRANGER.NAME',
       iconClass: 'fa-light fa-radar',
-      expanded: false,
     },
     {
       key: 'led-ring',
-      name: 'LED 灯环甲板',
-      description: '设置灯环颜色和灯效，或关闭灯环，用灯光反馈飞行状态。',
+      name: 'CRAZYFLIE_TOOLBOX.LED_RING.NAME',
       iconClass: 'fa-light fa-circle-dot',
-      expanded: false,
     },
     {
       key: 'buzzer',
-      name: '蜂鸣器甲板',
-      description: '控制蜂鸣器发出提示音，为起飞、到达或状态变化提供声音反馈。',
+      name: 'CRAZYFLIE_TOOLBOX.BUZZER.NAME',
       iconClass: 'fa-light fa-volume',
-      expanded: false,
     },
   ];
   contextMenuPosition = { x: 0, y: 0 };
@@ -146,7 +131,6 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   ) { }
 
   ngOnInit(): void {
-    this.crazyflieBlockLanguage = this.blocklyService.crazyflieBlockLanguage;
     combineLatest([
       this.blocklyService.toolboxFacadeItemsSubject,
       this.blocklyService.toolboxSelectedKeySubject,
@@ -158,12 +142,6 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
           this.items = items;
           this.refreshDeckBindings(items);
           this.selectedKey = selectedKey;
-          if (this.activeDeckKey) {
-            const activeDeck = this.deckGroups.find((deck) => deck.key === this.activeDeckKey);
-            if (activeDeck?.allTargetKey !== selectedKey) {
-              this.activeDeckKey = null;
-            }
-          }
           this.searchQuery = searchQuery;
           if (this.contextMenuTarget && !this.findItemByKey(this.contextMenuTarget.key, items)) {
             this.closeContextMenu();
@@ -217,24 +195,14 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     this.blocklyService.clickToolboxFacadeItem(item.key);
   }
 
-  onCrazyflieClick(item: BlocklyToolboxFacadeItem) {
-    this.crazyflieIntroExpanded = !this.crazyflieIntroExpanded;
-    this.activeDeckKey = null;
-    if (this.crazyflieIntroExpanded) {
-      this.blocklyService.selectToolboxFacadeItem(item.key);
-    } else {
-      this.blocklyService.clearToolboxSelection();
-    }
+  onFlightCategoryClick(item: BlocklyToolboxFacadeItem) {
+    if (this.shouldIgnoreCategoryClick()) return;
+    this.blocklyService.selectToolboxFacadeItem(item.key);
   }
 
   onToggleClick(item: BlocklyToolboxFacadeItem, event: MouseEvent) {
     event.stopPropagation();
     this.blocklyService.toggleToolboxFacadeItem(item.key);
-  }
-
-  onCrazyflieToggleClick(item: BlocklyToolboxFacadeItem, event: MouseEvent) {
-    event.stopPropagation();
-    this.onCrazyflieClick(item);
   }
 
   onToolboxItemContextMenu(item: BlocklyToolboxFacadeItem, event: MouseEvent) {
@@ -278,28 +246,6 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     this.libraryManagerRequested.emit();
   }
 
-  async toggleCrazyflieBlockLanguage(): Promise<void> {
-    if (this.languageSwitching) {
-      return;
-    }
-
-    this.languageSwitching = true;
-    try {
-      const saveResult = await this.projectService.save();
-      if (!saveResult.success) {
-        this.message.error(saveResult.error || '保存失败，语言未切换');
-        return;
-      }
-
-      const nextLanguage = this.crazyflieBlockLanguage === 'en' ? 'zh' : 'en';
-      this.blocklyService.setCrazyflieBlockLanguage(nextLanguage);
-      this.crazyflieBlockLanguage = nextLanguage;
-      await this.projectService.projectOpen(this.projectService.currentProjectPath, { reason: 'reload' });
-    } finally {
-      this.languageSwitching = false;
-    }
-  }
-
   get showDeckPanel(): boolean {
     return this.items.some((item) => String(item.name || '').toLowerCase().includes('crazyflie'));
   }
@@ -321,23 +267,13 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
   }
 
   onDeckRowClick(deckKey: string): void {
-    this.deckGroups = this.deckGroups.map((deck) =>
-      deck.key === deckKey ? { ...deck, expanded: !deck.expanded } : deck,
-    );
+    if (this.shouldIgnoreCategoryClick()) return;
     const deck = this.deckGroups.find((item) => item.key === deckKey);
     if (!deck?.allTargetKey) {
+      this.message.error(this.translate.instant('CRAZYFLIE_TOOLBOX.UNAVAILABLE'));
       return;
     }
 
-    const isAlreadySelected = this.activeDeckKey === deckKey || this.selectedKey === deck.allTargetKey;
-    if (isAlreadySelected) {
-      this.activeDeckKey = null;
-      this.blocklyService.clearToolboxSelection();
-      return;
-    }
-
-    this.activeDeckKey = deckKey;
-    this.blocklyService.clearToolboxSearch();
     this.blocklyService.selectToolboxFacadeItem(deck.allTargetKey);
   }
 

@@ -197,7 +197,7 @@ export function registerCrazyflieMotionBlocks(generator: Blockly.CodeGenerator, 
       type: spec.type, message0: chinese ? spec.zh : spec.en, args0: args,
       previousStatement: null, nextStatement: null, colour: CRAZYFLIE_FLIGHT_COLOUR,
       tooltip: chinese
-        ? '需定位甲板；先连接再起飞。机体坐标 X 向前、Y 向左、Z 向上；悬停不会关闭电机。'
+        ? '需定位模块；先连接再起飞。机体坐标 X 向前、Y 向左、Z 向上；悬停不会关闭电机。'
         : 'Requires positioning. Connect then take off. Body X forward, Y left, Z up. Hover does not turn off motors.',
     }]);
     generator.forBlock[spec.type] = (block, gen) => {

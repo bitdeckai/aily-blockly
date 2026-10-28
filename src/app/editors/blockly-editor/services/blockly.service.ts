@@ -91,7 +91,7 @@ const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string
   en: {
     cf_link_config: { message0: 'Set link URI %1 address %2', tooltip: 'Configure the radio URI and address' },
     cf_test_link: { message0: 'Check radio', tooltip: 'Check whether the Crazyradio is available' },
-    cf_crazyflie_link: { message0: 'Ensure connected', tooltip: 'Reuse the current aircraft connection, or connect before execution. Flight runs connect automatically.' },
+    cf_crazyflie_link: { message0: 'Connect', tooltip: 'Reuse the current aircraft connection, or connect before execution. Flight runs connect automatically.' },
     cf_test_crazyflie_link: { message0: 'Self-test', tooltip: 'Test the connection and motors without taking off; remove propellers first' },
     cf_detect_flow_v2: { message0: 'Detect Flow deck v2', tooltip: 'Check whether the Flow deck v2 is installed' },
     cf_detect_multiranger: { message0: 'Detect Multiranger deck', tooltip: 'Check whether the Multiranger deck is installed' },
@@ -133,10 +133,10 @@ const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string
   zh: {
     cf_link_config: { message0: '设置连接 URI %1 地址 %2', tooltip: '设置无线连接地址和编号' },
     cf_test_link: { message0: '检测无线收发器', tooltip: '检查 Crazyradio 无线收发器是否可用' },
-    cf_crazyflie_link: { message0: '确保连接', tooltip: '复用当前飞行器连接，未连接时先连接；飞行流程也会自动连接，不会重复连接。' },
+    cf_crazyflie_link: { message0: '连接', tooltip: '复用当前飞行器连接，未连接时先连接；飞行流程也会自动连接，不会重复连接。' },
     cf_test_crazyflie_link: { message0: '自检', tooltip: '测试连接与电机，不起飞；请先卸下螺旋桨' },
-    cf_detect_flow_v2: { message0: '探测 Flow 定位甲板 v2', tooltip: '检测是否安装 Flow 定位甲板 v2' },
-    cf_detect_multiranger: { message0: '探测多向测距甲板', tooltip: '检测是否安装多向测距甲板' },
+    cf_detect_flow_v2: { message0: '探测光流定位', tooltip: '检测是否安装光流定位模块' },
+    cf_detect_multiranger: { message0: '探测多向测距', tooltip: '检测是否安装多向测距模块' },
     cf_mr_get_distance: {
       message0: '读取多向测距 %1', tooltip: '读取指定方向的距离（米）',
       optionLabels: { 0: { front: '前方', back: '后方', left: '左侧', right: '右侧', up: '上方' } },
@@ -150,14 +150,14 @@ const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string
       optionLabels: { 0: { front: '前方', back: '后方', left: '左侧', right: '右侧', up: '上方' } },
     },
     cf_mr_log_all_distances: { message0: '打印所有方向测距', tooltip: '打印前后左右和上方的距离' },
-    cf_detect_led_ring: { message0: '探测 LED 灯环甲板', tooltip: '检测是否安装 LED 灯环甲板' },
+    cf_detect_led_ring: { message0: '探测 LED 灯环', tooltip: '检测是否安装 LED 灯环' },
     cf_led_ring_set_color: { message0: '设置灯环颜色 红 %1 绿 %2 蓝 %3', tooltip: '设置 LED 灯环颜色' },
     cf_led_ring_set_effect: {
       message0: '设置灯环效果 %1', tooltip: '选择 LED 灯环效果',
       optionLabels: { 0: { off: '关闭', solid: '常亮', fade: '渐变' } },
     },
     cf_led_ring_off: { message0: '关闭 LED 灯环', tooltip: '关闭 LED 灯环' },
-    cf_detect_buzzer: { message0: '探测蜂鸣器甲板', tooltip: '检测是否安装蜂鸣器甲板' },
+    cf_detect_buzzer: { message0: '探测蜂鸣器', tooltip: '检测是否安装蜂鸣器' },
     cf_buzzer_beep: { message0: '蜂鸣 持续 %1 毫秒 次数 %2', tooltip: '播放蜂鸣提示音' },
     cf_takeoff: { message0: '起飞 ▲', tooltip: '起飞' },
     cf_land: { message0: '降落 ▼', tooltip: '降落' },
@@ -181,8 +181,10 @@ export class BlocklyService {
   private readonly projectDocumentSchemaVersion = 3;
   private readonly sharedProcedureBlockPrefixes = ['procedures_'];
   private readonly toolboxSearchKey = BLOCKLY_TOOLBOX_SEARCH_KEY;
-  private readonly crazyflieBlockLanguageStorageKey = 'aily-crazyflie-block-language';
-  crazyflieBlockLanguage: CrazyflieBlockLanguage = 'en';
+  get crazyflieBlockLanguage(): CrazyflieBlockLanguage {
+    const language = this.translateService.currentLang || this.translateService.getDefaultLang() || 'en';
+    return language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  }
 
   private _workspace: Blockly.WorkspaceSvg | null = null;
   private workspaceReadySubject = new BehaviorSubject<Blockly.WorkspaceSvg | null>(null);
@@ -272,13 +274,6 @@ export class BlocklyService {
     private translateService: TranslateService,
     private electronService: ElectronService
   ) {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage.getItem(this.crazyflieBlockLanguageStorageKey) === 'zh') {
-        this.crazyflieBlockLanguage = 'zh';
-      }
-    } catch (_error) {
-      this.crazyflieBlockLanguage = 'en';
-    }
     (window as any).__ailyBlockDefinitionsMap = this.blockDefinitionsMap;
     (window as any).__ailyBlockTypeToLibMap = this.blockTypeToLibMap;
     this.loadLibraryFinishedLoadingSubject.pipe(
@@ -304,15 +299,6 @@ export class BlocklyService {
       filter((workspace): workspace is Blockly.WorkspaceSvg => !!workspace),
       take(1),
     ));
-  }
-
-  setCrazyflieBlockLanguage(language: CrazyflieBlockLanguage): void {
-    this.crazyflieBlockLanguage = language;
-    try {
-      window.localStorage.setItem(this.crazyflieBlockLanguageStorageKey, language);
-    } catch (_error) {
-      // Keep the language preference in memory for this session.
-    }
   }
 
   registerExternalToolboxHost(host: HTMLElement | null) {

@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "Basic examples",
+        "SELF_TEST": "Basic self-test (no flight)",
+        "SELF_TEST_DESCRIPTION": "Check the radio, connect and self-test, with waits between steps. A real self-test runs the motors.",
+        "HOVER": "Take off, hover and land",
+        "HOVER_DESCRIPTION": "Take off 0.3 m, hover for 3 seconds and land, with connection and landing waits.",
+        "BACK_AND_FORTH": "Back and forth",
+        "BACK_AND_FORTH_DESCRIPTION": "Move forward and back 0.3 m each, wait 1 second between moves, then land.",
+        "SQUARE": "Square path",
+        "SQUARE_DESCRIPTION": "Fly a square with 0.3 m sides, wait 1 second between moves, then land.",
+        "SELF_TEST_NOTICE": "Added to a new page without running. A real self-test spins the motors: remove the propellers first.",
+        "FLIGHT_NOTICE": "Added to a new page without running or changing the run mode. Simulate first; check positioning and clear the area before real flight.",
+        "BUSY": "Finish the current run before creating an example.",
+        "ERROR": "Could not add the example. Open a Crazyflie project and load the required blocks."
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "Roll",
+        "PITCH": "Pitch",
+        "YAW": "Yaw"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "The blocks for this expansion are not loaded.",
+        "SEARCH": "Search",
+        "FLIGHT_BLOCKS": "Aircraft blocks",
+        "INTRO": "Crazyflie is a programmable micro drone. Build tasks with flight, sensor and expansion deck blocks; select a category on the left to see its blocks.",
+        "DECKS": "Expansion decks",
+        "FLOW_V2": {
+            "NAME": "Flow deck v2",
+            "DESCRIPTION": "Optical flow and downward ranging assist positioning for takeoff, movement and waiting tasks."
+        },
+        "MULTIRANGER": {
+            "NAME": "Multiranger deck",
+            "DESCRIPTION": "Read front, back, left, right and upward distances for obstacle detection and avoidance."
+        },
+        "LED_RING": {
+            "NAME": "LED-ring deck",
+            "DESCRIPTION": "Set colors and effects or turn the ring off to provide visual flight feedback."
+        },
+        "BUZZER": {
+            "NAME": "Buzzer deck",
+            "DESCRIPTION": "Play notification tones for takeoff, arrival and other flight state changes."
+        }
+    },
     "MENU": {
         "MENU": "Menu",
         "PROJECT_NEW": "New Project",

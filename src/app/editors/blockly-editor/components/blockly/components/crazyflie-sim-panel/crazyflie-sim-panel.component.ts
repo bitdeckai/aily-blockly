@@ -1,5 +1,8 @@
 import { AfterViewInit, Component, ElementRef, NgZone, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { TranslateModule, TranslateService } from '@ngx-translate/core';
+import { NzDropDownModule } from 'ng-zorro-antd/dropdown';
+import { NzMenuModule } from 'ng-zorro-antd/menu';
 import {
   ACESFilmicToneMapping,
   AmbientLight,
@@ -35,6 +38,7 @@ import {
   Plane,
   PerspectiveCamera,
   PlaneGeometry,
+  PMREMGenerator,
   Path,
   QuadraticBezierCurve3,
   RepeatWrapping,
@@ -50,12 +54,15 @@ import {
   Vector2,
   Vector3,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from 'three';
 import * as Blockly from 'blockly';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Subscription } from 'rxjs';
 import { CrazyflieSimService } from '../../../../../../services/crazyflie-sim.service';
 import { getClassroomDeskLayout } from '../../../../../../services/crazyflie-classroom';
@@ -64,18 +71,19 @@ import { BlocklyService } from '../../../../services/blockly.service';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import { AttitudeReception, attitudeQuaternion, CRAZYFLIE_BODY_AXES } from '../../../../../../services/crazyflie-attitude';
 import { CrazyflieAttitudePreview } from '../../../../../../services/crazyflie-attitude-preview';
+import { CRAZYFLIE_EXAMPLES, CrazyflieExampleId, createCrazyflieExample } from '../../generators/crazyflie/examples';
 
 const CLASSROOM_WOOD_FINISHES = {
-  floor: { tint: '#eee5d3', opacity: 0.68, roughness: 0.88 },
+  floor: { tint: '#d4c2aa', opacity: 0.72, roughness: 0.88 },
   desk: { tint: '#efd0a0', opacity: 0.32, roughness: 0.74 },
   chair: { tint: '#b7c9bd', opacity: 0.82, roughness: 0.82 },
 } as const;
-type ClassroomWoodFinish = 'honey' | keyof typeof CLASSROOM_WOOD_FINISHES;
+type ClassroomWoodFinish = 'honey' | 'lectern' | keyof typeof CLASSROOM_WOOD_FINISHES;
 
 @Component({
   selector: 'app-crazyflie-sim-panel',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, TranslateModule, NzDropDownModule, NzMenuModule],
   templateUrl: './crazyflie-sim-panel.component.html',
   styleUrl: './crazyflie-sim-panel.component.scss',
 })
@@ -97,6 +105,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   detectedDeckLabels: string[] = [];
   axesVisible = true;
   selectedView = 'iso';
+  readonly flightExamples = CRAZYFLIE_EXAMPLES;
   attitudeMetrics: ReturnType<AttitudeReception['metrics']>;
   private attitudePreview: CrazyflieAttitudePreview | null = null;
   private attitudeViewport = { x: 0, y: 0, width: 0, height: 0 };
@@ -120,10 +129,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private deckMountGroup: Group | null = null;
   private detectedDeckTypes: CrazyflieDeckType[] = [];
   private readonly deckLabels: Record<CrazyflieDeckType, string> = {
-    'flow-v2': 'Flow v2',
-    multiranger: 'Multiranger',
-    'led-ring': 'LED-ring',
-    buzzer: 'Buzzer',
+    'flow-v2': 'CRAZYFLIE_TOOLBOX.FLOW_V2.NAME',
+    multiranger: 'CRAZYFLIE_TOOLBOX.MULTIRANGER.NAME',
+    'led-ring': 'CRAZYFLIE_TOOLBOX.LED_RING.NAME',
+    buzzer: 'CRAZYFLIE_TOOLBOX.BUZZER.NAME',
   };
   private readonly deckShellAssets: Partial<Record<CrazyflieDeckType, string>> = {};
   private readonly deckShellRoots = new Map<CrazyflieDeckType, { root: Object3D; url: string }>();
@@ -145,6 +154,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   private readonly classroomProtoAssetPromises = new Map<string, Promise<Group>>();
   private varnishedPineMaterialPromise: Promise<MeshStandardMaterial> | null = null;
   private readonly classroomWoodMaterialPromises = new Map<ClassroomWoodFinish, Promise<MeshStandardMaterial>>();
+  private classroomFurnitureEnvironment: WebGLRenderTarget | null = null;
   private readonly measureRaycaster = new Raycaster();
   private readonly measurePointer = new Vector2();
   private readonly measureFloor = new Plane(new Vector3(0, 1, 0), 0);
@@ -175,6 +185,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     private blocklyService: BlocklyService,
     private message: NzMessageService,
     private zone: NgZone,
+    private translate: TranslateService,
   ) {
     this.attitudeMetrics = connectionService.attitudeReception.metrics(performance.now());
   }
@@ -216,6 +227,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.resizeObserver = null;
     }
 
+    this.classroomFurnitureEnvironment?.dispose();
+    this.classroomFurnitureEnvironment = null;
     if (this.renderer) {
       this.renderer.dispose();
       this.renderer = null;
@@ -361,42 +374,38 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.measureStart = null;
   }
 
-  insertStarterFlow(): void {
+  insertExample(id: CrazyflieExampleId): void {
     if (this.running) {
-      this.message.error('请先结束当前流程再新建示例');
-      return;
-    }
-    const linkType = 'cf_crazyflie_link';
-    const takeoffType = 'cf_takeoff';
-    const landType = 'cf_land';
-    if (!Blockly.Blocks[linkType] || !Blockly.Blocks[takeoffType] || !Blockly.Blocks[landType]) {
-      this.message.error('Crazyflie 起飞/降落积木尚未加载，请先打开 Crazyflie 工程。');
+      this.message.error(this.translate.instant('CRAZYFLIE_EXAMPLES.BUSY'));
       return;
     }
 
-    this.blocklyService.createPage('Crazyflie 起飞降落示例');
-    const workspace: any = this.blocklyService.workspace;
     try {
-      const link = workspace.newBlock(linkType);
-      const takeoff = workspace.newBlock(takeoffType);
-      const land = workspace.newBlock(landType);
-      link.initSvg();
-      takeoff.initSvg();
-      land.initSvg();
-      if (!link.nextConnection || !takeoff.previousConnection || !takeoff.nextConnection || !land.previousConnection) {
-        throw new Error('积木连接口不可用');
+      const example = this.flightExamples.find(item => item.id === id);
+      if (!example) throw new Error(`Unknown Crazyflie example: ${id}`);
+      const workspace = this.blocklyService.workspace;
+      if (!workspace) throw new Error('Blockly workspace is not available');
+      const state = createCrazyflieExample(id);
+      const validationWorkspace = new Blockly.Workspace();
+      try {
+        Blockly.serialization.blocks.append(state, validationWorkspace);
+      } finally {
+        validationWorkspace.dispose();
       }
-      link.nextConnection.connect(takeoff.previousConnection);
-      takeoff.nextConnection.connect(land.previousConnection);
-      link.moveBy(80, 80);
-      link.render();
-      takeoff.render();
-      land.render();
-      workspace.centerOnBlock?.(link.id);
-      this.message.success('示例已插入新页面；默认仅模拟，不会自动起飞。');
+      this.blocklyService.createPage(this.translate.instant(example.titleKey));
+      const previousGroup = Blockly.Events.getGroup();
+      Blockly.Events.setGroup(true);
+      try {
+        const block = Blockly.serialization.blocks.append(state, workspace, { recordUndo: true });
+        workspace.centerOnBlock(block.id);
+      } finally {
+        Blockly.Events.setGroup(previousGroup);
+      }
+      this.message.warning(this.translate.instant(id === 'self-test'
+        ? 'CRAZYFLIE_EXAMPLES.SELF_TEST_NOTICE' : 'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE'));
     } catch (error) {
       console.error('插入 Crazyflie 示例失败:', error);
-      this.message.error('插入示例失败，请确认 Crazyflie 积木库已加载。');
+      this.message.error(this.translate.instant('CRAZYFLIE_EXAMPLES.ERROR'));
     }
   }
 
@@ -569,6 +578,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(width, height);
     this.renderer.shadowMap.enabled = false;
+    this.createClassroomFurnitureEnvironment();
     host.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -1258,6 +1268,15 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
           geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
           geometry.computeVertexNormals();
+          const flatNormals = geometry.getAttribute('normal').clone();
+          toCreasedNormals(geometry, Math.PI / 6);
+          const normals = geometry.getAttribute('normal');
+          // Keep the large horizontal panels flat instead of rounding them into their bevels.
+          for (let vertex = 0; vertex < normals.count; vertex += 1) {
+            if (Math.abs(flatNormals.getY(vertex)) > 0.99) {
+              normals.setXYZ(vertex, flatNormals.getX(vertex), flatNormals.getY(vertex), flatNormals.getZ(vertex));
+            }
+          }
           geometry.computeBoundingBox();
           geometry.computeBoundingSphere();
 
@@ -1290,7 +1309,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           }
           context.putImageData(colorPixels, 0, 0);
           lightMap.needsUpdate = true;
-          const material = new MeshStandardMaterial({ map: lightMap, roughnessMap, metalnessMap, normalMap, roughness: 0.7, metalness: 0.5 });
+          const material = new MeshPhysicalMaterial({
+            map: lightMap, roughnessMap, metalnessMap, normalMap,
+            normalScale: new Vector2(0.55, 0.55), roughness: 0.74, metalness: 0.75,
+            clearcoat: 0.18, clearcoatRoughness: 0.48,
+            envMap: this.classroomFurnitureEnvironment?.texture ?? null, envMapIntensity: 0.1,
+          });
           return { geometry, material };
         });
 
@@ -1407,10 +1431,11 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         if (!template.map) {
           throw new Error('Varnished pine material is missing its wood color texture');
         }
+        if (finish === 'lectern') return this.createClassroomFurnitureMaterial(template);
         const palette = CLASSROOM_WOOD_FINISHES[finish];
         const map = this.createLightClassroomTexture(template.map, palette.tint, palette.opacity);
         map.repeat.copy(template.map.repeat);
-        const material = template.clone();
+        const material = finish === 'floor' ? template.clone() : this.createClassroomFurnitureMaterial(template);
         material.map = map;
         material.roughness = palette.roughness;
         return material;
@@ -1765,7 +1790,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = '#f5e6a0';
     context.font = 'bold 64px "Microsoft YaHei", sans-serif';
-    context.fillText('认识飞行器与扩展甲板  |  Crazyflie & Decks', 65, 100);
+    context.fillText('认识飞行器与扩展模块  |  Crazyflie & Decks', 65, 100);
     context.strokeStyle = '#8aafa2';
     context.lineWidth = 2;
     context.beginPath();
@@ -1774,7 +1799,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     context.stroke();
 
     const exhibits = [
-      { file: 'crazyflie-2-1-plus.jpg', title: 'Crazyflie 2.1+', lines: ['29 g 掌上开源飞行开发平台', '支持无线通信与自动识别扩展甲板'], x: 65, y: 180, imageSize: 530, textX: 65, textY: 780 },
+      { file: 'crazyflie-2-1-plus.jpg', title: 'Crazyflie 2.1+', lines: ['29 g 掌上开源飞行开发平台', '支持无线通信与自动识别扩展模块'], x: 65, y: 180, imageSize: 530, textX: 65, textY: 780 },
       { file: 'flow-v2.jpg', title: 'Flow deck v2', lines: ['光流测量水平位移', '向下 ToF 测量离地距离'], x: 780, y: 190, imageSize: 235, textX: 1050, textY: 240 },
       { file: 'multiranger.jpg', title: 'Multiranger deck', lines: ['测量前、后、左、右、上', '五个方向的物体距离'], x: 1570, y: 190, imageSize: 235, textX: 1840, textY: 240 },
       { file: 'led-ring.jpg', title: 'LED-ring deck', lines: ['12 颗朝下 RGB 彩灯', '可编程颜色与灯光效果'], x: 780, y: 540, imageSize: 235, textX: 1050, textY: 590 },
@@ -2267,19 +2292,45 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return lights;
   }
 
+  private createClassroomFurnitureEnvironment(): void {
+    if (this.classroomFurnitureEnvironment) return;
+    if (!this.renderer) throw new Error('Furniture reflections require an initialized renderer');
+    const generator = new PMREMGenerator(this.renderer);
+    const room = new RoomEnvironment();
+    try {
+      this.classroomFurnitureEnvironment = generator.fromScene(room, 0.08, 0.1, 100, { size: 128 });
+    } finally {
+      room.dispose();
+      generator.dispose();
+    }
+  }
+
+  private createClassroomFurnitureMaterial(wood: MeshStandardMaterial): MeshPhysicalMaterial {
+    return new MeshPhysicalMaterial({
+      color: wood.color, map: wood.map, roughness: wood.roughness, roughnessMap: wood.roughnessMap,
+      normalMap: wood.normalMap, normalScale: wood.normalScale, aoMap: wood.aoMap,
+      aoMapIntensity: wood.aoMapIntensity, side: wood.side,
+      clearcoat: 0.18, clearcoatRoughness: 0.48,
+      envMap: this.classroomFurnitureEnvironment?.texture ?? null, envMapIntensity: 0.1,
+    });
+  }
+
   private createClassroomChair(): Group {
     const chair = new Group();
     chair.name = 'School chair';
     const wood = new MeshStandardMaterial({
       color: CLASSROOM_WOOD_FINISHES.chair.tint, roughness: CLASSROOM_WOOD_FINISHES.chair.roughness,
     });
-    const steel = new MeshStandardMaterial({ color: '#b9c7cd', roughness: 0.32, metalness: 0.65 });
+    const steel = new MeshStandardMaterial({
+      color: '#b9c7cd', roughness: 0.32, metalness: 0.65,
+      envMap: this.classroomFurnitureEnvironment?.texture ?? null, envMapIntensity: 0.35,
+    });
     const rubber = new MeshStandardMaterial({ color: '#454b4e', roughness: 0.95 });
-    const seat = new Mesh(new RoundedBoxGeometry(0.32, 0.032, 0.33, 2, 0.012), wood);
+    const seat = new Mesh(new RoundedBoxGeometry(0.32, 0.032, 0.33, 3, 0.012), wood);
     seat.name = 'Chair wood seat';
     seat.position.y = 0.45;
     chair.add(seat);
-    const back = new Mesh(new RoundedBoxGeometry(0.026, 0.19, 0.31, 2, 0.01), wood);
+    const back = new Mesh(new RoundedBoxGeometry(0.026, 0.19, 0.31, 3, 0.01), wood);
     back.name = 'Chair wood back';
     back.position.set(0.154, 0.65, 0);
     back.rotation.z = -0.08;
@@ -2289,7 +2340,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       for (const sz of [-1, 1]) {
         const foot = new Vector3(sx * 0.14, 0.032, sz * 0.135);
         const top = new Vector3(sx * 0.115, 0.434, sz * 0.12);
-        const leg = new Mesh(new CylinderGeometry(0.011, 0.012, foot.distanceTo(top), 10), steel);
+        const leg = new Mesh(new CylinderGeometry(0.011, 0.012, foot.distanceTo(top), 16), steel);
         leg.name = 'Chair steel leg';
         leg.position.copy(foot).add(top).multiplyScalar(0.5);
         leg.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), top.sub(foot).normalize());
@@ -2315,13 +2366,20 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     framePath.add(new QuadraticBezierCurve3(
       new Vector3(0.165, 0.765, 0.125), new Vector3(0.165, 0.765, 0.17), new Vector3(0.16, 0.72, 0.17)));
     framePath.add(new LineCurve3(new Vector3(0.16, 0.72, 0.17), new Vector3(0.13, 0.43, 0.17)));
-    const frame = new Mesh(new TubeGeometry(framePath, 32, 0.012, 8, false), steel);
+    const frame = new Mesh(new TubeGeometry(framePath, 40, 0.012, 12, false), steel);
     frame.name = 'Chair bent steel back frame';
     chair.add(frame);
     const plate = new Mesh(new RoundedBoxGeometry(0.003, 0.026, 0.064, 1, 0.001), steel);
     plate.name = 'Chair nameplate';
     plate.position.set(0.139, 0.66, 0);
     chair.add(plate);
+    for (const side of [-1, 1]) {
+      const rivet = new Mesh(new CylinderGeometry(0.004, 0.004, 0.003, 8), steel);
+      rivet.name = 'Chair back fastener';
+      rivet.rotation.z = Math.PI / 2;
+      rivet.position.set(0.139, 0.65, side * 0.115);
+      chair.add(rivet);
+    }
     return chair;
   }
 
@@ -2345,7 +2403,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     front.position.set(0.19, 0.643, 0);
     drawer.add(front);
     const handle = new Mesh(new RoundedBoxGeometry(0.018, 0.012, 0.095, 2, 0.004),
-      new MeshStandardMaterial({ color: '#a8b6bd', roughness: 0.35, metalness: 0.65 }));
+      new MeshStandardMaterial({
+        color: '#a8b6bd', roughness: 0.35, metalness: 0.65,
+        envMap: this.classroomFurnitureEnvironment?.texture ?? null, envMapIntensity: 0.35,
+      }));
     handle.name = 'Drawer handle';
     handle.position.set(0.208, 0.643, 0);
     drawer.add(handle);
@@ -2363,6 +2424,16 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     front.position.set(0, 0.51, 0.18);
     panels.add(front);
     for (const side of [-1, 1]) {
+      const stile = new Mesh(new RoundedBoxGeometry(0.022, 0.79, 0.012, 2, 0.004), wood);
+      stile.name = 'Lectern raised panel stile';
+      stile.position.set(side * 0.195, 0.51, 0.201);
+      panels.add(stile);
+      const rail = new Mesh(new RoundedBoxGeometry(0.39, 0.022, 0.012, 2, 0.004), wood);
+      rail.name = 'Lectern raised panel rail';
+      rail.position.set(0, 0.51 + side * 0.384, 0.201);
+      panels.add(rail);
+    }
+    for (const side of [-1, 1]) {
       const panel = new Mesh(new RoundedBoxGeometry(0.035, 0.9, 0.36, 2, 0.008), wood);
       panel.position.set(side * 0.21, 0.51, 0);
       panels.add(panel);
@@ -2374,6 +2445,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     surface.position.set(0, 1.08, -0.035);
     surface.rotation.x = -0.22;
     panels.add(surface);
+    const shelf = new Mesh(new RoundedBoxGeometry(0.38, 0.025, 0.31, 2, 0.005), wood);
+    shelf.name = 'Lectern interior shelf';
+    shelf.position.set(0, 0.47, 0);
+    panels.add(shelf);
     const base = new Mesh(new RoundedBoxGeometry(0.58, 0.09, 0.46, 2, 0.015), edge);
     base.position.y = 0.045;
     const stop = new Mesh(new RoundedBoxGeometry(0.58, 0.05, 0.025, 2, 0.008), edge);
@@ -2614,6 +2689,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         new MeshStandardMaterial({ color: '#e6d2b8', roughness: 0.86, metalness: 0.01 }),
       );
       teachingStage.position.set(-room.width / 2 + 0.95, 0.045, 0);
+      const stageSurfaceY = teachingStage.position.y + teachingStage.geometry.parameters.height / 2;
       group.add(teachingStage);
       this.applyVarnishedPineFinish(teachingStage);
 
@@ -2714,7 +2790,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
       const teacherDesk = new Group();
       teacherDesk.name = 'Classroom teacher desk';
-      teacherDesk.position.set(-room.width / 2 + 1.55, 0, -0.55);
+      teacherDesk.position.set(-room.width / 2 + 1.55, stageSurfaceY, -0.55);
       teacherDesk.rotation.y = Math.PI / 2;
       const teacherDeskFallback = new Mesh(
         new BoxGeometry(1.4, 0.74, 0.62),
@@ -2775,12 +2851,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       }
 
       const podiumGroup = this.createClassroomLectern();
-      podiumGroup.position.set(-room.width / 2 + 1.36, 0, 1.02);
+      podiumGroup.position.set(-room.width / 2 + 1.36, stageSurfaceY, 1.02);
       podiumGroup.rotation.y = Math.PI / 2;
       group.add(podiumGroup);
       const lecternPanels = podiumGroup.getObjectByName('Lectern wood panels');
       if (lecternPanels) {
-        this.applyVarnishedPineFinish(lecternPanels);
+        this.applyVarnishedPineFinish(lecternPanels, 'lectern');
       }
 
       const wallClock = new Mesh(
@@ -2911,7 +2987,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       const deskSurfaceY = 0.71001;
       const helipadBase = new Mesh(
         new BoxGeometry(0.3, 0.024, 0.3),
-        new MeshStandardMaterial({ color: '#7896a6', roughness: 0.82, metalness: 0.08 }),
+        new MeshStandardMaterial({ color: '#ad5b2b', roughness: 0.82, metalness: 0.08 }),
       );
       helipadBase.name = 'Classroom desk helipad';
       helipadBase.position.set(helipadX, deskSurfaceY + 0.012, helipadZ);
@@ -2919,19 +2995,19 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
       const helipadDeckPlate = new Mesh(
         new BoxGeometry(0.284, 0.008, 0.284),
-        new MeshStandardMaterial({ color: '#edf4f7', roughness: 0.72, metalness: 0.02 }),
+        new MeshStandardMaterial({ color: '#f6c76a', roughness: 0.72, metalness: 0.02 }),
       );
       helipadDeckPlate.position.set(helipadX, deskSurfaceY + 0.028, helipadZ);
       group.add(helipadDeckPlate);
 
       const helipadTop = new Mesh(
         new CylinderGeometry(0.126, 0.126, 0.006, 48),
-        new MeshStandardMaterial({ color: '#b9dfed', roughness: 0.78, metalness: 0.08 }),
+        new MeshStandardMaterial({ color: '#ee923a', roughness: 0.78, metalness: 0.08 }),
       );
       helipadTop.position.set(helipadX, deskSurfaceY + 0.035, helipadZ);
       group.add(helipadTop);
 
-      const safetyDashMaterial = new MeshStandardMaterial({ color: '#287598', roughness: 0.64, metalness: 0.04 });
+      const safetyDashMaterial = new MeshStandardMaterial({ color: '#203a46', roughness: 0.64, metalness: 0.04 });
       const safetyDashCount = 16;
       for (let dashIndex = 0; dashIndex < safetyDashCount; dashIndex += 1) {
         const angle = (dashIndex / safetyDashCount) * Math.PI * 2;
@@ -2942,7 +3018,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         group.add(dash);
       }
 
-      const hMarkMaterial = new MeshStandardMaterial({ color: '#287598', roughness: 0.74, metalness: 0.01 });
+      const hMarkMaterial = new MeshStandardMaterial({ color: '#203a46', roughness: 0.74, metalness: 0.01 });
       const hBarLeft = new Mesh(new BoxGeometry(0.014, 0.004, 0.095), hMarkMaterial);
       hBarLeft.position.set(helipadX - 0.034, deskSurfaceY + 0.040, helipadZ);
       group.add(hBarLeft);
@@ -2997,7 +3073,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           }
           if (!node.userData?.sharedClassroomTextures) {
             Object.values(material).forEach((value: any) => {
-              if (value?.isTexture) {
+              if (value?.isTexture && value !== this.classroomFurnitureEnvironment?.texture) {
                 value.dispose();
               }
             });

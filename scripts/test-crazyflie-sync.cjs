@@ -26,6 +26,7 @@ function load(filename) {
       if (name === '@angular/core') return {
         Injectable: () => type => type, Component: () => type => type,
         HostListener: () => () => {}, ViewChild: () => () => {},
+        HostBinding: () => () => {}, Output: () => () => {}, EventEmitter: class { emit() {} },
         ChangeDetectionStrategy: { OnPush: 0 },
       };
       if (['three', 'rxjs', 'blockly', 'blockly/blocks', 'blockly/python'].includes(name)) return require(name);
@@ -172,7 +173,7 @@ function toolboxLoader() {
   Object.defineProperty(loader, 'workspace', { value: null, writable: true });
   let updates = 0;
   Object.assign(loader, {
-    crazyflieBlockLanguage: 'zh', toolbox: { contents: [] },
+    translateService: { currentLang: 'zh_cn' }, toolbox: { contents: [] },
     findToolboxItemIndex: () => -1, ensureToolboxItemIds() {}, applyToolboxSortOrderToContents() {},
     rebuildToolboxFacade() {}, syncToolboxFacadeWithWorkspace() {},
     workspace: {
@@ -213,15 +214,167 @@ test('refreshing basic categories registers existing motion entries before any w
     ['cf_test_link', 'cf_scan_links', 'cf_radio_config']);
 });
 
+test('Crazyflie block language follows Settings and ignores the retired independent preference', () => {
+  const { loader } = toolboxLoader();
+  const oldStorage = bridgeWindow.localStorage;
+  bridgeWindow.localStorage = { getItem() { throw new Error('independent block language must not be read'); } };
+  try {
+    for (const [locale, expected] of [['zh_cn', 'zh'], ['zh_hk', 'zh'], ['zh-CN', 'zh'], ['en', 'en'], ['de', 'en']]) {
+      loader.translateService.currentLang = locale;
+      assert.equal(loader.crazyflieBlockLanguage, expected);
+    }
+    loader.translateService.currentLang = undefined;
+    loader.translateService.getDefaultLang = () => 'zh_cn';
+    assert.equal(loader.crazyflieBlockLanguage, 'zh');
+    loader.translateService.getDefaultLang = () => 'en';
+    assert.equal(loader.crazyflieBlockLanguage, 'en');
+    assert.equal(loader.setCrazyflieBlockLanguage, undefined);
+  } finally { bridgeWindow.localStorage = oldStorage; }
+});
+
+test('toolbox has no separate language control and its deck labels use app translations', () => {
+  const pane = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
+    'components', 'blockly-toolbox-pane');
+  const html = fs.readFileSync(path.join(pane, 'blockly-toolbox-pane.component.html'), 'utf8');
+  const source = fs.readFileSync(path.join(pane, 'blockly-toolbox-pane.component.ts'), 'utf8');
+  const service = fs.readFileSync(path.join(root, 'src', 'app', 'editors', 'blockly-editor',
+    'services', 'blockly.service.ts'), 'utf8');
+  assert.doesNotMatch(html + source, /deck-language-toggle|toggleCrazyflieBlockLanguage|languageSwitching/);
+  assert.doesNotMatch(service, /aily-crazyflie-block-language|setCrazyflieBlockLanguage/);
+  assert.match(html, /deck\.name \| translate/);
+  assert.doesNotMatch(html + source, /crazyflieIntroExpanded|deck\.expanded|deck\.description|onCrazyflieToggleClick/);
+  assert.doesNotMatch(html, /crazyflie-intro|deck-row__content|deck-row__chevron/);
+  assert.match(html, /\$implicit: cf, flat: true/);
+  assert.match(html, /item\.isCollapsible && !flat/);
+  const keys = [...new Set([...(html + source).matchAll(/'(CRAZYFLIE_TOOLBOX\.[A-Z0-9_.]+)'/g)].map(match => match[1]))];
+  assert.ok(keys.length >= 6);
+  const languages = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', 'i18n.json'), 'utf8'));
+  for (const { code: lang } of languages) {
+    const data = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', lang, `${lang}.json`), 'utf8'));
+    for (const key of keys) {
+      const value = key.split('.').reduce((value, part) => value?.[part], data);
+      assert.equal(typeof value, 'string', `${lang}: ${key}`);
+      assert.ok(value.trim().length > 0);
+    }
+    if (lang.startsWith('zh')) {
+      const labels = data.CRAZYFLIE_TOOLBOX;
+      assert.equal(labels.FLOW_V2.NAME, '光流定位');
+      assert.equal(labels.DECKS, lang === 'zh_cn' ? '扩展' : '擴展');
+      assert.equal(labels.MULTIRANGER.NAME, lang === 'zh_cn' ? '多向测距' : '多向測距');
+      assert.equal(labels.LED_RING.NAME, lang === 'zh_cn' ? 'LED 灯环' : 'LED 燈環');
+      assert.equal(labels.BUZZER.NAME, lang === 'zh_cn' ? '蜂鸣器' : '蜂鳴器');
+      assert.doesNotMatch(JSON.stringify(labels), /甲板/);
+    }
+  }
+});
+
+test('Settings broadcasts only after its language change completes', async () => {
+  const { SettingsComponent } = load(path.join(root, 'src', 'app', 'windows', 'settings', 'settings.component.ts'));
+  const oldIpc = bridgeWindow.ipcRenderer;
+  let finish;
+  const events = [];
+  bridgeWindow.ipcRenderer = { send: (...args) => events.push(plain(args)) };
+  const settings = Object.create(SettingsComponent.prototype);
+  settings.translationService = { setLanguage: code => {
+    assert.equal(code, 'en');
+    return new Promise(resolve => { finish = resolve; });
+  } };
+  try {
+    const pending = settings.selectLang({ code: 'en' });
+    assert.equal(events.length, 0);
+    finish();
+    await pending;
+    assert.deepEqual(events, [['setting-changed', { action: 'language-changed', data: 'en' }]]);
+  } finally { bridgeWindow.ipcRenderer = oldIpc; }
+});
+
+test('Settings language reload waits for translation and saved workspace, and never reloads a failed save', async () => {
+  const { MainWindowComponent } = load(path.join(root, 'src', 'app', 'main-window', 'main-window.component.ts'));
+  const { Subject } = require('rxjs');
+  const oldIpc = bridgeWindow.ipcRenderer;
+  for (const saveSucceeds of [true, false]) {
+    const component = Object.create(MainWindowComponent.prototype);
+    const events = [], errors = [];
+    let handler, finishLanguage, finishSave;
+    bridgeWindow.ipcRenderer = { on: (channel, callback) => {
+      assert.equal(channel, 'setting-changed'); handler = callback;
+    } };
+    Object.assign(component, {
+      uiService: { init() {}, updateFooterState() {} },
+      updateService: { init() {} }, npmService: { init() {} }, cd: { detectChanges() {} },
+      router: { url: '/main/blockly-editor?path=test', events: new Subject() },
+      onboardingService: { show$: new Subject(), config$: new Subject() },
+      configService: { load: async () => { events.push('config'); } },
+      translate: { instant: key => key },
+      translationService: { setLanguage: code => {
+        events.push(`language:${code}`);
+        return new Promise(resolve => { finishLanguage = resolve; });
+      } },
+      projectService: {
+        currentProjectPath: 'test-project', init() {},
+        save: () => { events.push('save'); return new Promise(resolve => { finishSave = resolve; }); },
+        projectOpen: async (target, options) => {
+          assert.equal(target, 'test-project'); assert.equal(options.reason, 'reload'); events.push('reload');
+        },
+      },
+      message: { error: text => errors.push(text) },
+    });
+    try {
+      component.ngOnInit();
+      const pending = handler({}, { action: 'language-changed', data: 'en' });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(events, ['config', 'language:en']);
+      finishLanguage();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(events, ['config', 'language:en', 'save']);
+      finishSave({ success: saveSucceeds, error: 'test save failed' });
+      await pending;
+      assert.equal(events.includes('reload'), saveSucceeds);
+      assert.deepEqual(errors, saveSucceeds ? [] : ['test save failed']);
+    } finally { bridgeWindow.ipcRenderer = oldIpc; }
+  }
+});
+
 test('flight and radio categories are separated from basic blocks with a themed accessible divider', () => {
   const pane = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
     'components', 'blockly-toolbox-pane');
   const html = fs.readFileSync(path.join(pane, 'blockly-toolbox-pane.component.html'), 'utf8');
   const style = fs.readFileSync(path.join(pane, 'blockly-toolbox-pane.component.scss'), 'utf8');
   assert.match(html, /class="flight-toolbox-divider" role="separator"/);
-  assert.ok(html.indexOf('flight-toolbox-divider') < html.indexOf('class="deck-crazyflie"'));
-  assert.ok(html.indexOf('crazyradioRootItem') > html.indexOf('class="deck-crazyflie"'));
+  assert.ok(html.indexOf('flight-toolbox-divider') < html.indexOf('crazyflieRootItem as cf'));
+  assert.ok(html.indexOf('crazyradioRootItem') > html.indexOf('crazyflieRootItem as cf'));
   assert.match(style, /\.flight-toolbox-divider\s*\{[^}]*border-top: 1px solid var\(--aily-border-input\)/);
+});
+
+test('flat aircraft and module rows select normal flyouts without expanding descriptions', () => {
+  const { BlocklyToolboxPaneComponent } = load(path.join(root, 'src', 'app', 'editors',
+    'blockly-editor', 'components', 'blockly', 'components', 'blockly-toolbox-pane',
+    'blockly-toolbox-pane.component.ts'));
+  const selected = [], errors = [];
+  const pane = new BlocklyToolboxPaneComponent({ selectToolboxFacadeItem: key => selected.push(key) },
+    {}, {}, {}, {}, {}, {}, { error: text => errors.push(text) }, { instant: key => key }, {});
+  const child = (key, name) => ({ key, name, level: 1, selectable: true, children: [] });
+  const aircraft = { key: 'cf', name: 'Crazyflie', level: 0, selectable: true, isCollapsible: true,
+    children: [child('flow', 'Flow deck v2'), child('mr', 'Multiranger deck'),
+      child('led', 'LED-ring deck'), child('sound', 'Buzzer deck')] };
+  pane.items = [child('variables', 'Variables'), aircraft];
+  pane.refreshDeckBindings(pane.items);
+  pane.onFlightCategoryClick(aircraft);
+  for (const deck of pane.deckGroups) {
+    pane.onDeckRowClick(deck.key);
+    pane.onDeckRowClick(deck.key);
+    assert.equal('expanded' in deck, false);
+    assert.equal('description' in deck, false);
+  }
+  assert.deepEqual(selected, ['cf', 'flow', 'flow', 'mr', 'mr', 'led', 'led', 'sound', 'sound']);
+  pane.dragSorting = true;
+  pane.onFlightCategoryClick(aircraft);
+  pane.onDeckRowClick('flow-v2');
+  assert.equal(selected.length, 9, 'a completed drag must not open a category');
+  pane.dragSorting = false;
+  pane.deckGroups[0].allTargetKey = null;
+  pane.onDeckRowClick('flow-v2');
+  assert.deepEqual(errors, ['CRAZYFLIE_TOOLBOX.UNAVAILABLE']);
 });
 
 test('removing the legacy library retains built-in Crazyradio definitions and generators', () => {
@@ -247,13 +400,23 @@ test('legacy flight blocks use concise bilingual labels and the motion palette w
   const original = JSON.stringify(definitions);
   const Blockly = require('blockly');
   for (const [language, labels] of [
-    ['zh', ['确保连接', '检测无线收发器', '自检']],
-    ['en', ['Ensure connected', 'Check radio', 'Self-test']],
+    ['zh', ['连接', '检测无线收发器', '自检']],
+    ['en', ['Connect', 'Check radio', 'Self-test']],
   ]) {
-    loader.crazyflieBlockLanguage = language;
+    loader.translateService.currentLang = language;
     const translated = loader.applyCrazyflieBlockLanguage(definitions);
     for (const [index, type] of ['cf_crazyflie_link', 'cf_test_link', 'cf_test_crazyflie_link'].entries()) {
       assert.equal(translated.find(block => block.type === type).message0, labels[index]);
+    }
+    if (language === 'zh') {
+      for (const [type, message] of [
+        ['cf_detect_flow_v2', '探测光流定位'], ['cf_detect_multiranger', '探测多向测距'],
+        ['cf_detect_led_ring', '探测 LED 灯环'], ['cf_detect_buzzer', '探测蜂鸣器'],
+      ]) {
+        const definition = translated.find(block => block.type === type);
+        assert.equal(definition.message0, message);
+        assert.doesNotMatch(definition.tooltip, /甲板/);
+      }
     }
     Blockly.defineBlocksWithJsonArray(translated);
     load(path.join(generators, 'radio-blocks.ts')).registerCrazyradioBlocks(
@@ -271,6 +434,42 @@ test('legacy flight blocks use concise bilingual labels and the motion palette w
     } finally { workspace.dispose(); }
   }
   assert.equal(JSON.stringify(definitions), original, 'do not rewrite installed project definitions');
+});
+
+test('Settings language changes preserve motion fields, connections, IDs and generated Python', () => {
+  const { loader } = toolboxLoader();
+  const Blockly = require('blockly');
+  const { crazyflieGenerator } = load(path.join(generators, 'basic-blocks.ts'));
+  const radio = load(path.join(generators, 'radio-blocks.ts'));
+  const saved = { blocks: { languageVersion: 0, blocks: [{
+    type: 'cf_radio_config', id: 'radio', fields: { RADIO: 1, CHANNEL: 42, RATE: '1M', ADDRESS: 'ABCDEF1234' },
+    next: { block: {
+      type: 'cf_move_at_speed', id: 'move', fields: { DIRECTION: 'right' },
+      inputs: {
+        DISTANCE: { shadow: { type: 'math_number', fields: { NUM: 0.6 } } },
+        SPEED: { shadow: { type: 'math_number', fields: { NUM: 0.25 } } },
+      },
+    } },
+  }] } };
+  let python;
+  for (const locale of ['zh_cn', 'en', 'zh_hk', 'en']) {
+    loader.translateService.currentLang = locale;
+    const chinese = loader.crazyflieBlockLanguage === 'zh';
+    radio.registerCrazyradioBlocks(crazyflieGenerator, chinese);
+    motion.registerCrazyflieMotionBlocks(crazyflieGenerator, chinese);
+    const workspace = new Blockly.Workspace();
+    try {
+      Blockly.serialization.workspaces.load(saved, workspace);
+      const code = crazyflieGenerator.workspaceToCode(workspace);
+      if (python === undefined) python = code;
+      assert.equal(code, python, `${locale}: language must not change flight instructions`);
+      const move = workspace.getBlockById('move');
+      assert.equal(move.getFieldValue('DIRECTION'), 'right');
+      assert.equal(move.getInputTargetBlock('DISTANCE').getFieldValue('NUM'), 0.6);
+      assert.equal(move.getInputTargetBlock('SPEED').getFieldValue('NUM'), 0.25);
+      assert.equal(workspace.getBlockById('radio').getNextBlock().id, 'move');
+    } finally { workspace.dispose(); }
+  }
 });
 
 test('Crazyflie hides duplicate generic buttons and routes menu/F6 run through the selected mode', async () => {

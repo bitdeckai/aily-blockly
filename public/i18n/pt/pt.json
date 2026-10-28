@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "Exemplos básicos",
+        "SELF_TEST": "Autoteste (sem voo)",
+        "SELF_TEST_DESCRIPTION": "Verificar rádio, conectar e testar, com pausas. O teste real aciona os motores.",
+        "HOVER": "Decolar, pairar e pousar",
+        "HOVER_DESCRIPTION": "Subir 0,3 m, pairar por 3 segundos e pousar, com pausas.",
+        "BACK_AND_FORTH": "Ida e volta",
+        "BACK_AND_FORTH_DESCRIPTION": "Avançar e recuar 0,3 m, esperar 1 segundo entre movimentos e pousar.",
+        "SQUARE": "Trajetória quadrada",
+        "SQUARE_DESCRIPTION": "Voar um quadrado de 0,3 m por lado, esperar 1 segundo entre movimentos e pousar.",
+        "SELF_TEST_NOTICE": "Adicionado em nova página sem executar. O teste real gira os motores: remova as hélices primeiro.",
+        "FLIGHT_NOTICE": "Adicionado sem executar nem alterar o modo. Simule primeiro; verifique o posicionamento e libere a área antes do voo real.",
+        "BUSY": "Termine a execução atual antes de criar um exemplo.",
+        "ERROR": "Não foi possível adicionar o exemplo. Abra um projeto Crazyflie e carregue os blocos necessários."
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "Rolagem",
+        "PITCH": "Arfagem",
+        "YAW": "Guinada"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "Os blocos desta expansão não estão carregados.",
+        "SEARCH": "Pesquisar",
+        "FLIGHT_BLOCKS": "Blocos de voo",
+        "INTRO": "Crazyflie é um microdrone programável. Crie tarefas com blocos de voo, sensores e módulos de expansão; selecione uma categoria à esquerda.",
+        "DECKS": "Módulos de expansão",
+        "FLOW_V2": {
+            "NAME": "Módulo Flow v2",
+            "DESCRIPTION": "O fluxo óptico e a medição de distância inferior auxiliam o posicionamento na descolagem, no movimento e na espera."
+        },
+        "MULTIRANGER": {
+            "NAME": "Módulo Multiranger",
+            "DESCRIPTION": "Lê distâncias à frente, atrás, à esquerda, à direita e acima para detetar obstáculos."
+        },
+        "LED_RING": {
+            "NAME": "Módulo de anel LED",
+            "DESCRIPTION": "Define cores e efeitos ou desliga o anel para indicar o estado do voo."
+        },
+        "BUZZER": {
+            "NAME": "Módulo de buzina",
+            "DESCRIPTION": "Emite sinais sonoros na descolagem, na chegada e noutras mudanças de estado."
+        }
+    },
     "MENU": {
         "MENU": "Menu",
         "PROJECT_NEW": "Novo projeto",

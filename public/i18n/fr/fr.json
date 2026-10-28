@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "Exemples de base",
+        "SELF_TEST": "Autotest (sans vol)",
+        "SELF_TEST_DESCRIPTION": "Vérifier la radio, connecter et tester, avec des pauses. Le test réel active les moteurs.",
+        "HOVER": "Décoller, stationner et atterrir",
+        "HOVER_DESCRIPTION": "Monter de 0,3 m, stationner 3 secondes et atterrir, avec des pauses.",
+        "BACK_AND_FORTH": "Aller-retour",
+        "BACK_AND_FORTH_DESCRIPTION": "Avancer et reculer de 0,3 m, attendre 1 seconde entre les mouvements et atterrir.",
+        "SQUARE": "Trajectoire carrée",
+        "SQUARE_DESCRIPTION": "Voler un carré de 0,3 m de côté, attendre 1 seconde entre les mouvements et atterrir.",
+        "SELF_TEST_NOTICE": "Ajouté sur une nouvelle page sans exécution. Le test réel fait tourner les moteurs : retirez d'abord les hélices.",
+        "FLIGHT_NOTICE": "Ajouté sans exécution ni changement de mode. Simulez d'abord ; vérifiez le positionnement et dégagez la zone avant le vol réel.",
+        "BUSY": "Terminez l'exécution en cours avant de créer un exemple.",
+        "ERROR": "Impossible d'ajouter l'exemple. Ouvrez un projet Crazyflie et chargez les blocs nécessaires."
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "Roulis",
+        "PITCH": "Tangage",
+        "YAW": "Lacet"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "Les blocs de cette extension ne sont pas chargés.",
+        "SEARCH": "Rechercher",
+        "FLIGHT_BLOCKS": "Blocs de vol",
+        "INTRO": "Crazyflie est un microdrone programmable. Créez des tâches avec les blocs de vol, de capteurs et d'extension ; sélectionnez une catégorie à gauche.",
+        "DECKS": "Cartes d'extension",
+        "FLOW_V2": {
+            "NAME": "Carte Flow v2",
+            "DESCRIPTION": "Le flux optique et la télémétrie vers le bas facilitent le positionnement au décollage, en déplacement et en attente."
+        },
+        "MULTIRANGER": {
+            "NAME": "Carte Multiranger",
+            "DESCRIPTION": "Mesure les distances devant, derrière, à gauche, à droite et au-dessus pour détecter les obstacles."
+        },
+        "LED_RING": {
+            "NAME": "Carte anneau LED",
+            "DESCRIPTION": "Règle les couleurs et les effets ou éteint l'anneau pour indiquer l'état du vol."
+        },
+        "BUZZER": {
+            "NAME": "Carte avertisseur sonore",
+            "DESCRIPTION": "Émet des signaux au décollage, à l'arrivée et lors d'autres changements d'état."
+        }
+    },
     "MENU": {
         "MENU": "Menu",
         "PROJECT_NEW": "Nouveau Projet",

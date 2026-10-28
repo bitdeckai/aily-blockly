@@ -298,7 +298,7 @@ export class HeaderComponent implements OnDestroy {
       case 'unknown':
       case 'error': return '连接';
       case 'ready':
-        if (this.connectionState.message.includes('部分甲板/流程检测失败')) {
+        if (this.connectionState.message.includes('部分扩展/流程检测失败')) {
           return '断开';
         }
         if (this.connectionState.message.includes('未发现') || this.connectionState.message.includes('已就绪')) {

@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "Ejemplos básicos",
+        "SELF_TEST": "Autoprueba (sin vuelo)",
+        "SELF_TEST_DESCRIPTION": "Comprobar radio, conectar y probar, con esperas. La prueba real activa los motores.",
+        "HOVER": "Despegar, mantenerse y aterrizar",
+        "HOVER_DESCRIPTION": "Subir 0,3 m, mantenerse 3 segundos y aterrizar, con esperas.",
+        "BACK_AND_FORTH": "Adelante y atrás",
+        "BACK_AND_FORTH_DESCRIPTION": "Avanzar y retroceder 0,3 m, esperar 1 segundo entre movimientos y aterrizar.",
+        "SQUARE": "Trayectoria cuadrada",
+        "SQUARE_DESCRIPTION": "Volar un cuadrado de 0,3 m por lado, esperar 1 segundo entre movimientos y aterrizar.",
+        "SELF_TEST_NOTICE": "Añadido en una página nueva sin ejecutar. La prueba real gira los motores: retire primero las hélices.",
+        "FLIGHT_NOTICE": "Añadido sin ejecutar ni cambiar el modo. Simule primero; compruebe el posicionamiento y despeje la zona antes del vuelo real.",
+        "BUSY": "Finalice la ejecución actual antes de crear un ejemplo.",
+        "ERROR": "No se pudo añadir el ejemplo. Abra un proyecto Crazyflie y cargue los bloques necesarios."
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "Alabeo",
+        "PITCH": "Cabeceo",
+        "YAW": "Guiñada"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "Los bloques de esta expansión no están cargados.",
+        "SEARCH": "Buscar",
+        "FLIGHT_BLOCKS": "Bloques de vuelo",
+        "INTRO": "Crazyflie es un microdron programable. Crea tareas con bloques de vuelo, sensores y módulos de expansión; selecciona una categoría a la izquierda.",
+        "DECKS": "Módulos de expansión",
+        "FLOW_V2": {
+            "NAME": "Módulo Flow v2",
+            "DESCRIPTION": "El flujo óptico y la medición inferior ayudan al posicionamiento durante el despegue, movimiento y espera."
+        },
+        "MULTIRANGER": {
+            "NAME": "Módulo Multiranger",
+            "DESCRIPTION": "Lee distancias delante, detrás, a ambos lados y arriba para detectar obstáculos."
+        },
+        "LED_RING": {
+            "NAME": "Módulo de anillo LED",
+            "DESCRIPTION": "Configura colores y efectos o apaga el anillo para indicar el estado del vuelo."
+        },
+        "BUZZER": {
+            "NAME": "Módulo de zumbador",
+            "DESCRIPTION": "Reproduce avisos sonoros durante el despegue, la llegada y otros cambios de estado."
+        }
+    },
     "MENU": {
         "MENU": "Menú",
         "PROJECT_NEW": "Nuevo Proyecto",

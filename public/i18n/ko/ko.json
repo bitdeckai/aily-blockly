@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "기본 예제",
+        "SELF_TEST": "자가 진단 (비행 없음)",
+        "SELF_TEST_DESCRIPTION": "무선 확인, 연결, 자가 진단 사이에 대기합니다. 실제 진단은 모터를 작동시킵니다.",
+        "HOVER": "이륙, 제자리 비행, 착륙",
+        "HOVER_DESCRIPTION": "0.3 m 이륙하고 3초간 제자리 비행 후 착륙합니다. 연결 및 착륙 후 대기가 포함됩니다.",
+        "BACK_AND_FORTH": "앞뒤 이동",
+        "BACK_AND_FORTH_DESCRIPTION": "앞뒤로 각각 0.3 m 이동하며 동작 사이에 1초 대기 후 착륙합니다.",
+        "SQUARE": "사각형 경로",
+        "SQUARE_DESCRIPTION": "한 변이 0.3 m인 사각형을 비행하며 동작 사이에 1초 대기 후 착륙합니다.",
+        "SELF_TEST_NOTICE": "새 페이지에 추가했으며 자동 실행하지 않습니다. 실제 진단은 모터를 회전시키므로 먼저 프로펠러를 제거하세요.",
+        "FLIGHT_NOTICE": "자동 실행이나 모드 변경 없이 새 페이지에 추가했습니다. 먼저 시뮬레이션하고 실제 비행 전에 위치 추정과 주변 안전을 확인하세요.",
+        "BUSY": "현재 실행을 종료한 후 예제를 만드세요.",
+        "ERROR": "예제를 추가하지 못했습니다. Crazyflie 프로젝트를 열고 필요한 블록을 불러오세요."
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "롤",
+        "PITCH": "피치",
+        "YAW": "요"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "이 확장의 블록을 불러오지 않았습니다.",
+        "SEARCH": "검색",
+        "FLIGHT_BLOCKS": "비행 블록",
+        "INTRO": "Crazyflie는 프로그래밍 가능한 초소형 드론입니다. 비행, 센서, 확장 데크 블록으로 작업을 만들고 왼쪽에서 분류를 선택하세요.",
+        "DECKS": "확장 데크",
+        "FLOW_V2": {
+            "NAME": "Flow 데크 v2",
+            "DESCRIPTION": "광학 흐름과 하향 거리 측정으로 이륙, 이동, 대기 중 위치 추정을 돕습니다."
+        },
+        "MULTIRANGER": {
+            "NAME": "Multiranger 데크",
+            "DESCRIPTION": "앞뒤, 좌우, 위쪽 거리를 읽어 장애물을 감지하고 회피합니다."
+        },
+        "LED_RING": {
+            "NAME": "LED 링 데크",
+            "DESCRIPTION": "색상과 효과를 설정하거나 링을 꺼서 비행 상태를 표시합니다."
+        },
+        "BUZZER": {
+            "NAME": "부저 데크",
+            "DESCRIPTION": "이륙, 도착 및 기타 상태 변화를 알림음으로 알려 줍니다."
+        }
+    },
     "MENU": {
         "MENU": "메뉴",
         "PROJECT_NEW": "새 프로젝트",

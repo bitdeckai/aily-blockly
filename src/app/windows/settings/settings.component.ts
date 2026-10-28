@@ -266,8 +266,8 @@ export class SettingsComponent implements OnDestroy {
     this.settingsService.getCompilerList(this.appdata_path, npmRegistry);
   }
 
-  selectLang(lang) {
-    this.translationService.setLanguage(lang.code);
+  async selectLang(lang) {
+    await this.translationService.setLanguage(lang.code);
     window['ipcRenderer'].send('setting-changed', { action: 'language-changed', data: lang.code });
   }
 

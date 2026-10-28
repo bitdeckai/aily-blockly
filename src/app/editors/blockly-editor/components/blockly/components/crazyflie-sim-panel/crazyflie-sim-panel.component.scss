@@ -87,6 +87,20 @@
     color: #acb7c3;
   }
 
+  &__values {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+    white-space: normal;
+    text-align: center;
+
+    > span {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      overflow-wrap: anywhere;
+    }
+  }
+
   &__viewport {
     position: relative;
     height: clamp(96px, 14vh, 124px);
@@ -127,6 +141,16 @@
 
   &--stale {
     color: #e2ad55;
+  }
+}
+
+.sim-example-menu {
+  max-width: min(360px, calc(100vw - 24px));
+
+  &__description {
+    white-space: normal;
+    font-size: 12px;
+    color: var(--aily-text-secondary);
   }
 }
 

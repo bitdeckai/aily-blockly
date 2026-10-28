@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "基礎範例",
+        "SELF_TEST": "基礎自檢（不飛行）",
+        "SELF_TEST_DESCRIPTION": "偵測無線收發器、連線、自檢，步驟間設有等待。真機自檢會測試馬達。",
+        "HOVER": "起飛、懸停、降落",
+        "HOVER_DESCRIPTION": "起飛 0.3 米，懸停 3 秒後降落，包含連線和落地等待。",
+        "BACK_AND_FORTH": "前後移動",
+        "BACK_AND_FORTH_DESCRIPTION": "起飛後向前、向後各移動 0.3 米，動作間等待 1 秒，再降落。",
+        "SQUARE": "方形航線",
+        "SQUARE_DESCRIPTION": "以每邊 0.3 米飛行一圈，動作間等待 1 秒，再降落。",
+        "SELF_TEST_NOTICE": "自檢範例已新增至新頁面，不會自動執行。真機自檢會驅動馬達，請先拆下螺旋槳。",
+        "FLIGHT_NOTICE": "範例已新增至新頁面，不會自動執行或更改執行模式。請先僅模擬驗證，真機飛行前檢查定位並清空場地。",
+        "BUSY": "請先結束目前流程再新增範例。",
+        "ERROR": "新增範例失敗，請確認已開啟 Crazyflie 專案並載入所需積木。"
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "橫滾",
+        "PITCH": "俯仰",
+        "YAW": "偏航"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "此擴展的積木尚未載入。",
+        "SEARCH": "搜尋",
+        "FLIGHT_BLOCKS": "飛行器專用積木",
+        "INTRO": "Crazyflie 是一款可編程微型無人機。使用飛行、感測器和擴展積木編排任務；選擇左側分類，右側會顯示對應積木。",
+        "DECKS": "擴展",
+        "FLOW_V2": {
+            "NAME": "光流定位",
+            "DESCRIPTION": "利用光流和下視測距輔助定位，可配合起飛、移動、等待等積木編寫飛行流程。"
+        },
+        "MULTIRANGER": {
+            "NAME": "多向測距",
+            "DESCRIPTION": "讀取前、後、左、右和上方的距離，可用於障礙物判斷與避障邏輯。"
+        },
+        "LED_RING": {
+            "NAME": "LED 燈環",
+            "DESCRIPTION": "設定燈環顏色和燈效，或關閉燈環，用燈光回饋飛行狀態。"
+        },
+        "BUZZER": {
+            "NAME": "蜂鳴器",
+            "DESCRIPTION": "控制蜂鳴器發出提示音，為起飛、到達或狀態變化提供聲音回饋。"
+        }
+    },
     "MENU": {
         "MENU": "選單",
         "PROJECT_NEW": "新建專案",

@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "Grundbeispiele",
+        "SELF_TEST": "Selbsttest (ohne Flug)",
+        "SELF_TEST_DESCRIPTION": "Funk prüfen, verbinden und Selbsttest, mit Wartezeiten. Der echte Selbsttest startet die Motoren.",
+        "HOVER": "Starten, schweben und landen",
+        "HOVER_DESCRIPTION": "0,3 m aufsteigen, 3 Sekunden schweben und landen, mit Wartezeiten.",
+        "BACK_AND_FORTH": "Vor und zurück",
+        "BACK_AND_FORTH_DESCRIPTION": "Je 0,3 m vor und zurück, dazwischen 1 Sekunde warten, dann landen.",
+        "SQUARE": "Quadratischer Flugweg",
+        "SQUARE_DESCRIPTION": "Ein Quadrat mit 0,3 m Seitenlänge fliegen, dazwischen 1 Sekunde warten, dann landen.",
+        "SELF_TEST_NOTICE": "Auf neuer Seite hinzugefügt, nicht gestartet. Der echte Selbsttest dreht die Motoren: zuerst Propeller entfernen.",
+        "FLIGHT_NOTICE": "Auf neuer Seite hinzugefügt, ohne Start oder Moduswechsel. Zuerst simulieren; vor echtem Flug Positionierung prüfen und Bereich räumen.",
+        "BUSY": "Zuerst den aktuellen Ablauf beenden.",
+        "ERROR": "Beispiel konnte nicht hinzugefügt werden. Crazyflie-Projekt öffnen und erforderliche Blöcke laden."
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "Rollen",
+        "PITCH": "Nicken",
+        "YAW": "Gieren"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "Die Blöcke dieser Erweiterung sind nicht geladen.",
+        "SEARCH": "Suchen",
+        "FLIGHT_BLOCKS": "Flugblöcke",
+        "INTRO": "Crazyflie ist eine programmierbare Mikrodrohne. Erstellen Sie Aufgaben mit Flug-, Sensor- und Erweiterungsblöcken und wählen Sie links eine Kategorie.",
+        "DECKS": "Erweiterungsdecks",
+        "FLOW_V2": {
+            "NAME": "Flow-Deck v2",
+            "DESCRIPTION": "Optischer Fluss und Abstandsmessung nach unten unterstützen die Positionierung bei Start, Bewegung und Warten."
+        },
+        "MULTIRANGER": {
+            "NAME": "Multiranger-Deck",
+            "DESCRIPTION": "Misst Abstände vorne, hinten, links, rechts und oben zur Hinderniserkennung."
+        },
+        "LED_RING": {
+            "NAME": "LED-Ring-Deck",
+            "DESCRIPTION": "Stellt Farben und Effekte ein oder schaltet den Ring aus, um den Flugzustand anzuzeigen."
+        },
+        "BUZZER": {
+            "NAME": "Summer-Deck",
+            "DESCRIPTION": "Spielt Signaltöne bei Start, Ankunft und anderen Zustandsänderungen."
+        }
+    },
     "MENU": {
         "MENU": "Menü",
         "PROJECT_NEW": "Neues Projekt",

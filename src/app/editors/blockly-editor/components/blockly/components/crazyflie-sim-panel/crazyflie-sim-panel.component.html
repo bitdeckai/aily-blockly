@@ -12,7 +12,20 @@
   </div>
 
   <div class="sim-panel__controls">
-    <button class="sim-btn" [disabled]="running" (click)="insertStarterFlow()">新建飞行示例</button>
+    <button type="button" class="sim-btn" nz-dropdown [nzDropdownMenu]="examplesMenu" nzTrigger="click"
+      [disabled]="running" [nzDisabled]="running">
+      {{ 'CRAZYFLIE_EXAMPLES.MENU' | translate }} <i class="fa-light fa-chevron-down" aria-hidden="true"></i>
+    </button>
+    <nz-dropdown-menu #examplesMenu="nzDropdownMenu">
+      <ul nz-menu class="sim-example-menu">
+        <li nz-menu-item *ngFor="let example of flightExamples" [nzDisabled]="running" (click)="insertExample(example.id)">
+          <div>
+            <div>{{ example.titleKey | translate }}</div>
+            <div class="sim-example-menu__description">{{ example.descriptionKey | translate }}</div>
+          </div>
+        </li>
+      </ul>
+    </nz-dropdown-menu>
     <button class="sim-btn" [disabled]="running" title="仅复位三维模型，不控制真机" (click)="resetDronePose()">复位模型</button>
     <div class="sim-view-tools" role="toolbar" aria-label="三维视角控制">
       <button class="sim-icon-btn" title="放大 (+)" aria-label="放大" (click)="zoomCamera(0.7)"><i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i></button>
@@ -38,7 +51,7 @@
       } @else {
         <span>模拟航向 {{ telemetry.yawDeg }}°</span>
       }
-      <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel }}</span>
+      <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel | translate }}</span>
       <span *ngIf="measureStatus" class="sim-hud__measure">{{ measureStatus }}</span>
     </div>
     <div #canvasHost class="sim-panel__canvas" tabindex="0" aria-label="三维场景" title="左键拖动旋转，右键拖动平移，滚轮缩放；点击场景后可用方向键旋转、Home 全景、F 聚焦" (keydown)="onViewportKeydown($event)" (click)="onCanvasClick($event)">
@@ -52,13 +65,18 @@
         <div #attitudeViewport class="sim-attitude-inset__viewport" role="img"
           aria-label="真机姿态与机体坐标：X 前（红）、Y 左（绿）、Z 上（蓝）；仅显示真实姿态，不代表真实位置"></div>
         <div class="sim-attitude-inset__values">
-          @if (liveAttitude; as sample) {
-            <span title="横滚 Roll">R {{ sample.roll | number:'1.0-0' }}°</span>
-            <span title="俯仰 Pitch">P {{ sample.pitch | number:'1.0-0' }}°</span>
-            <span title="航向 Yaw">Y {{ sample.yaw | number:'1.0-0' }}°</span>
-          } @else {
-            <span>R --°</span><span>P --°</span><span>Y --°</span>
-          }
+          <span>
+            <span>{{ 'CRAZYFLIE_ATTITUDE.ROLL' | translate }}</span>
+            <span>{{ liveAttitude ? (liveAttitude.roll | number:'1.0-0') : '--' }}°</span>
+          </span>
+          <span>
+            <span>{{ 'CRAZYFLIE_ATTITUDE.PITCH' | translate }}</span>
+            <span>{{ liveAttitude ? (liveAttitude.pitch | number:'1.0-0') : '--' }}°</span>
+          </span>
+          <span>
+            <span>{{ 'CRAZYFLIE_ATTITUDE.YAW' | translate }}</span>
+            <span>{{ liveAttitude ? (liveAttitude.yaw | number:'1.0-0') : '--' }}°</span>
+          </span>
         </div>
         <select class="sim-attitude-inset__view" aria-label="主场景标准视角" title="按飞行器坐标选择主场景观察方向，不改变真机姿态"
           [value]="selectedView" (change)="setCameraView($any($event.target).value)">

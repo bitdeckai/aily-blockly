@@ -408,7 +408,7 @@ export class _UploaderService {
       && !radioStatus.startsWith('error')
       && !radioStatus.includes('not found');
     if (!connectionFailure && radioAvailable && links.length > 0) {
-      this.crazyflieConnectionService.setResult(true, '无线链路正常，部分甲板/流程检测失败');
+      this.crazyflieConnectionService.setResult(true, '无线链路正常，部分扩展/流程检测失败');
     } else {
       this.crazyflieConnectionService.setResult(false, result?.message || 'Crazyflie 链路测试失败');
     }

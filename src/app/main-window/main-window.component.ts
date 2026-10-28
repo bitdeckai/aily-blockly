@@ -29,6 +29,7 @@ import { ModelStoreComponent } from '../tools/model-store/model-store.component'
 import { OnboardingComponent } from '../components/onboarding/onboarding.component';
 import { OnboardingService } from '../services/onboarding.service';
 import { TranslateService } from '@ngx-translate/core';
+import { TranslationService } from '../services/translation.service';
 
 @Component({
   selector: 'app-main-window',
@@ -97,7 +98,8 @@ export class MainWindowComponent {
     private router: Router,
     private configService: ConfigService,
     private modal: NzModalService,
-    private onboardingService: OnboardingService
+    private onboardingService: OnboardingService,
+    private translationService: TranslationService
   ) { }
 
   ngOnInit(): void {
@@ -130,10 +132,18 @@ export class MainWindowComponent {
       await this.configService.load();
       if (data.action == 'language-changed' && this.router.url.includes('/main/blockly-editor')) {
         console.log('mainwindow setLanguage', data);
-        this.projectService.save();
-        setTimeout(() => {
-          this.projectService.projectOpen();
-        }, 100);
+        try {
+          await this.translationService.setLanguage(data.data);
+          const result = await this.projectService.save();
+          if (!result.success) {
+            this.message.error(result.error || this.translate.instant('PROJECT_SETTING_DIALOG.ERROR_SAVE_FAILED'));
+            return;
+          }
+          await this.projectService.projectOpen(this.projectService.currentProjectPath, { reason: 'reload' });
+        } catch (error) {
+          console.error('Failed to reload project after changing language:', error);
+          this.message.error(error instanceof Error ? error.message : this.translate.instant('PROJECT.CANNOT_OPEN_PROJECT'));
+        }
       }
     });
   }

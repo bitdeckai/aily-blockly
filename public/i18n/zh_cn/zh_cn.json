@@ -1,4 +1,47 @@
 {
+    "CRAZYFLIE_EXAMPLES": {
+        "MENU": "基础示例",
+        "SELF_TEST": "基础自检（不飞行）",
+        "SELF_TEST_DESCRIPTION": "检测无线收发器、连接、自检，步骤间留有等待。真机自检会测试电机。",
+        "HOVER": "起飞、悬停、降落",
+        "HOVER_DESCRIPTION": "起飞 0.3 米，悬停 3 秒后降落，包含连接和落地等待。",
+        "BACK_AND_FORTH": "前后移动",
+        "BACK_AND_FORTH_DESCRIPTION": "起飞后向前、向后各移动 0.3 米，动作间等待 1 秒，再降落。",
+        "SQUARE": "方形航线",
+        "SQUARE_DESCRIPTION": "以每边 0.3 米飞行一圈，动作间等待 1 秒，再降落。",
+        "SELF_TEST_NOTICE": "自检示例已添加到新页面，不会自动运行。真机自检会驱动电机，请先拆下螺旋桨。",
+        "FLIGHT_NOTICE": "示例已添加到新页面，不会自动运行或更改运行模式。请先仅模拟验证，真机飞行前检查定位并清空场地。",
+        "BUSY": "请先结束当前流程再新建示例。",
+        "ERROR": "添加示例失败，请确认已打开 Crazyflie 工程并加载所需积木。"
+    },
+    "CRAZYFLIE_ATTITUDE": {
+        "ROLL": "横滚",
+        "PITCH": "俯仰",
+        "YAW": "偏航"
+    },
+    "CRAZYFLIE_TOOLBOX": {
+        "UNAVAILABLE": "此扩展的积木尚未加载。",
+        "SEARCH": "搜索",
+        "FLIGHT_BLOCKS": "飞行器专用积木",
+        "INTRO": "Crazyflie 是一款可编程微型无人机。使用飞行、传感器和扩展积木编排任务；选择左侧分类，右侧会显示对应积木。",
+        "DECKS": "扩展",
+        "FLOW_V2": {
+            "NAME": "光流定位",
+            "DESCRIPTION": "利用光流和下视测距辅助定位，可配合起飞、移动、等待等积木编写飞行流程。"
+        },
+        "MULTIRANGER": {
+            "NAME": "多向测距",
+            "DESCRIPTION": "读取前、后、左、右和上方的距离，可用于障碍物判断与避障逻辑。"
+        },
+        "LED_RING": {
+            "NAME": "LED 灯环",
+            "DESCRIPTION": "设置灯环颜色和灯效，或关闭灯环，用灯光反馈飞行状态。"
+        },
+        "BUZZER": {
+            "NAME": "蜂鸣器",
+            "DESCRIPTION": "控制蜂鸣器发出提示音，为起飞、到达或状态变化提供声音反馈。"
+        }
+    },
     "MENU": {
         "MENU": "菜单",
         "PROJECT_NEW": "新建项目",

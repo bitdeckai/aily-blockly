@@ -24,6 +24,16 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'ap
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, { exports: classroom.exports });
 const { getClassroomDeskLayout } = classroom.exports;
+const generatorDir = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
+  'blockly', 'generators', 'crazyflie');
+function loadGenerator(name) {
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(generatorDir, name), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { exports, require });
+  return exports;
+}
+const examples = loadGenerator('examples.ts');
 const sample = (timestampMs, yaw = 0) => ({ type: 'sample', timestampMs, roll: 0, pitch: 0, yaw });
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
 const vectorNear = (actual, expected) => actual.toArray().forEach((n, i) => near(n, expected[i]));
@@ -548,7 +558,7 @@ test('classroom uses natural wood finishes without loose books or extra cabinets
   assert.match(source, /createLightClassroomTexture\(map, '#dfb270', 0\.42\)/);
   assert.match(source, /this\.applyVarnishedPineFinish\(teachingStage\)/);
   assert.match(source, /this\.applyVarnishedPineFinish\(doorGroup\)/);
-  assert.match(source, /this\.applyVarnishedPineFinish\(lecternPanels\)/);
+  assert.match(source, /this\.applyVarnishedPineFinish\(lecternPanels, 'lectern'\)/);
   assert.match(source, /this\.applyVarnishedPineFinish\(floor, 'floor'\)/);
   assert.match(source, /this\.loadVarnishedPineMaterial\('desk'\)/);
   assert.match(source, /\[this\.createClassroomChair\(\), chairOffsetX, 'chair'\]/);
@@ -559,7 +569,7 @@ test('classroom uses natural wood finishes without loose books or extra cabinets
   assert.doesNotMatch(source, /Webots school book|cabinetGroup|lowShelfGroup/);
 });
 
-function panelHarness({ globals = {}, three = require('three') } = {}) {
+function panelHarness({ globals = {}, three = require('three'), modules = {} } = {}) {
   const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts');
   const js = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
@@ -572,15 +582,19 @@ function panelHarness({ globals = {}, three = require('three') } = {}) {
     exports, performance: { now: () => now }, queueMicrotask,
     requestAnimationFrame: callback => { frame = callback; return 1; }, cancelAnimationFrame() {},
     require: name => {
+      if (modules[name]) return modules[name];
       if (name === '@angular/core') return { Component: () => target => target, ViewChild: () => () => {} };
       if (name === '@angular/common') return {};
       if (name === 'three') return three;
+      if (name === 'blockly') return require(name);
+      if (name.endsWith('/crazyflie/examples')) return examples;
       if (name === 'rxjs') return require(name);
       if (name.endsWith('/crazyflie-attitude')) return helper.exports;
       if (name.endsWith('/crazyflie-classroom')) return classroom.exports;
       if (name.endsWith('/GLTFLoader.js')) return { GLTFLoader: class {} };
       if (name.endsWith('/ColladaLoader.js')) return { ColladaLoader: class {} };
       if (name.endsWith('/RoundedBoxGeometry.js')) return require(name);
+      if (name.endsWith('/BufferGeometryUtils.js')) return require(name);
       if (name.endsWith('/OrbitControls.js')) return {};
       return {};
     },
@@ -597,7 +611,8 @@ function panelHarness({ globals = {}, three = require('three') } = {}) {
     attitude$: new BehaviorSubject(null), attitudeError$: new BehaviorSubject(null),
     attitudeReception: new AttitudeReception() };
   const panel = new exports.CrazyflieSimPanelComponent(sim, connection, {},
-    { error: text => messages.push(text) }, { run: fn => fn() });
+    { error: text => messages.push(text), warning: text => messages.push(text) },
+    { run: fn => fn() }, { instant: key => key });
   panel.scene = {};
   panel.camera = {};
   let rendered = 0;
@@ -647,7 +662,7 @@ test('classroom palettes cache distinct light finishes, share detail maps and re
   assert.equal(fetches, 1, 'all colors use one underlying pine asset request');
   assert.equal(requests.length, 4, 'normal, roughness and AO maps must not be reloaded for every palette');
   for (const [material, tint, opacity, roughness] of [
-    [floor, '#eee5d3', 0.68, 0.88], [desk, '#efd0a0', 0.32, 0.74], [chair, '#b7c9bd', 0.82, 0.82],
+    [floor, '#d4c2aa', 0.72, 0.88], [desk, '#efd0a0', 0.32, 0.74], [chair, '#b7c9bd', 0.82, 0.82],
   ]) {
     const transform = transforms.find(item => item.tint === tint);
     assert.equal(transform.source, honey.map);
@@ -661,6 +676,14 @@ test('classroom palettes cache distinct light finishes, share detail maps and re
     assert.deepEqual(material.map.repeat.toArray(), [3, 3]);
   }
   assert.equal(honey.roughness, 0.7, 'stage, door and lectern must retain their honey finish');
+  const lectern = await panel.loadVarnishedPineMaterial('lectern');
+  assert.equal(lectern.isMeshPhysicalMaterial, true);
+  assert.equal(lectern.map, honey.map, 'lectern varnish cannot change its honey color or duplicate its map');
+  assert.equal(lectern.roughnessMap, honey.roughnessMap);
+  assert.equal(desk.isMeshPhysicalMaterial, true);
+  assert.equal(chair.isMeshPhysicalMaterial, true);
+  assert.equal(floor.isMeshPhysicalMaterial, undefined, 'floor must remain matte and unreflected');
+  assert.equal(desk.envMapIntensity, 0.1);
   assert.equal(transforms.length, 4);
   assert.equal(new Set([floor.map, desk.map, chair.map, honey.map]).size, 4);
   panel.classroomWoodMaterialPromises.delete('floor');
@@ -679,6 +702,7 @@ test('classroom palettes cache distinct light finishes, share detail maps and re
   honey.normalMap.dispose();
   honey.roughnessMap.dispose();
   honey.aoMap.dispose();
+  lectern.dispose();
 });
 
 test('floor uses its light neutral finish, preserves its grain and never disposes shared textures', async () => {
@@ -721,7 +745,7 @@ test('floor uses its light neutral finish, preserves its grain and never dispose
     assert.equal(floor.material.metalness, 0);
     assert.equal(floor.receiveShadow, true);
     assert.ok(floor.geometry.getAttribute('uv2'));
-    assert.equal(floor.material.color.getHexString(), 'eee5d3');
+    assert.equal(floor.material.color.getHexString(), 'd4c2aa');
     if (replaceScene) panel.disposePresetInterior();
     finishLoad(template);
     await new Promise(setImmediate);
@@ -809,6 +833,10 @@ test('imported desk faces upward and uses its warm finish without recoloring the
     assert.deepEqual(Array.from(outputPixels.slice(4, 8)), [195, 203, 207, 255], 'metal pixels remain silver');
     assert.equal(sharedMapDisposed, 0, 'building desk textures cannot dispose the floor/stage/door map');
     assert.equal(material.color.getHexString(), 'ffffff');
+    assert.equal(material.isMeshPhysicalMaterial, true);
+    assert.equal(material.clearcoat, 0.18);
+    assert.equal(material.envMapIntensity, 0.1, 'wood highlights must stay subdued');
+    assert.equal(material.metalness, 0.75);
     assert.equal(requests.length, 3, 'only desk surface-detail maps are loaded separately');
     assert.ok(requests.some(url => url.endsWith('desk_metalness.jpg')));
   } finally {
@@ -818,6 +846,197 @@ test('imported desk faces upward and uses its warm finish without recoloring the
     woodMap.dispose();
     woodMaterial.dispose();
   }
+});
+
+test('attitude labels use Settings translations in both live and empty states for every supported language', async () => {
+  await import('@angular/compiler');
+  const { TranslateService, TranslateStore, TranslatePipe, TranslateDefaultParser,
+    TranslateFakeCompiler, TranslateFakeLoader, FakeMissingTranslationHandler } = await import('@ngx-translate/core');
+  const translate = new TranslateService(new TranslateStore(), new TranslateFakeLoader(),
+    new TranslateFakeCompiler(), new TranslateDefaultParser(), new FakeMissingTranslationHandler(),
+    true, false, false, 'zh_cn');
+  const languageList = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', 'i18n.json'), 'utf8'));
+  let updates = 0;
+  const pipes = ['ROLL', 'PITCH', 'YAW'].map(() => new TranslatePipe(translate, {
+    markForCheck() { updates++; },
+  }));
+  const keys = ['ROLL', 'PITCH', 'YAW'].map(axis => `CRAZYFLIE_ATTITUDE.${axis}`);
+  try {
+    for (const { code } of languageList) {
+      const data = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', code, `${code}.json`), 'utf8'));
+      translate.setTranslation(code, data);
+      translate.use(code);
+      const labels = keys.map((key, index) => pipes[index].transform(key));
+      assert.deepEqual(labels, ['ROLL', 'PITCH', 'YAW'].map(axis => data.CRAZYFLIE_ATTITUDE[axis]));
+      assert.ok(labels.every(text => typeof text === 'string' && text.trim() && !keys.includes(text)));
+      if (code === 'zh_cn') assert.deepEqual(labels, ['横滚', '俯仰', '偏航']);
+      if (code === 'en') assert.deepEqual(labels, ['Roll', 'Pitch', 'Yaw']);
+    }
+    assert.ok(updates >= languageList.length * 3, 'existing pipes must react when the Settings language changes');
+    const componentDir = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
+      'components', 'crazyflie-sim-panel');
+    const html = fs.readFileSync(path.join(componentDir, 'crazyflie-sim-panel.component.html'), 'utf8');
+    const values = html.match(/<div class="sim-attitude-inset__values">([\s\S]*?)<\/div>/)[1];
+    for (const [index, axis] of ['roll', 'pitch', 'yaw'].entries()) {
+      assert.ok(values.includes(`'${keys[index]}' | translate`));
+      assert.ok(values.includes(`liveAttitude ? (liveAttitude.${axis} | number:'1.0-0') : '--'`),
+        'translation and numeric formatting must apply to live/zero and disconnected values alike');
+    }
+    assert.doesNotMatch(values, />[RPY]\s/);
+    const source = fs.readFileSync(path.join(componentDir, 'crazyflie-sim-panel.component.ts'), 'utf8');
+    assert.match(source, /imports:\s*\[CommonModule, TranslateModule,/);
+  } finally {
+    pipes.forEach(pipe => pipe.ngOnDestroy());
+  }
+});
+
+function registerExampleBlocks() {
+  const Blockly = require('blockly');
+  const basic = loadGenerator('basic-blocks.ts');
+  basic.createCrazyflieBasicToolbox(true);
+  basic.registerCrazyflieBasicBlocks();
+  Blockly.defineBlocksWithJsonArray(JSON.parse(fs.readFileSync(path.join(root, 'child', 'boards',
+    'board-crazyflie', 'template', 'node_modules', '@aily-project', 'lib-crazyflie-motion', 'block.json'), 'utf8')));
+  loadGenerator('motion-blocks.ts').registerCrazyflieMotionBlocks(basic.crazyflieGenerator, true);
+}
+
+test('example selection preserves the old page, adds rendered-ready blocks and never runs or connects', () => {
+  registerExampleBlocks();
+  const Blockly = require('blockly');
+  const workspace = new Blockly.Workspace();
+  const { panel, messages, sim, connection } = panelHarness();
+  const savedPages = [];
+  workspace.centerOnBlock = id => assert.ok(workspace.getBlockById(id));
+  sim.runCode = () => assert.fail('selecting an example must not run it');
+  connection.connect = () => assert.fail('selecting an example must not connect to hardware');
+  Blockly.serialization.blocks.append({ type: 'math_number', id: 'existing', fields: { NUM: 42 } }, workspace);
+  panel.blocklyService = {
+    workspace,
+    createPage(title) {
+      savedPages.push({ title, state: Blockly.serialization.workspaces.save(workspace) });
+      workspace.clear();
+    },
+  };
+  Blockly.Events.setGroup('outer-example-group');
+  try {
+    for (const example of examples.CRAZYFLIE_EXAMPLES) {
+      panel.insertExample(example.id);
+      assert.equal(Blockly.Events.getGroup(), 'outer-example-group');
+      assert.equal(savedPages.length, examples.CRAZYFLIE_EXAMPLES.indexOf(example) + 1, JSON.stringify(messages));
+      assert.equal(savedPages.at(-1).title, example.titleKey);
+      assert.equal(workspace.getTopBlocks(false).length, 1);
+      assert.ok(workspace.getAllBlocks(false).some(block => block.type === 'cf_core_delay'));
+    }
+    assert.equal(savedPages.length, 4);
+    assert.equal(savedPages[0].state.blocks.blocks[0].id, 'existing');
+    assert.equal(savedPages[0].state.blocks.blocks[0].fields.NUM, 42);
+    assert.deepEqual(messages, ['CRAZYFLIE_EXAMPLES.SELF_TEST_NOTICE',
+      'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE', 'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE', 'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE']);
+  } finally {
+    Blockly.Events.setGroup(false);
+    workspace.dispose();
+  }
+});
+
+test('running, missing blocks and invalid examples cannot replace the existing page', () => {
+  registerExampleBlocks();
+  const Blockly = require('blockly');
+  const workspace = new Blockly.Workspace();
+  const { panel, messages } = panelHarness();
+  Blockly.serialization.blocks.append({ type: 'math_number', id: 'untouched' }, workspace);
+  panel.blocklyService = { workspace, createPage() { assert.fail('no page should be created'); } };
+  const delay = Blockly.Blocks.cf_core_delay;
+  try {
+    panel.running = true;
+    panel.insertExample('self-test');
+    panel.running = false;
+    delete Blockly.Blocks.cf_core_delay;
+    panel.insertExample('self-test');
+    Blockly.Blocks.cf_core_delay = delay;
+    panel.insertExample('unknown');
+    assert.ok(workspace.getBlockById('untouched'));
+    assert.equal(workspace.getAllBlocks(false).length, 1);
+    assert.deepEqual(messages, ['CRAZYFLIE_EXAMPLES.BUSY', 'CRAZYFLIE_EXAMPLES.ERROR', 'CRAZYFLIE_EXAMPLES.ERROR']);
+  } finally {
+    Blockly.Blocks.cf_core_delay = delay;
+    workspace.dispose();
+  }
+});
+
+test('detected module names share the localized toolbox labels', () => {
+  const { panel } = panelHarness();
+  const expected = { 'flow-v2': '光流定位', multiranger: '多向测距', 'led-ring': 'LED 灯环', buzzer: '蜂鸣器' };
+  const data = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', 'zh_cn', 'zh_cn.json'), 'utf8'));
+  for (const [type, name] of Object.entries(expected)) {
+    const key = panel.deckLabels[type];
+    assert.equal(key.split('.').reduce((value, part) => value[part], data), name);
+  }
+  const html = fs.readFileSync(path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
+    'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.html'), 'utf8');
+  assert.match(html, /deckLabel \| translate/);
+});
+
+test('furniture reflections are cached, keep floor matte, survive scene switches and release on close', () => {
+  const THREE = require('three');
+  const texture = new THREE.Texture();
+  let roomDisposed = 0;
+  let generatorDisposed = 0;
+  let environmentDisposed = 0;
+  let generated = 0;
+  const target = { texture, dispose() { environmentDisposed++; texture.dispose(); } };
+  const panel = panelHarness({
+    three: { ...THREE, PMREMGenerator: class {
+      fromScene(room, sigma, nearPlane, farPlane, options) {
+        generated++;
+        assert.equal(sigma, 0.08);
+        assert.equal(options.size, 128, 'reflection probe must stay small and shared');
+        return target;
+      }
+      dispose() { generatorDisposed++; }
+    } },
+    modules: { 'three/examples/jsm/environments/RoomEnvironment.js': {
+      RoomEnvironment: class { dispose() { roomDisposed++; } },
+    } },
+  }).panel;
+  panel.createClassroomFurnitureEnvironment();
+  panel.createClassroomFurnitureEnvironment();
+  assert.equal(generated, 1);
+  assert.equal(roomDisposed, 1);
+  assert.equal(generatorDisposed, 1);
+  panel.scene = new THREE.Scene();
+  const floor = new THREE.MeshStandardMaterial({ roughness: 0.88 });
+  const furniture = panel.createClassroomFurnitureMaterial(floor);
+  assert.equal(furniture.isMeshPhysicalMaterial, true);
+  assert.equal(furniture.envMap, texture);
+  assert.equal(furniture.clearcoat, 0.18);
+  assert.equal(floor.envMap, null, 'the reflection probe cannot brighten the floor or other scenery');
+  panel.presetInteriorRoot = new THREE.Group();
+  panel.presetInteriorRoot.add(panel.createClassroomChair(), panel.createClassroomDeskDrawer());
+  panel.scene.add(panel.presetInteriorRoot);
+  panel.disposePresetInterior();
+  assert.equal(environmentDisposed, 0, 'removing metal frames cannot dispose the shared environment');
+  panel.renderer.dispose = () => {};
+  panel.ngOnDestroy();
+  panel.ngOnDestroy();
+  assert.equal(environmentDisposed, 1);
+  furniture.dispose();
+  floor.dispose();
+});
+
+test('furniture reflection failures release temporary GPU helpers and remain explicit', () => {
+  let disposed = 0;
+  const panel = panelHarness({
+    three: { ...require('three'), PMREMGenerator: class {
+      fromScene() { throw new Error('test reflection failure'); }
+      dispose() { disposed++; }
+    } },
+    modules: { 'three/examples/jsm/environments/RoomEnvironment.js': {
+      RoomEnvironment: class { dispose() { disposed++; } },
+    } },
+  }).panel;
+  assert.throws(() => panel.createClassroomFurnitureEnvironment(), /test reflection failure/);
+  assert.equal(disposed, 2);
+  assert.equal(panel.classroomFurnitureEnvironment, null);
 });
 
 test('student desks leave clearance from the teaching area and keep chairs, bags and helipad inside the classroom', () => {
@@ -860,6 +1079,54 @@ test('student desks leave clearance from the teaching area and keep chairs, bags
   near(getClassroomDeskLayout().firstRowX, -1.3);
 });
 
+test('classroom helipad uses a distinct matte orange surface with high-contrast markings at the original position', async () => {
+  const THREE = require('three');
+  const panel = panelHarness({
+    globals: {
+      URL, window: { location: { href: 'http://localhost/' } },
+      document: { createElement: () => ({ getContext: () => null }) },
+    },
+    three: { ...THREE, TextureLoader: class {
+      async loadAsync() { return new THREE.Texture(); }
+    } },
+  }).panel;
+  const deskAsset = { geometry: new THREE.BoxGeometry(), material: new THREE.MeshStandardMaterial() };
+  panel.scene = new THREE.Scene();
+  panel.applyVarnishedPineFinish = () => {};
+  panel.loadClassroomProtoAsset = async () => new THREE.Group();
+  panel.loadClassroomDeskAsset = async () => deskAsset;
+  try {
+    panel.rebuildPresetInterior('classroom', { width: 8.2, depth: 6.2, height: 3 });
+    await new Promise(resolve => setImmediate(resolve));
+    const root = panel.presetInteriorRoot;
+    const base = root.getObjectByName('Classroom desk helipad');
+    const top = root.children.find(part => part.geometry?.parameters.radiusTop === 0.126);
+    const plate = root.children.find(part => part.geometry?.parameters.width === 0.284);
+    const marks = root.children.filter(part => part.material?.color.getHexString() === '203a46');
+    assert.equal(base.material.color.getHexString(), 'ad5b2b');
+    assert.equal(plate.material.color.getHexString(), 'f6c76a');
+    assert.equal(top.material.color.getHexString(), 'ee923a');
+    assert.equal(marks.length, 19, 'keep sixteen safety dashes and three H bars');
+    const luminance = color => 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+    const contrast = (luminance(top.material.color) + 0.05) / (luminance(marks[0].material.color) + 0.05);
+    assert.ok(contrast >= 4.5, 'markings must contrast clearly with the orange landing surface');
+    assert.ok(top.material.roughness >= 0.75 && top.material.envMap === null);
+    const deskColor = new THREE.Color('#efd0a0');
+    const colorDistance = top.material.color.toArray().reduce((sum, value, index) =>
+      sum + (value - deskColor.toArray()[index]) ** 2, 0);
+    assert.ok(colorDistance > 0.2, 'orange must remain distinct from the warm tabletop');
+    near(base.position.x, getClassroomDeskLayout().helipadPose.x);
+    near(base.position.z, getClassroomDeskLayout().helipadPose.z);
+    near(base.position.y, 0.72201);
+    near(base.geometry.parameters.width, 0.3);
+    near(top.position.y, 0.74501);
+  } finally {
+    panel.disposePresetInterior();
+    deskAsset.geometry.dispose();
+    deskAsset.material.dispose();
+  }
+});
+
 test('school chairs have rounded wood panels, a continuous steel back and four floor-contacting rubber feet', () => {
   const { Box3 } = require('three');
   const chair = panelHarness().panel.createClassroomChair();
@@ -870,6 +1137,8 @@ test('school chairs have rounded wood panels, a continuous steel back and four f
   assert.equal(feet.length, 4);
   for (const foot of feet) near(new Box3().setFromObject(foot).min.y, 0.012);
   assert.equal(chair.children.filter(part => part.name === 'Chair steel leg').length, 4);
+  assert.equal(chair.children.filter(part => part.name === 'Chair back fastener').length, 2);
+  assert.equal(chair.getObjectByName('Chair steel leg').geometry.parameters.radialSegments, 16);
   const bounds = new Box3().setFromObject(chair);
   assert.ok(bounds.max.y > 0.75 && bounds.max.y < 0.8);
   assert.ok(bounds.max.z - bounds.min.z < 0.4, 'chair must fit inside each 1.1m column');
@@ -892,7 +1161,10 @@ test('lectern has textured-panel attachment, rounded edges and a sloped reading 
   const { Box3 } = require('three');
   const lectern = panelHarness().panel.createClassroomLectern();
   const panels = lectern.getObjectByName('Lectern wood panels');
-  assert.equal(panels.children.length, 5);
+  assert.equal(panels.children.length, 10);
+  assert.equal(panels.children.filter(part => part.name === 'Lectern raised panel stile').length, 2);
+  assert.equal(panels.children.filter(part => part.name === 'Lectern raised panel rail').length, 2);
+  assert.ok(panels.getObjectByName('Lectern interior shelf'));
   assert.ok(panels.children.some(part => part.rotation.x < -0.2));
   lectern.traverse(node => {
     if (!node.isMesh) return;

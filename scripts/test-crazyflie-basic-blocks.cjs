@@ -20,6 +20,7 @@ const source = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'compo
 const { createCrazyflieBasicToolbox, registerCrazyflieBasicBlocks, crazyflieGenerator } =
   require(path.join(source, 'basic-blocks.ts'));
 const { compileCrazyflieFlow } = require(path.join(source, 'compile-flow.ts'));
+const { CRAZYFLIE_EXAMPLES, createCrazyflieExample } = require(path.join(source, 'examples.ts'));
 const radio = require(path.join(source, 'radio-blocks.ts'));
 const {
   registerCrazyflieMotionBlocks, createCrazyflieMotionToolbox, parseMotionCall, validateMotionCommand,
@@ -77,6 +78,54 @@ test('legacy straight-line flight still generates valid Python', () => {
   assert.match(code, /cf_takeoff\(\)/);
   assert.match(code, /cf_land\(\)/);
   assert.doesNotMatch(code, /while True/);
+});
+
+test('basic example list compiles exact self-test and flight plans with deliberate waits', () => {
+  assert.deepEqual(CRAZYFLIE_EXAMPLES.map(example => example.id), ['self-test', 'hover', 'back-and-forth', 'square']);
+  const expected = {
+    'self-test': ['cf_test_link()', 'cf_delay(2)', 'cf_crazyflie_link()', 'cf_delay(2)',
+      'cf_test_crazyflie_link()', 'cf_delay(3)'],
+    hover: ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_motion("takeoff", [0.3, 0.2])',
+      'cf_delay(3)', 'cf_motion("land", [0.2])', 'cf_delay(2)'],
+    'back-and-forth': ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_motion("takeoff", [0.3, 0.2])', 'cf_delay(2)',
+      'cf_motion("move", [0.3, 0, 0, 0.2])', 'cf_delay(1)', 'cf_motion("move", [-0.3, 0, 0, 0.2])',
+      'cf_delay(1)', 'cf_motion("land", [0.2])', 'cf_delay(2)'],
+    square: ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_motion("takeoff", [0.3, 0.2])', 'cf_delay(2)',
+      'cf_motion("move", [0.3, 0, 0, 0.2])', 'cf_delay(1)', 'cf_motion("move", [0, 0.3, 0, 0.2])', 'cf_delay(1)',
+      'cf_motion("move", [-0.3, 0, 0, 0.2])', 'cf_delay(1)', 'cf_motion("move", [0, -0.3, 0, 0.2])', 'cf_delay(1)',
+      'cf_motion("land", [0.2])', 'cf_delay(2)'],
+  };
+  const sim = simulator();
+  for (const example of CRAZYFLIE_EXAMPLES) {
+    const state = createCrazyflieExample(example.id);
+    const original = JSON.stringify(state);
+    const ws = workspace([state]);
+    assert.deepEqual(JSON.parse(JSON.stringify(sim.parseCommands(compile(ws)))),
+      JSON.parse(JSON.stringify(sim.parseCommands(expected[example.id].join('\n')))), example.id);
+    assert.equal(JSON.stringify(state), original, 'loading cannot mutate reusable example data');
+    const restored = workspace([]);
+    Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
+    assert.equal(compile(restored), compile(ws), 'saving and reopening must keep the delays and values');
+    assert.notEqual(createCrazyflieExample(example.id), state, 'each insertion must have fresh state');
+  }
+  assert.throws(() => createCrazyflieExample('unknown'), /Unknown Crazyflie example/);
+});
+
+test('all Settings languages include example names, instructions and explicit motor warnings', () => {
+  const languages = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', 'i18n.json'), 'utf8'));
+  const keys = [...CRAZYFLIE_EXAMPLES.flatMap(example => [example.titleKey, example.descriptionKey]),
+    ...['MENU', 'SELF_TEST_NOTICE', 'FLIGHT_NOTICE', 'BUSY', 'ERROR'].map(key => `CRAZYFLIE_EXAMPLES.${key}`),
+    'CRAZYFLIE_TOOLBOX.UNAVAILABLE'];
+  for (const { code } of languages) {
+    const data = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', code, `${code}.json`), 'utf8'));
+    for (const key of keys) {
+      const value = key.split('.').reduce((value, part) => value?.[part], data);
+      assert.equal(typeof value, 'string', `${code}: ${key}`);
+      assert.ok(value.trim());
+    }
+    if (code === 'zh_cn') assert.match(data.CRAZYFLIE_EXAMPLES.SELF_TEST_NOTICE, /驱动电机.*拆下螺旋桨/);
+    if (code === 'en') assert.match(data.CRAZYFLIE_EXAMPLES.SELF_TEST_NOTICE, /motors.*remove the propellers/);
+  }
 });
 
 test('Crazyradio parameters generate addressed official URIs and round-trip saved blocks', () => {
