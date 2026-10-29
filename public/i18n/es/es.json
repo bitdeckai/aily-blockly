@@ -1,4 +1,33 @@
 {
+    "CRAZYFLIE_HOME": {
+        "MASTER": "Dormitorio principal", "CHILD": "Habitación infantil", "GUEST": "Dormitorio de invitados", "LIVING": "Sala de estar",
+        "KITCHEN": "Cocina", "BATHROOM": "Baño", "ENTRY": "Entrada y comedor", "BALCONY": "Terraza ajardinada", "HALLWAY": "Pasillo"
+    },
+    "CRAZYFLIE_EXPLORATION": {
+        "REFERENCE": "Plano de referencia", "TEACHING_MAP": "Mapa educativo original a escala, no una réplica exacta",
+        "SCENE": "Escena de exploración",
+        "CLASSROOM": "Aula", "HOME": "Casa", "ANIMALS": "Museo de animales", "BOTANICAL": "Museo botánico",
+        "SCIENCE": "Museo de ciencias", "SPACE": "Estación espacial", "OCEAN": "Exploración submarina",
+        "MISSION": "Puntos de vuelo", "SIM_ONLY": "Solo simulación", "RULE": "Orden libre · Permanecer 1 segundo a menos de 25 cm",
+        "RESET": "Reiniciar puntos", "VIEW_ONLY": "Resalta el punto y mueve la cámara, no la aeronave", "HEIGHT": "Alt.",
+        "GUIDANCE": "Guía del objetivo", "DISTANCE": "Distancia", "CLEAR_SELECTION": "Quitar selección",
+        "VISITED": "¡Este punto ya está completo! Explora otro.",
+        "HOLD": "Dentro del objetivo: añade un bloque de espera de 1 segundo.", "DWELL_PROGRESS": "Progreso de permanencia",
+        "FORWARD": "Adelante", "BACK": "Atrás", "LEFT": "Izquierda", "RIGHT": "Derecha", "UP": "Subir", "DOWN": "Bajar",
+        "SELECT_POINT": "Selecciona un punto para resaltar el aro y ver la distancia y las direcciones.",
+        "GUIDANCE_HINT": "Las indicaciones siguen el rumbo simulado. Despega primero y programa los movimientos. La línea discontinua no evita obstáculos.",
+        "COORDINATES": "Metros desde el despegue: X delante+/detrás−, Y izquierda+/derecha−, altura hacia arriba. Girar no cambia los ejes.",
+        "BUILD": "Programa tu ruta a los aros con bloques de espera. Cada ejecución inicia un nuevo reto.",
+        "COMPLETE": "¡Todos los puntos alcanzados! ¡Has explorado todo el museo!",
+        "DISABLED": "Los puntos solo funcionan en simulación. No se usa la posición real ni el control de vuelo automático.",
+        "STATIONS": {
+            "DINOSAUR": "Fósil de dinosaurio", "GIRAFFE": "Jirafa", "PENGUIN": "Isla de pingüinos", "BUTTERFLY": "Jardín de mariposas", "WHALE": "Ballena azul",
+            "TREE": "Árbol de la vida", "FLOWER": "Jardín de flores", "CACTUS": "Cactus del desierto", "MUSHROOM": "Bosque de setas", "SEED": "Semilla germinando",
+            "ROBOT": "Amigo robot", "SOLAR": "Sistema solar", "ROCKET": "Laboratorio de cohetes", "GEARS": "Taller de engranajes", "ENERGY": "Energía limpia",
+            "BASE": "Base lunar", "STATION": "Estación espacial", "SATELLITE": "Satélite", "ROVER": "Explorador planetario", "PLANET": "Mirador de Saturno",
+            "CORAL": "Jardín de coral", "TURTLE": "Tortuga marina", "JELLYFISH": "Teatro de medusas", "SHIP": "Naufragio", "SUBMARINE": "Submarino abisal"
+        }
+    },
     "CRAZYFLIE_EXAMPLES": {
         "MENU": "Ejemplos básicos",
         "SELF_TEST": "Autoprueba (sin vuelo)",

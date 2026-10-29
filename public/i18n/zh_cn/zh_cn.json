@@ -1,4 +1,43 @@
 {
+    "CRAZYFLIE_HOME": {
+        "MASTER": "主卧", "CHILD": "儿童房", "GUEST": "客卧", "LIVING": "客厅",
+        "KITCHEN": "厨房", "BATHROOM": "卫生间", "ENTRY": "玄关与餐区", "BALCONY": "空中花园阳台", "HALLWAY": "走廊"
+    },
+    "CRAZYFLIE_EXPLORATION": {
+        "REFERENCE": "布局参考", "TEACHING_MAP": "原创缩比教学地图，非原馆精确复刻",
+        "SCENE": "探索场景",
+        "CLASSROOM": "教室",
+        "HOME": "家庭",
+        "ANIMALS": "动物博物馆",
+        "BOTANICAL": "植物博物馆",
+        "SCIENCE": "科学技术馆",
+        "SPACE": "星际探索站",
+        "OCEAN": "海底探险馆",
+        "MISSION": "飞行打卡",
+        "SIM_ONLY": "仅模拟",
+        "RULE": "自由顺序 · 距目标 25 cm 内停留 1 秒",
+        "RESET": "重置打卡",
+        "VIEW_ONLY": "选择点位：高亮并调整视角，不移动飞行器",
+        "GUIDANCE": "目标指引", "DISTANCE": "距目标", "CLEAR_SELECTION": "取消选择",
+        "VISITED": "这个点已经打卡，可以继续探索其他点。",
+        "HOLD": "已进入打卡范围：使用等待积木保持 1 秒。",
+        "DWELL_PROGRESS": "打卡停留进度",
+        "FORWARD": "向前", "BACK": "向后", "LEFT": "向左", "RIGHT": "向右", "UP": "上升", "DOWN": "下降",
+        "SELECT_POINT": "点选一个打卡点，查看高亮圆环、距离和方向提示。",
+        "GUIDANCE_HINT": "提示按模拟机头方向计算；先起飞，再自行编程。虚线只指向目标，不是避障航线。",
+        "HEIGHT": "高",
+        "COORDINATES": "坐标相对起飞点，单位米：X 前+/后−，Y 左+/右−，高度向上；转向不改变坐标轴。",
+        "BUILD": "自己搭积木飞到圆环处，并加上等待积木。每次运行重新打卡。",
+        "COMPLETE": "全部打卡成功！你完成了本馆的飞行探索！",
+        "DISABLED": "打卡只在“模拟”模式启用，不使用真机位置，不会自动控制飞行器。",
+        "STATIONS": {
+            "DINOSAUR": "恐龙化石", "GIRAFFE": "长颈鹿", "PENGUIN": "企鹅冰岛", "BUTTERFLY": "蝴蝶花园", "WHALE": "蓝鲸展区",
+            "TREE": "生命巨树", "FLOWER": "缤纷花园", "CACTUS": "沙漠仙人掌", "MUSHROOM": "蘑菇森林", "SEED": "种子萌芽",
+            "ROBOT": "机器人伙伴", "SOLAR": "太阳系模型", "ROCKET": "火箭实验室", "GEARS": "齿轮工坊", "ENERGY": "清洁能源",
+            "BASE": "月球基地", "STATION": "空间站", "SATELLITE": "人造卫星", "ROVER": "星球探测车", "PLANET": "土星观测台",
+            "CORAL": "珊瑚花园", "TURTLE": "海龟驿站", "JELLYFISH": "水母剧场", "SHIP": "沉船遗迹", "SUBMARINE": "深海潜水器"
+        }
+    },
     "CRAZYFLIE_EXAMPLES": {
         "MENU": "基础示例",
         "SELF_TEST": "基础自检（不飞行）",

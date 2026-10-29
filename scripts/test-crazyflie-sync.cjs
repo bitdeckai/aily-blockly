@@ -32,6 +32,7 @@ function load(filename) {
       if (['three', 'rxjs', 'blockly', 'blockly/blocks', 'blockly/python'].includes(name)) return require(name);
       if (name.endsWith('/crazyflie-attitude')) return load(path.join(services, 'crazyflie-attitude.ts'));
       if (name.endsWith('/crazyflie-classroom')) return load(path.join(services, 'crazyflie-classroom.ts'));
+      if (name.endsWith('/crazyflie-exploration')) return load(path.join(services, 'crazyflie-exploration.ts'));
       if (name.endsWith('/motion-blocks')) return load(path.join(generators, 'motion-blocks.ts'));
       if (name.endsWith('/radio-blocks')) return load(path.join(generators, 'radio-blocks.ts'));
       if (name.endsWith('/basic-blocks')) return load(path.join(generators, 'basic-blocks.ts'));
@@ -153,15 +154,27 @@ test('legacy/new project toolbox merges in either load order and hides only redu
   }
 });
 
-test('compact scene UI has only classroom/home, no removed controls, and one camera reset', () => {
+test('compact scene UI places all seven scenes directly after basic examples, with no removed controls and one camera reset', () => {
   const panelPath = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
     'blockly', 'components', 'crazyflie-sim-panel');
   const html = fs.readFileSync(path.join(panelPath, 'crazyflie-sim-panel.component.html'), 'utf8');
   assert.doesNotMatch(html, /导入平面图|导入3D模型|清除贴图|清除3D模型|togglePause|stepOnce|onSpeedChanged|setExplosionAmount|type="file"/);
   assert.equal((html.match(/click\)="resetCameraView\(\)"/g) || []).length, 1);
   const select = /<select class="sim-scene-select"[\s\S]+?<\/select>/.exec(html)[0];
-  assert.deepEqual([...select.matchAll(/<option value="([^"]+)"/g)].map(match => match[1]), ['classroom', 'home']);
+  const { CRAZYFLIE_SCENE_OPTIONS } = load(path.join(services, 'crazyflie-exploration.ts'));
+  assert.deepEqual(plain(CRAZYFLIE_SCENE_OPTIONS.map(scene => scene.id)),
+    ['classroom', 'home', 'animals', 'botanical', 'science', 'space', 'ocean']);
+  assert.match(select, /\*ngFor="let scene of sceneOptions" \[value\]="scene\.id"/);
+  assert.match(select, /\[selected\]="scene\.id === simService\.roomPreset\$\.value"/);
+  assert.match(select, /scene\.nameKey \| translate/);
   assert.match(select, /\[disabled\]="running"/);
+  assert.match(select, /\[value\]="simService\.roomPreset\$\.value"/);
+  assert.match(select, /\(change\)="onPresetSelected\(\$event\)"/);
+  const toolbar = html.slice(html.indexOf('<div class="sim-panel__toolbar">'), html.indexOf('<div class="sim-panel__controls">'));
+  assert.doesNotMatch(toolbar, /sim-scene-select/);
+  const controls = html.slice(html.indexOf('<div class="sim-panel__controls">'), html.indexOf('<div class="sim-panel__canvas-wrap">'));
+  assert.match(controls, /<button\b[^>]*\[nzDropdownMenu\]="examplesMenu"[^>]*>[\s\S]*?<\/button>\s*<select class="sim-scene-select"/);
+  assert.equal((html.match(/class="sim-scene-select"/g) || []).length, 1);
 });
 
 function toolboxLoader() {

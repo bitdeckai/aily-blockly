@@ -1,4 +1,33 @@
 {
+    "CRAZYFLIE_HOME": {
+        "MASTER": "Chambre principale", "CHILD": "Chambre d'enfant", "GUEST": "Chambre d'amis", "LIVING": "Salon",
+        "KITCHEN": "Cuisine", "BATHROOM": "Salle de bains", "ENTRY": "Entrée et salle à manger", "BALCONY": "Terrasse-jardin", "HALLWAY": "Couloir"
+    },
+    "CRAZYFLIE_EXPLORATION": {
+        "REFERENCE": "Plan de référence", "TEACHING_MAP": "Carte pédagogique originale réduite, pas une réplique exacte",
+        "SCENE": "Scène d'exploration",
+        "CLASSROOM": "Classe", "HOME": "Maison", "ANIMALS": "Musée des animaux", "BOTANICAL": "Musée botanique",
+        "SCIENCE": "Musée des sciences", "SPACE": "Station spatiale", "OCEAN": "Exploration sous-marine",
+        "MISSION": "Étapes de vol", "SIM_ONLY": "Simulation uniquement", "RULE": "Ordre libre · Rester 1 seconde à moins de 25 cm",
+        "RESET": "Réinitialiser les étapes", "VIEW_ONLY": "Surligner une étape et déplacer la caméra, pas l'appareil", "HEIGHT": "H",
+        "GUIDANCE": "Guide de cible", "DISTANCE": "Distance", "CLEAR_SELECTION": "Effacer la sélection",
+        "VISITED": "Cette étape est terminée. Explore une autre étape !",
+        "HOLD": "Dans la cible : ajoute un bloc d'attente de 1 seconde.", "DWELL_PROGRESS": "Progression du séjour",
+        "FORWARD": "Avancer", "BACK": "Reculer", "LEFT": "Gauche", "RIGHT": "Droite", "UP": "Monter", "DOWN": "Descendre",
+        "SELECT_POINT": "Choisis une étape pour surligner son anneau et voir la distance et les directions.",
+        "GUIDANCE_HINT": "Les indications suivent le cap simulé. Décolle d'abord et programme toi-même les mouvements. Les pointillés ne sont pas un trajet évitant les obstacles.",
+        "COORDINATES": "Mètres depuis le départ : X avant+/arrière−, Y gauche+/droite−, hauteur vers le haut. Les axes ne tournent pas.",
+        "BUILD": "Programme ton trajet vers les anneaux avec des blocs d'attente. Chaque exécution relance le défi.",
+        "COMPLETE": "Toutes les étapes atteintes ! Tu as exploré tout le musée !",
+        "DISABLED": "Les étapes sont réservées à la simulation. Aucune position réelle ni commande de vol automatique.",
+        "STATIONS": {
+            "DINOSAUR": "Fossile de dinosaure", "GIRAFFE": "Girafe", "PENGUIN": "Île des manchots", "BUTTERFLY": "Jardin des papillons", "WHALE": "Baleine bleue",
+            "TREE": "Arbre de vie", "FLOWER": "Jardin fleuri", "CACTUS": "Cactus du désert", "MUSHROOM": "Forêt de champignons", "SEED": "Graine germée",
+            "ROBOT": "Ami robot", "SOLAR": "Système solaire", "ROCKET": "Laboratoire de fusées", "GEARS": "Atelier d'engrenages", "ENERGY": "Énergie propre",
+            "BASE": "Base lunaire", "STATION": "Station spatiale", "SATELLITE": "Satellite", "ROVER": "Rover planétaire", "PLANET": "Observatoire de Saturne",
+            "CORAL": "Jardin de corail", "TURTLE": "Tortue marine", "JELLYFISH": "Théâtre des méduses", "SHIP": "Épave", "SUBMARINE": "Sous-marin des abysses"
+        }
+    },
     "CRAZYFLIE_EXAMPLES": {
         "MENU": "Exemples de base",
         "SELF_TEST": "Autotest (sans vol)",

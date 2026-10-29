@@ -8,7 +8,8 @@
 
 .sim-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(220px, 1fr) minmax(0, auto);
   width: 100%;
   height: 100%;
   background: color-mix(in srgb, var(--aily-bg-primary) 92%, #12161c);
@@ -183,7 +184,195 @@
   background: color-mix(in srgb, var(--aily-bg-tertiary) 90%, transparent);
   color: var(--aily-text-secondary);
   font-size: 12px;
+  max-width: 180px;
+}
 
+.sim-mission {
+  margin-bottom: 8px;
+  border: 1px solid var(--aily-border-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--aily-bg-tertiary) 65%, transparent);
+  color: var(--aily-text-secondary);
+  font-size: 12px;
+
+  summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--aily-text-primary);
+
+    &::before {
+      content: '+';
+      width: 10px;
+    }
+  }
+
+  &[open] summary::before {
+    content: '-';
+  }
+
+  &__badge {
+    margin-left: auto;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #b8dcd4;
+    background: #32625944;
+    font-size: 11px;
+  }
+
+  &__intro {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 0 10px 6px;
+  }
+
+  &__points {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+    gap: 5px;
+    max-height: 150px;
+    overflow-y: auto;
+    padding: 0 8px;
+  }
+
+  &__point {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--aily-border-primary);
+    border-radius: 6px;
+    color: var(--aily-text-secondary);
+    background: var(--aily-bg-primary);
+    text-align: start;
+    cursor: pointer;
+
+    strong {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    &:hover, &:focus-visible, &.dwelling {
+      border-color: #d3b86e;
+    }
+
+    &.visited {
+      border-color: #5a9c83;
+      background: color-mix(in srgb, #4d8c71 15%, var(--aily-bg-primary));
+    }
+
+    &.selected {
+      outline: 1px solid #83c6d4;
+      outline-offset: -2px;
+    }
+  }
+
+  &__number {
+    display: grid;
+    place-items: center;
+    flex: 0 0 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #a68a4d33;
+    color: var(--aily-text-primary);
+    font-weight: 600;
+  }
+
+  &__coordinates {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  &__dwell {
+    margin-inline-start: auto;
+    font-size: 11px;
+    color: #d3b86e;
+  }
+
+  &__hint, &__result {
+    padding: 5px 10px;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  &__result {
+    color: var(--aily-text-primary);
+  }
+
+  &__guidance {
+    margin: 8px;
+    padding: 8px;
+    border: 1px solid #83c6d488;
+    border-radius: 6px;
+    background: color-mix(in srgb, #4c8596 12%, var(--aily-bg-primary));
+    overflow-wrap: anywhere;
+
+    p {
+      margin: 6px 0 0;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    progress {
+      display: block;
+      width: 100%;
+      height: 8px;
+      margin-top: 6px;
+      accent-color: #82c8a9;
+    }
+  }
+
+  &__guidance-title, &__directions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    color: var(--aily-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__guidance-title {
+    margin-bottom: 6px;
+
+    strong {
+      font-size: 13px;
+    }
+
+    button {
+      margin-inline-start: auto;
+    }
+  }
+
+  &__directions span {
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: #83c6d41a;
+    font-size: 13px;
+  }
+
+  &__arrival {
+    color: #82c8a9;
+    font-weight: 500;
+  }
+
+  &--complete &__result {
+    color: #82c8a9;
+  }
+
+  .sim-quick-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .sim-panel__canvas-wrap {
@@ -334,6 +523,9 @@
 
 .sim-panel__footer {
   padding: 8px 12px;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: 280px;
 }
 
 .sim-panel__step {

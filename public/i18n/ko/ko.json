@@ -1,4 +1,33 @@
 {
+    "CRAZYFLIE_HOME": {
+        "MASTER": "안방", "CHILD": "어린이 방", "GUEST": "손님 침실", "LIVING": "거실",
+        "KITCHEN": "주방", "BATHROOM": "욕실", "ENTRY": "현관과 식사 공간", "BALCONY": "하늘 정원 테라스", "HALLWAY": "복도"
+    },
+    "CRAZYFLIE_EXPLORATION": {
+        "REFERENCE": "배치 참고", "TEACHING_MAP": "정확한 복제본이 아닌 독창적인 축소 교육 지도",
+        "SCENE": "탐험 장면",
+        "CLASSROOM": "교실", "HOME": "집", "ANIMALS": "동물 박물관", "BOTANICAL": "식물 박물관",
+        "SCIENCE": "과학 기술관", "SPACE": "우주 탐험 기지", "OCEAN": "해저 탐험관",
+        "MISSION": "비행 체크포인트", "SIM_ONLY": "시뮬레이션 전용", "RULE": "순서 자유 · 목표 25 cm 안에서 1초 머물기",
+        "RESET": "진행 초기화", "VIEW_ONLY": "목표를 강조하고 시점만 바꾸며 기체는 이동하지 않습니다", "HEIGHT": "높이",
+        "GUIDANCE": "목표 안내", "DISTANCE": "목표까지", "CLEAR_SELECTION": "선택 해제",
+        "VISITED": "이 지점은 완료했어요. 다른 지점을 탐험해 보세요!",
+        "HOLD": "목표 범위 안이에요. 대기 블록으로 1초 머물러 보세요.", "DWELL_PROGRESS": "머무르기 진행률",
+        "FORWARD": "앞으로", "BACK": "뒤로", "LEFT": "왼쪽", "RIGHT": "오른쪽", "UP": "상승", "DOWN": "하강",
+        "SELECT_POINT": "지점을 선택하면 링이 강조되고 거리와 방향 안내가 표시돼요.",
+        "GUIDANCE_HINT": "안내는 모의 기체의 방향을 기준으로 해요. 먼저 이륙하고 직접 동작을 프로그래밍하세요. 점선은 장애물을 피하는 경로가 아닙니다.",
+        "COORDINATES": "이륙점 기준 미터 좌표: X 앞+/뒤−, Y 왼쪽+/오른쪽−, 높이는 위쪽. 회전해도 좌표축은 유지됩니다.",
+        "BUILD": "링까지의 비행과 대기를 블록으로 만들어 보세요. 실행할 때마다 진행이 초기화됩니다.",
+        "COMPLETE": "모든 지점 완료! 박물관 비행 탐험에 성공했어요!",
+        "DISABLED": "체크포인트는 시뮬레이션 전용입니다. 실제 기체 위치나 자동 비행 제어는 사용하지 않습니다.",
+        "STATIONS": {
+            "DINOSAUR": "공룡 화석", "GIRAFFE": "기린", "PENGUIN": "펭귄 섬", "BUTTERFLY": "나비 정원", "WHALE": "대왕고래",
+            "TREE": "생명의 나무", "FLOWER": "꽃 정원", "CACTUS": "사막 선인장", "MUSHROOM": "버섯 숲", "SEED": "씨앗 발아",
+            "ROBOT": "로봇 친구", "SOLAR": "태양계 모형", "ROCKET": "로켓 연구실", "GEARS": "기어 공방", "ENERGY": "청정 에너지",
+            "BASE": "달 기지", "STATION": "우주 정거장", "SATELLITE": "인공위성", "ROVER": "행성 탐사차", "PLANET": "토성 전망대",
+            "CORAL": "산호 정원", "TURTLE": "바다거북", "JELLYFISH": "해파리 극장", "SHIP": "난파선", "SUBMARINE": "심해 잠수정"
+        }
+    },
     "CRAZYFLIE_EXAMPLES": {
         "MENU": "기본 예제",
         "SELF_TEST": "자가 진단 (비행 없음)",

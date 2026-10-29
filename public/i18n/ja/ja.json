@@ -1,4 +1,33 @@
 {
+    "CRAZYFLIE_HOME": {
+        "MASTER": "主寝室", "CHILD": "子供部屋", "GUEST": "客用寝室", "LIVING": "リビング",
+        "KITCHEN": "キッチン", "BATHROOM": "浴室・トイレ", "ENTRY": "玄関とダイニング", "BALCONY": "空中庭園テラス", "HALLWAY": "廊下"
+    },
+    "CRAZYFLIE_EXPLORATION": {
+        "REFERENCE": "配置の参考", "TEACHING_MAP": "独自の縮尺教材マップで、実施設の正確な複製ではありません",
+        "SCENE": "探検シーン",
+        "CLASSROOM": "教室", "HOME": "家", "ANIMALS": "動物博物館", "BOTANICAL": "植物博物館",
+        "SCIENCE": "科学技術館", "SPACE": "宇宙探検基地", "OCEAN": "海底探検館",
+        "MISSION": "飛行チェックポイント", "SIM_ONLY": "シミュレーション専用", "RULE": "順番自由 · 目標の25 cm以内で1秒滞在",
+        "RESET": "進捗をリセット", "VIEW_ONLY": "目標を強調して視点を移動します。機体は移動しません", "HEIGHT": "高さ",
+        "GUIDANCE": "目標ガイド", "DISTANCE": "目標まで", "CLEAR_SELECTION": "選択を解除",
+        "VISITED": "この地点はクリア済み。別の地点を探検しよう！",
+        "HOLD": "範囲内です。待機ブロックで1秒滞在しよう。", "DWELL_PROGRESS": "滞在の進捗",
+        "FORWARD": "前へ", "BACK": "後ろへ", "LEFT": "左へ", "RIGHT": "右へ", "UP": "上昇", "DOWN": "下降",
+        "SELECT_POINT": "地点を選ぶとリングが強調され、距離と方向のヒントが表示されます。",
+        "GUIDANCE_HINT": "ヒントは模擬機体の向きが基準です。離陸してから自分で動きをプログラムしよう。点線は障害物を避ける経路ではありません。",
+        "COORDINATES": "離陸点からのメートル座標：X 前+/後−、Y 左+/右−、高さは上向き。旋回しても座標軸は変わりません。",
+        "BUILD": "リングまでの飛行経路と待機をブロックで作ろう。実行ごとに進捗がリセットされます。",
+        "COMPLETE": "全地点クリア！館内の飛行探検を達成しました！",
+        "DISABLED": "チェックポイントはシミュレーション専用です。実機の位置や自動操縦は使用しません。",
+        "STATIONS": {
+            "DINOSAUR": "恐竜の化石", "GIRAFFE": "キリン", "PENGUIN": "ペンギン島", "BUTTERFLY": "チョウの庭", "WHALE": "シロナガスクジラ",
+            "TREE": "生命の大樹", "FLOWER": "花の庭", "CACTUS": "砂漠のサボテン", "MUSHROOM": "キノコの森", "SEED": "種の発芽",
+            "ROBOT": "ロボットの友達", "SOLAR": "太陽系模型", "ROCKET": "ロケット研究室", "GEARS": "歯車工房", "ENERGY": "クリーンエネルギー",
+            "BASE": "月面基地", "STATION": "宇宙ステーション", "SATELLITE": "人工衛星", "ROVER": "惑星探査車", "PLANET": "土星展望台",
+            "CORAL": "サンゴの庭", "TURTLE": "ウミガメ", "JELLYFISH": "クラゲ劇場", "SHIP": "沈没船", "SUBMARINE": "深海潜水艇"
+        }
+    },
     "CRAZYFLIE_EXAMPLES": {
         "MENU": "基本サンプル",
         "SELF_TEST": "セルフテスト（飛行なし）",

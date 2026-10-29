@@ -591,6 +591,7 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
       if (name === 'rxjs') return require(name);
       if (name.endsWith('/crazyflie-attitude')) return helper.exports;
       if (name.endsWith('/crazyflie-classroom')) return classroom.exports;
+      if (name.endsWith('/crazyflie-exploration')) return require(path.join(root, 'src', 'app', 'services', 'crazyflie-exploration.ts'));
       if (name.endsWith('/GLTFLoader.js')) return { GLTFLoader: class {} };
       if (name.endsWith('/ColladaLoader.js')) return { ColladaLoader: class {} };
       if (name.endsWith('/RoundedBoxGeometry.js')) return require(name);
@@ -605,6 +606,7 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
   const sim = {
     pose$: { value: { x: 0, y: 0, z: 0, yaw: 0 } },
     poseSource$: { value: 'simulation' }, realAttitude$: { value: null },
+    roomPreset$: { value: 'classroom' },
   };
   const { BehaviorSubject } = require('rxjs');
   const connection = { state$: new BehaviorSubject({ status: 'disconnected' }),
@@ -630,6 +632,116 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
     get rendered() { return rendered; },
   };
 }
+
+test('exploration camera fit keeps all floor and exhibit bounds visible in narrow and wide viewports', () => {
+  const THREE = require('three');
+  for (const aspect of [0.55, 1, 1.8]) {
+    const { panel } = panelHarness();
+    panel.camera = new THREE.PerspectiveCamera(58, aspect, 0.005, 100);
+    panel.camera.position.set(5.2, 4, -3.2);
+    panel.controls = { target: new THREE.Vector3(0, 0.8, 0), update() {}, enabled: true };
+    const bounds = new THREE.Box3(new THREE.Vector3(-4, -0.2, -4), new THREE.Vector3(4, 3, 4));
+    panel.frameCameraBounds(bounds, 0, true);
+    panel.camera.lookAt(panel.controls.target);
+    panel.camera.updateMatrixWorld(true);
+    for (const x of [-4, 4]) for (const y of [-0.2, 3]) for (const z of [-4, 4]) {
+      const screen = new THREE.Vector3(x, y, z).project(panel.camera);
+      assert.ok(Math.abs(screen.x) <= 1 && Math.abs(screen.y) <= 1, `${aspect}: ${screen.toArray()}`);
+      assert.ok(screen.z >= -1 && screen.z <= 1);
+    }
+  }
+});
+
+test('checkpoint selection provides simulation-only body guidance without moving the aircraft and hides completed guides', () => {
+  const calls = [];
+  const { panel, sim } = panelHarness({ modules: {
+    '../../../../../../services/crazyflie-exploration-scene': {
+      updateExplorationMarkers: (...args) => calls.push(['markers', ...args]),
+      updateExplorationGuide: (...args) => calls.push(['guide', ...args]),
+    },
+  } });
+  panel.runtime = { policy$: { value: 'sim-only' } };
+  sim.roomPreset$.value = 'animals';
+  sim.explorationProgress$ = { value: { visited: [], dwelling: null, dwellPercent: 0 } };
+  sim.pose$.value = { x: 0, y: 0.06, z: 0, yaw: 0 };
+  panel.presetInteriorRoot = new Group();
+  panel.presetInteriorRoot.userData.exploration = true;
+  panel.camera = null;
+  const point = panel.explorationScene.points[0], original = { ...sim.pose$.value };
+  panel.focusCheckpoint(point);
+  assert.equal(panel.selectedCheckpointId, point.id);
+  assert.deepEqual(sim.pose$.value, original);
+  const moves = JSON.parse(JSON.stringify(panel.checkpointGuidance.moves));
+  assert.deepEqual(moves.map(move => move.key), ['FORWARD', 'RIGHT', 'UP']);
+  for (const [index, meters] of [1.2, 1.2, 0.6].entries()) assert.ok(Math.abs(moves[index].meters - meters) < 1e-8);
+  sim.pose$.value.yaw = Math.PI;
+  assert.equal(panel.checkpointGuidance.moves[0].key, 'BACK');
+  sim.explorationProgress$.value.visited = [point.id];
+  panel.updateExplorationMarkers();
+  assert.equal(calls.at(-1)[3], undefined, 'completed targets must not retain an active guide line');
+  for (const mode of ['sim-real', 'real-only']) {
+    panel.runtime.policy$.value = mode;
+    assert.equal(panel.checkpointGuidance, null);
+    panel.updateExplorationMarkers();
+    assert.equal(calls.at(-1)[4], false);
+  }
+  panel.runtime.policy$.value = 'sim-only';
+  sim.poseSource$.value = 'real';
+  assert.equal(panel.checkpointGuidance, null);
+  sim.poseSource$.value = 'simulation';
+  panel.clearCheckpointSelection();
+  assert.equal(panel.selectedCheckpointId, null);
+  assert.equal(panel.checkpointGuidance, null);
+});
+
+test('closing a themed scene releases the complete exploration root including navigation graphics', () => {
+  let disposed = 0;
+  const { panel } = panelHarness({ modules: {
+    '../../../../../../services/crazyflie-exploration-scene': { disposeExplorationScene: () => { disposed++; } },
+  } });
+  panel.scene = new (require('three').Scene)();
+  panel.presetInteriorRoot = new Group();
+  panel.presetInteriorRoot.userData.exploration = true;
+  panel.scene.add(panel.presetInteriorRoot);
+  panel.renderer = null;
+  panel.ngOnDestroy();
+  assert.equal(disposed, 1);
+  assert.equal(panel.presetInteriorRoot, null);
+  assert.equal(panel.scene.children.length, 0);
+});
+
+test('the furnished apartment replaces the legacy room, fits on reset and releases its owned scene on close', () => {
+  const THREE = require('three');
+  let built = 0, disposed = 0, fitted = 0;
+  const apartment = new THREE.Group();
+  apartment.userData.home = true;
+  const { panel, sim } = panelHarness({ modules: {
+    '../../../../../../services/crazyflie-home-scene': { createHomeScene: () => { built++; return apartment; } },
+    '../../../../../../services/crazyflie-exploration-scene': { disposeExplorationScene: root => {
+      assert.equal(root, apartment);
+      disposed++;
+    } },
+  } });
+  panel.scene = new THREE.Scene();
+  panel.floorMesh = { visible: true };
+  panel.roomWireframe = { visible: false };
+  panel.rebuildPresetInterior('custom', { width: 14, depth: 12, height: 3.2 });
+  assert.equal(panel.roomWireframe.visible, true);
+  sim.roomPreset$.value = 'home';
+  panel.rebuildPresetInterior('home', { width: 14, depth: 12, height: 3.2 });
+  assert.equal(built, 1);
+  assert.equal(panel.presetInteriorRoot, apartment);
+  assert.equal(panel.floorMesh.visible, false);
+  assert.equal(panel.roomWireframe.visible, false);
+  panel.camera = new THREE.PerspectiveCamera();
+  panel.fitCameraToScene = () => { fitted++; };
+  panel.resetCameraView();
+  assert.equal(fitted, 1, 'reset and initial home selection must frame the whole apartment');
+  panel.renderer = null;
+  panel.ngOnDestroy();
+  assert.equal(disposed, 1);
+  assert.equal(panel.presetInteriorRoot, null);
+});
 
 test('classroom palettes cache distinct light finishes, share detail maps and retry failed variants', async () => {
   const THREE = require('three');

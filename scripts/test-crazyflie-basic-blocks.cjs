@@ -503,6 +503,7 @@ function simulator() {
     exports,
     require: name => name === '@angular/core' ? { Injectable: () => type => type }
       : name.endsWith('/crazyflie-classroom') ? require(path.join(root, 'src', 'app', 'services', 'crazyflie-classroom.ts'))
+      : name.endsWith('/crazyflie-exploration') ? require(path.join(root, 'src', 'app', 'services', 'crazyflie-exploration.ts'))
       : name.endsWith('/crazyflie-attitude') ? require(path.join(root, 'src', 'app', 'services', 'crazyflie-attitude.ts'))
       : name.endsWith('/motion-blocks') ? require(path.join(source, 'motion-blocks.ts'))
       : name.endsWith('/radio-blocks') ? radio : require(name),

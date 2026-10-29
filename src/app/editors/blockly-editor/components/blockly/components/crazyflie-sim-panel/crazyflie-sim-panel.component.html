@@ -1,11 +1,6 @@
 <div class="sim-panel">
   <div class="sim-panel__toolbar">
     <div class="sim-panel__title">3D 模拟器</div>
-    <select class="sim-scene-select" aria-label="场景模型" [value]="simService.roomPreset$.value"
-      [disabled]="running" (change)="onPresetSelected($event)">
-      <option value="classroom">教室</option>
-      <option value="home">家庭</option>
-    </select>
     <div class="sim-panel__status" [class.running]="running" [class.loading]="!sceneReady && !running">
       {{ running ? '运行中' : (sceneReady ? '已就绪' : '加载中') }}
     </div>
@@ -16,6 +11,11 @@
       [disabled]="running" [nzDisabled]="running">
       {{ 'CRAZYFLIE_EXAMPLES.MENU' | translate }} <i class="fa-light fa-chevron-down" aria-hidden="true"></i>
     </button>
+    <select class="sim-scene-select" [attr.aria-label]="'CRAZYFLIE_EXPLORATION.SCENE' | translate" [value]="simService.roomPreset$.value"
+      [disabled]="running" (change)="onPresetSelected($event)">
+      <option *ngFor="let scene of sceneOptions" [value]="scene.id"
+        [selected]="scene.id === simService.roomPreset$.value">{{ scene.nameKey | translate }}</option>
+    </select>
     <nz-dropdown-menu #examplesMenu="nzDropdownMenu">
       <ul nz-menu class="sim-example-menu">
         <li nz-menu-item *ngFor="let example of flightExamples" [nzDisabled]="running" (click)="insertExample(example.id)">
@@ -101,6 +101,82 @@
   </div>
 
   <div class="sim-panel__footer">
+    @if (explorationScene; as expedition) {
+      @if (simService.explorationProgress$ | async; as progress) {
+        <details class="sim-mission" open [class.sim-mission--complete]="progress.visited.length === expedition.points.length && explorationEnabled">
+          <summary>
+            <span>{{ 'CRAZYFLIE_EXPLORATION.MISSION' | translate }}</span>
+            <span>{{ progress.visited.length }} / {{ expedition.points.length }}</span>
+            <span class="sim-mission__badge">{{ 'CRAZYFLIE_EXPLORATION.SIM_ONLY' | translate }}</span>
+          </summary>
+          @if (explorationEnabled) {
+            <div class="sim-mission__intro">
+              <span>{{ 'CRAZYFLIE_EXPLORATION.RULE' | translate }}</span>
+              <button type="button" class="sim-quick-btn" [disabled]="running" (click)="simService.resetExploration()">
+                {{ 'CRAZYFLIE_EXPLORATION.RESET' | translate }}
+              </button>
+            </div>
+            <div class="sim-mission__points">
+              @for (point of expedition.points; track point.id) {
+                <button type="button" class="sim-mission__point" [class.visited]="progress.visited.includes(point.id)"
+                  [class.selected]="selectedCheckpointId === point.id" [attr.aria-pressed]="selectedCheckpointId === point.id"
+                  [class.dwelling]="progress.dwelling === point.id" [title]="'CRAZYFLIE_EXPLORATION.VIEW_ONLY' | translate"
+                  (click)="focusCheckpoint(point)">
+                  <span class="sim-mission__number">{{ progress.visited.includes(point.id) ? '✓' : point.id }}</span>
+                  <span>
+                    <strong>{{ point.nameKey | translate }}</strong>
+                    <span class="sim-mission__coordinates">
+                      X {{ point.forward | number:'1.0-1' }} · Y {{ point.left | number:'1.0-1' }} ·
+                      {{ 'CRAZYFLIE_EXPLORATION.HEIGHT' | translate }} {{ point.height | number:'1.0-1' }} m
+                    </span>
+                  </span>
+                  @if (progress.dwelling === point.id) {
+                    <span class="sim-mission__dwell">{{ progress.dwellPercent }}%</span>
+                  }
+                </button>
+              }
+            </div>
+            @if (checkpointGuidance; as guidance) {
+              <section class="sim-mission__guidance" [attr.aria-label]="'CRAZYFLIE_EXPLORATION.GUIDANCE' | translate">
+                <div class="sim-mission__guidance-title">
+                  <strong>{{ guidance.point.id }} · {{ guidance.point.nameKey | translate }}</strong>
+                  <span>{{ 'CRAZYFLIE_EXPLORATION.DISTANCE' | translate }} {{ guidance.distanceCm | number:'1.0-1' }} cm</span>
+                  <button type="button" class="sim-quick-btn" (click)="clearCheckpointSelection()">
+                    {{ 'CRAZYFLIE_EXPLORATION.CLEAR_SELECTION' | translate }}
+                  </button>
+                </div>
+                @if (progress.visited.includes(guidance.point.id)) {
+                  <div class="sim-mission__arrival">{{ 'CRAZYFLIE_EXPLORATION.VISITED' | translate }}</div>
+                } @else if (guidance.inside) {
+                  <div class="sim-mission__arrival">{{ 'CRAZYFLIE_EXPLORATION.HOLD' | translate }}</div>
+                  <progress max="100" [value]="progress.dwelling === guidance.point.id ? progress.dwellPercent : 0"
+                    [attr.aria-label]="'CRAZYFLIE_EXPLORATION.DWELL_PROGRESS' | translate"></progress>
+                } @else {
+                  <div class="sim-mission__directions">
+                    @for (move of guidance.moves; track move.key) {
+                      <span>{{ ('CRAZYFLIE_EXPLORATION.' + move.key) | translate }} ≈ {{ move.meters | number:'1.2-2' }} m</span>
+                    }
+                  </div>
+                }
+                <p>{{ 'CRAZYFLIE_EXPLORATION.GUIDANCE_HINT' | translate }}</p>
+              </section>
+            } @else {
+              <div class="sim-mission__hint">{{ 'CRAZYFLIE_EXPLORATION.SELECT_POINT' | translate }}</div>
+            }
+            <div class="sim-mission__hint">{{ 'CRAZYFLIE_EXPLORATION.COORDINATES' | translate }}</div>
+            <div class="sim-mission__result" role="status" aria-live="polite">
+              {{ (progress.visited.length === expedition.points.length ? 'CRAZYFLIE_EXPLORATION.COMPLETE' : 'CRAZYFLIE_EXPLORATION.BUILD') | translate }}
+            </div>
+          } @else {
+            <div class="sim-mission__hint">{{ 'CRAZYFLIE_EXPLORATION.DISABLED' | translate }}</div>
+          }
+          <div class="sim-mission__hint" [title]="expedition.reference.url">
+            {{ 'CRAZYFLIE_EXPLORATION.REFERENCE' | translate }}：{{ expedition.reference.name }} ·
+            {{ 'CRAZYFLIE_EXPLORATION.TEACHING_MAP' | translate }}
+          </div>
+        </details>
+      }
+    }
     <div *ngIf="liveAttitude" class="attitude-metrics" [class.attitude-metrics--stale]="attitudeMetrics.stale" [title]="attitudePreviewMessage">
       真机姿态 · {{ attitudeStatus }} · 接收 {{ attitudeMetrics.hz | number:'1.0-1' }} Hz ·
       {{ attitudeMetrics.ageMs === null ? '等待数据' : ('距上次接收 ' + (attitudeMetrics.ageMs | number:'1.0-0') + ' ms') }}

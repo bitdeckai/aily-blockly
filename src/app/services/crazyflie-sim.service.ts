@@ -5,8 +5,8 @@ import { getClassroomDeskLayout } from './crazyflie-classroom';
 import { AttitudeReception, AttitudeSample, FlightPoseSample, isFlightPoseSample, relativeFlightPose } from './crazyflie-attitude';
 import { MotionCommand, motionDurationSeconds, parseMotionCall, validateMotionSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/motion-blocks';
 import { validateRadioScanSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/radio-blocks';
-
-export type CrazyflieRoomPreset = 'classroom' | 'home' | 'custom';
+import { CrazyflieRoomPreset, ExplorationProgress, ExplorationTracker, getExplorationScene, HOME_ROOM_SIZE } from './crazyflie-exploration';
+export type { CrazyflieRoomPreset } from './crazyflie-exploration';
 
 export interface CrazyfliePose {
   x: number;
@@ -58,6 +58,9 @@ export class CrazyflieSimService {
   });
   floorPlanUrl$ = new BehaviorSubject<string | null>(null);
   sceneModelUrl$ = new BehaviorSubject<string | null>(null);
+  readonly explorationProgress$ = new BehaviorSubject<ExplorationProgress>({ visited: [], dwelling: null, dwellPercent: 0 });
+  private explorationTracker = new ExplorationTracker([]);
+  private explorationClockMs = 0;
 
   private cancelRequested = false;
   private stepOnceTokens = 0;
@@ -74,19 +77,21 @@ export class CrazyflieSimService {
 
   cancelRun(): void {
     this.cancelRequested = true;
+    this.advanceExploration(0);
   }
 
   setPaused(paused: boolean): void {
     this.paused$.next(paused);
+    if (paused) this.advanceExploration(0);
   }
 
   togglePause(): void {
-    this.paused$.next(!this.paused$.value);
+    this.setPaused(!this.paused$.value);
   }
 
   requestStepOnce(): void {
     this.stepOnceTokens += 1;
-    this.paused$.next(true);
+    this.setPaused(true);
   }
 
   setSpeed(speed: number): void {
@@ -100,7 +105,10 @@ export class CrazyflieSimService {
     if (preset === 'classroom') {
       this.roomSize$.next({ width: 8.2, depth: 6.2, height: 3 });
     } else if (preset === 'home') {
-      this.roomSize$.next({ width: 5.5, depth: 7, height: 2.8 });
+      this.roomSize$.next({ ...HOME_ROOM_SIZE });
+    } else {
+      const exploration = getExplorationScene(preset);
+      if (exploration) this.roomSize$.next({ ...exploration.size });
     }
 
     if (!this.running$.value) {
@@ -148,9 +156,27 @@ export class CrazyflieSimService {
 
   resetPose(): void {
     if (this.followingReal$.value) throw new Error('真机同步期间不能复位；复位不会控制真机');
+    if (this.running$.value) throw new Error('运行期间不能复位模型');
     this.poseSource$.next('simulation');
     this.realAttitude$.next(null);
     this.pose$.next(this.getResetPoseForPreset(this.roomPreset$.value));
+    this.resetExploration();
+  }
+
+  resetExploration(): void {
+    if (this.running$.value) throw new Error('运行期间不能重置打卡进度');
+    this.explorationTracker = new ExplorationTracker(getExplorationScene(this.roomPreset$.value)?.points ?? []);
+    this.explorationClockMs = 0;
+    this.explorationProgress$.next({ visited: [], dwelling: null, dwellPercent: 0 });
+  }
+
+  private advanceExploration(durationMs: number): void {
+    this.explorationClockMs += durationMs;
+    const progress = this.explorationTracker.update(this.pose$.value, this.explorationClockMs,
+      this.running$.value && !this.paused$.value && !this.cancelRequested && this.poseSource$.value === 'simulation');
+    const previous = this.explorationProgress$.value;
+    if (progress.dwelling !== previous.dwelling || progress.dwellPercent !== previous.dwellPercent
+      || progress.visited.length !== previous.visited.length) this.explorationProgress$.next(progress);
   }
 
   beginRealFollow(): void {
@@ -209,11 +235,11 @@ export class CrazyflieSimService {
 
     this.cancelRequested = false;
     this.stepOnceTokens = 0;
-    this.running$.next(true);
     this.step$.next(null);
     this.logs$.next([]);
     this.paused$.next(false);
     this.resetPose();
+    this.running$.next(true);
 
     const pose: CrazyfliePose = this.getResetPoseForPreset(this.roomPreset$.value);
     let current = 0;
@@ -397,6 +423,7 @@ export class CrazyflieSimService {
       this.cancelRequested = false;
       this.stepOnceTokens = 0;
       this.running$.next(false);
+      this.advanceExploration(0);
       this.step$.next(null);
       this.paused$.next(false);
 
@@ -409,6 +436,7 @@ export class CrazyflieSimService {
       return { success: true, message: '模拟执行完成', executed };
     } catch (error: any) {
       this.running$.next(false);
+      this.advanceExploration(0);
       this.step$.next(null);
       this.paused$.next(false);
       this.appendLog(`sim error: ${error?.message || String(error)}`);
@@ -782,8 +810,10 @@ export class CrazyflieSimService {
     }
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+  private async sleep(ms: number): Promise<void> {
+    this.advanceExploration(0);
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
+    this.advanceExploration(Math.max(0, ms));
   }
 
   private getSimRangeDistances(pose: CrazyfliePose): Record<string, number> {

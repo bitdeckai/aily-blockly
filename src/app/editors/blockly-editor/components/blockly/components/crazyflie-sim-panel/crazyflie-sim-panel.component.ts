@@ -65,6 +65,15 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Subscription } from 'rxjs';
 import { CrazyflieSimService } from '../../../../../../services/crazyflie-sim.service';
+import { CrazyflieRuntimeService } from '../../../../../../services/crazyflie-runtime.service';
+import {
+  CRAZYFLIE_SCENE_OPTIONS, CrazyflieRoomPreset, ExplorationPoint, explorationGuidance, explorationPointPosition,
+  getExplorationScene, isSelectableRoomPreset,
+} from '../../../../../../services/crazyflie-exploration';
+import {
+  createExplorationScene, disposeExplorationScene, updateExplorationGuide, updateExplorationMarkers,
+} from '../../../../../../services/crazyflie-exploration-scene';
+import { createHomeScene } from '../../../../../../services/crazyflie-home-scene';
 import { getClassroomDeskLayout } from '../../../../../../services/crazyflie-classroom';
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
 import { BlocklyService } from '../../../../services/blockly.service';
@@ -106,6 +115,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   axesVisible = true;
   selectedView = 'iso';
   readonly flightExamples = CRAZYFLIE_EXAMPLES;
+  readonly sceneOptions = CRAZYFLIE_SCENE_OPTIONS;
+  selectedCheckpointId: number | null = null;
   attitudeMetrics: ReturnType<AttitudeReception['metrics']>;
   private attitudePreview: CrazyflieAttitudePreview | null = null;
   private attitudeViewport = { x: 0, y: 0, width: 0, height: 0 };
@@ -186,6 +197,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     private message: NzMessageService,
     private zone: NgZone,
     private translate: TranslateService,
+    private runtime: CrazyflieRuntimeService,
   ) {
     this.attitudeMetrics = connectionService.attitudeReception.metrics(performance.now());
   }
@@ -206,6 +218,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    if (this.presetInteriorRoot?.userData.exploration || this.presetInteriorRoot?.userData.home) this.disposePresetInterior();
     this.attitudePreview?.dispose();
     this.attitudePreview = null;
     this.subscriptions.forEach((sub) => sub.unsubscribe());
@@ -241,22 +254,66 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.clearMeasurement();
   }
 
-  setPreset(preset: 'classroom' | 'home'): void {
+  setPreset(preset: Exclude<CrazyflieRoomPreset, 'custom'>): void {
     if (this.running) {
       this.message.error('请先结束当前流程再切换场景');
       return;
     }
     this.simService.setRoomPreset(preset);
+    if (getExplorationScene(preset) || preset === 'home') this.resetCameraView();
   }
 
   onPresetSelected(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
-    if (value === 'classroom' || value === 'home') this.setPreset(value);
+    if (isSelectableRoomPreset(value)) this.setPreset(value);
     else this.message.error('不支持的场景模型');
   }
 
   get realPoseShown(): boolean {
     return this.simService.poseSource$.value === 'real';
+  }
+
+  get explorationScene() {
+    return getExplorationScene(this.simService.roomPreset$.value);
+  }
+
+  get explorationEnabled(): boolean {
+    return this.runtime.policy$.value === 'sim-only' && !this.realPoseShown;
+  }
+
+  get selectedCheckpoint(): ExplorationPoint | undefined {
+    return this.explorationScene?.points.find(point => point.id === this.selectedCheckpointId);
+  }
+
+  get checkpointGuidance() {
+    const point = this.selectedCheckpoint;
+    if (!point || !this.explorationEnabled) return null;
+    const guidance = explorationGuidance(this.simService.pose$.value, point);
+    const moves = [
+      { key: guidance.forward >= 0 ? 'FORWARD' : 'BACK', meters: Math.abs(guidance.forward) },
+      { key: guidance.left >= 0 ? 'LEFT' : 'RIGHT', meters: Math.abs(guidance.left) },
+      { key: guidance.up >= 0 ? 'UP' : 'DOWN', meters: Math.abs(guidance.up) },
+    ].filter(move => move.meters >= 0.005);
+    return { ...guidance, point, moves, distanceCm: Math.ceil(guidance.distance * 1000) / 10 };
+  }
+
+  clearCheckpointSelection(): void {
+    this.selectedCheckpointId = null;
+    this.updateExplorationMarkers();
+  }
+
+  focusCheckpoint(point: ExplorationPoint): void {
+    if (!this.explorationEnabled) return;
+    this.selectedCheckpointId = point.id;
+    this.updateExplorationMarkers();
+    const position = explorationPointPosition(point);
+    const bounds = new Box3(
+      new Vector3(position.x - 0.9, 0, position.z - 0.9),
+      new Vector3(position.x + 0.9, 2, position.z + 0.9),
+    );
+    const exhibit = this.presetInteriorRoot?.children.find(child => child.userData.exhibitId === point.id);
+    if (exhibit) bounds.expandByObject(exhibit);
+    this.frameCameraBounds(bounds, 0, true);
   }
 
   get displayedAttitude() {
@@ -430,6 +487,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.controls.update();
     }
     this.selectedView = 'iso';
+    if (this.explorationScene || this.simService.roomPreset$.value === 'home') this.fitCameraToScene();
   }
 
   private settleCameraControls(): void {
@@ -453,6 +511,12 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   fitCameraToScene(): void {
+    if ((this.explorationScene || this.simService.roomPreset$.value === 'home') && this.presetInteriorRoot) {
+      const bounds = new Box3().setFromObject(this.presetInteriorRoot);
+      if (this.droneGroup) bounds.expandByObject(this.droneGroup);
+      this.frameCameraBounds(bounds, 0, true);
+      return;
+    }
     const room = this.currentRoomSize;
     const bounds = new Box3(new Vector3(-room.width / 2, 0, -room.depth / 2), new Vector3(room.width / 2, room.height, room.depth / 2));
     if (this.sceneModelRoot) {
@@ -470,7 +534,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
   }
 
-  private frameCameraBounds(bounds: Box3, minimumSize = 0): void {
+  private frameCameraBounds(bounds: Box3, minimumSize = 0, fitCorners = false): void {
     if (!this.camera || !this.controls || bounds.isEmpty()) {
       return;
     }
@@ -480,12 +544,29 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     const verticalFov = MathUtils.degToRad(this.camera.fov);
     const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * this.camera.aspect);
     const diameter = Math.max(size.length(), minimumSize);
-    const distance = diameter / (2 * Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.1;
-    this.controls.maxDistance = Math.max(30, distance * 1.5);
+    let distance = diameter / (2 * Math.sin(Math.min(verticalFov, horizontalFov) / 2)) * 1.1;
     const direction = this.camera.position.clone().sub(this.controls.target).normalize();
     if (direction.lengthSq() === 0) {
       direction.set(1, 1, -1).normalize();
     }
+    if (fitCorners) {
+      const right = new Vector3().crossVectors(this.camera.up, direction).normalize();
+      const up = new Vector3().crossVectors(direction, right);
+      distance = 0;
+      for (const x of [bounds.min.x, bounds.max.x]) {
+        for (const y of [bounds.min.y, bounds.max.y]) {
+          for (const z of [bounds.min.z, bounds.max.z]) {
+            const offset = new Vector3(x, y, z).sub(center);
+            distance = Math.max(distance, offset.dot(direction) + Math.max(
+              Math.abs(offset.dot(right)) / Math.tan(horizontalFov / 2),
+              Math.abs(offset.dot(up)) / Math.tan(verticalFov / 2),
+            ));
+          }
+        }
+      }
+      distance *= 1.08;
+    }
+    this.controls.maxDistance = Math.max(30, distance * 1.5);
     this.controls.target.copy(center);
     this.camera.position.copy(center).addScaledVector(direction, distance);
     this.camera.far = Math.max(100, distance * 4);
@@ -633,6 +714,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.applyFloorPlanTexture(this.simService.floorPlanUrl$.value);
     this.applySceneModel(this.simService.sceneModelUrl$.value);
     this.updateAttitudeViewport();
+    if (this.explorationScene || this.simService.roomPreset$.value === 'home') this.resetCameraView();
   }
 
   private createDroneMesh(): Group {
@@ -1045,6 +1127,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
           altitudeCm: Math.max(0, Math.round(pose.y * 100)),
           yawDeg: Math.round(MathUtils.radToDeg(pose.yaw)),
         };
+        this.updateCheckpointGuide();
       }),
     );
 
@@ -1058,7 +1141,19 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.subscriptions.push(
       this.simService.roomPreset$.subscribe((preset) => {
+        this.selectedCheckpointId = null;
         this.rebuildPresetInterior(preset, this.currentRoomSize);
+      }),
+    );
+
+    this.subscriptions.push(
+      this.simService.explorationProgress$.subscribe(() => this.updateExplorationMarkers()),
+      this.simService.poseSource$.subscribe(() => this.updateExplorationMarkers()),
+      this.runtime.policy$.subscribe(() => this.updateExplorationMarkers()),
+      this.translate.onLangChange.subscribe(() => {
+        if (this.explorationScene || this.simService.roomPreset$.value === 'home') {
+          this.rebuildPresetInterior(this.simService.roomPreset$.value, this.currentRoomSize);
+        }
       }),
     );
 
@@ -2554,20 +2649,52 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return tools;
   }
 
-  private rebuildPresetInterior(preset: 'classroom' | 'home' | 'custom', room: { width: number; depth: number; height: number }): void {
+  private updateExplorationMarkers(): void {
+    if (this.presetInteriorRoot?.userData.exploration) {
+      updateExplorationMarkers(this.presetInteriorRoot, this.simService.explorationProgress$.value,
+        this.explorationEnabled, this.selectedCheckpointId);
+      this.updateCheckpointGuide();
+    }
+  }
+
+  private updateCheckpointGuide(): void {
+    if (!this.presetInteriorRoot?.userData.exploration) return;
+    const point = this.selectedCheckpoint;
+    const completed = point && this.simService.explorationProgress$.value.visited.includes(point.id);
+    updateExplorationGuide(this.presetInteriorRoot, this.simService.pose$.value,
+      completed ? undefined : point, this.explorationEnabled);
+  }
+
+  private rebuildPresetInterior(preset: CrazyflieRoomPreset, room: { width: number; depth: number; height: number }): void {
     if (!this.scene) {
       return;
     }
 
     this.disposePresetInterior();
 
+    const exploration = getExplorationScene(preset);
+    this.scene.background = new Color(exploration?.background ?? '#dfe8f2');
+    if (this.floorMesh) this.floorMesh.visible = !exploration && preset !== 'home';
+    if (this.roomWireframe) this.roomWireframe.visible = !exploration && preset !== 'home';
+    if (this.gridHelper) this.gridHelper.position.y = exploration || preset === 'home' ? 0.012 : 0.001;
     if (this.defaultLighting) {
       this.defaultLighting.visible = preset !== 'classroom';
     }
     if (this.renderer) {
-      this.renderer.toneMapping = preset === 'classroom' ? ACESFilmicToneMapping : NoToneMapping;
+      this.renderer.toneMapping = preset === 'classroom' || preset === 'home' || exploration ? ACESFilmicToneMapping : NoToneMapping;
     }
     if (preset === 'custom') {
+      return;
+    }
+    if (preset === 'home') {
+      this.presetInteriorRoot = createHomeScene(key => this.translate.instant(key));
+      this.scene.add(this.presetInteriorRoot);
+      return;
+    }
+    if (exploration) {
+      this.presetInteriorRoot = createExplorationScene(exploration, key => this.translate.instant(key));
+      this.scene.add(this.presetInteriorRoot);
+      this.updateExplorationMarkers();
       return;
     }
 
@@ -3055,6 +3182,11 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
 
     this.scene.remove(this.presetInteriorRoot);
+    if (this.presetInteriorRoot.userData.exploration || this.presetInteriorRoot.userData.home) {
+      disposeExplorationScene(this.presetInteriorRoot);
+      this.presetInteriorRoot = null;
+      return;
+    }
     this.presetInteriorRoot.traverse((node: any) => {
       if (node instanceof DirectionalLight) {
         node.shadow.dispose();
