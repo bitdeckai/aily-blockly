@@ -42,6 +42,7 @@ export interface NoticeOptions {
   state?: string,
   showProgress?: boolean,
   progress?: number,
+  /** Other states use this delay; done always dismisses after 5 seconds and error stays until closed. */
   setTimeout?: number,
   stop?: Function,
   detail?: string,

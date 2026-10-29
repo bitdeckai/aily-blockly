@@ -1,5 +1,5 @@
 <app-base-dialog 
-  [title]="'BOARD_SELECTOR.TITLE' | translate"
+  [title]="'ROBOTSTEM.SELECT_DEVICE' | translate"
   [buttons]="buttons"
   [showCloseButton]="!isLoading"
   (closeDialog)="onClose()"
@@ -8,7 +8,7 @@
   <!-- 搜索框 -->
   <div class="search-box">
     <input nz-input [(ngModel)]="searchKeyword" (ngModelChange)="onSearch()" 
-      [placeholder]="'BOARD_SELECTOR.SEARCH_PLACEHOLDER' | translate"
+      [placeholder]="'ROBOTSTEM.SEARCH_DEVICES' | translate"
       class="search-input" [disabled]="isLoading" />
   </div>
 

@@ -9,6 +9,10 @@ const projectLock = require("./project-lock");
 
 // 设置应用名称，用于 Windows 系统通知显示
 app.setName("aily blockly");
+// Preserve existing accounts, model settings and instance storage during rebranding.
+const legacyUserDataPath = app.getPath('userData');
+app.setName("RobotSTEM");
+app.setPath('userData', legacyUserDataPath);
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096');
 // 禁用 GPU 着色器磁盘缓存，避免 GPUCache 累积导致启动变慢
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -1298,7 +1302,7 @@ function createWindow() {
     titleBarStyle: isDarwin ? 'hiddenInset' : 'default',
     alwaysOnTop: false,
     autoHideMenuBar: true,
-    icon: serve ? path.join(__dirname, "../public/icon.ico") : path.join(process.resourcesPath, "icon.ico"),
+    icon: serve ? path.join(__dirname, "../public/robotstem.ico") : path.join(process.resourcesPath, "icon.ico"),
     webPreferences: {
       nodeIntegration: true,
       webSecurity: false,

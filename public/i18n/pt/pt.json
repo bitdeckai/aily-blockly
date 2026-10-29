@@ -1,4 +1,17 @@
 {
+    "ROBOTSTEM": {
+        "DEVICE": "Dispositivo",
+        "SELECT_DEVICE": "Escolher um robô",
+        "SEARCH_DEVICES": "Pesquisar robôs",
+        "DEVICE_DOCS": "Documentação",
+        "DEVICE_HINT": "Atualmente, Crazyflie oferece programação por blocos, simulação 3D e controlo real.",
+        "DEVICE_UNAVAILABLE": "Nenhum dispositivo correspondente. Se faltarem recursos Crazyflie, verifica a instalação e a mensagem de erro.",
+        "UNSUPPORTED_DEVICE": "Atualmente só Crazyflie é compatível. Escolhe um robô suportado.",
+        "AI_HINT": "O acesso à conta, o assistente de IA, a seleção de modelos e os modelos personalizados continuam disponíveis.",
+        "SOURCE_HINT": "Plataforma para drones, veículos e braços robóticos de código aberto. Veículos e braços são extensões futuras.",
+        "CREDITS": "Baseado em aily-blockly (GPL-3.0) e outros projetos abertos. Os avisos de direitos e licença são mantidos.",
+        "UPDATE_UNAVAILABLE": "RobotSTEM ainda não tem uma fonte própria de atualizações. O canal do produto original está desativado."
+    },
     "CRAZYFLIE_HOME": {
         "MASTER": "Quarto principal", "CHILD": "Quarto infantil", "GUEST": "Quarto de hóspedes", "LIVING": "Sala de estar",
         "KITCHEN": "Cozinha", "BATHROOM": "Banheiro", "ENTRY": "Entrada e sala de jantar", "BALCONY": "Terraço-jardim", "HALLWAY": "Corredor"
@@ -202,7 +215,7 @@
     "GUIDE": {
         "START": "Iniciar",
         "RECENTLY": "Recentes",
-        "TITLE": "aily blockly IDE",
+        "TITLE": "RobotSTEM",
         "TUTORIAL": "Tutoriais e Exemplos",
         "TUTORIAL_DESC": "Ver tutoriais e programas de exemplo",
         "COMING_SOON": "em breve",

@@ -8,6 +8,7 @@ import { ConfigService } from '../../../services/config.service';
 import { ProjectService } from '../../../services/project.service';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { BaseDialogComponent, DialogButton } from '../../../components/base-dialog/base-dialog.component';
+import { isSupportedRobotDevice } from '../../../services/robot-device-catalog';
 
 @Component({
   selector: 'app-board-selector-dialog',
@@ -64,7 +65,7 @@ export class BoardSelectorDialogComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadingText = this.translate.instant('BOARD_SELECTOR.LOADING');
-    this.boardList = (this.data.boardList || []).filter(board => board.state !== 'todo');
+    this.boardList = (this.data.boardList || []).filter(board => isSupportedRobotDevice(board.name) && board.state !== 'todo');
     this.filteredBoardList = [...this.boardList];
   }
 

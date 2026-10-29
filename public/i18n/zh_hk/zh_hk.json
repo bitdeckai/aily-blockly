@@ -1,4 +1,17 @@
 {
+    "ROBOTSTEM": {
+        "DEVICE": "硬件裝置",
+        "SELECT_DEVICE": "選擇機械人裝置",
+        "SEARCH_DEVICES": "搜尋機械人裝置",
+        "DEVICE_DOCS": "裝置文件",
+        "DEVICE_HINT": "目前支援 Crazyflie 飛行器：積木編程、三維模擬及真機控制。",
+        "DEVICE_UNAVAILABLE": "沒有符合的裝置。如缺少 Crazyflie 資源，請檢查安裝及錯誤提示。",
+        "UNSUPPORTED_DEVICE": "目前僅支援 Crazyflie，請選擇已適配的機械人裝置。",
+        "AI_HINT": "保留帳戶登入、AI 編程助手、大模型選擇及自訂模型設定。",
+        "SOURCE_HINT": "面向開源飛行器、小車及機械臂的編程平台，小車及機械臂為後續擴展方向。",
+        "CREDITS": "基於 aily-blockly（GPL-3.0）等開源項目，保留原作者版權及授權聲明。",
+        "UPDATE_UNAVAILABLE": "RobotSTEM 尚未設定獨立更新來源，已停用原產品更新通道。"
+    },
     "CRAZYFLIE_HOME": {
         "MASTER": "主人房", "CHILD": "兒童房", "GUEST": "客房", "LIVING": "客廳",
         "KITCHEN": "廚房", "BATHROOM": "浴室", "ENTRY": "玄關與飯廳", "BALCONY": "空中花園露台", "HALLWAY": "走廊"
@@ -202,7 +215,7 @@
     "GUIDE": {
         "START": "開始",
         "RECENTLY": "最近",
-        "TITLE": "aily blockly IDE",
+        "TITLE": "RobotSTEM",
         "TUTORIAL": "教程與示例",
         "TUTORIAL_DESC": "查看教程與示例程式",
         "COMING_SOON": "coming soon",

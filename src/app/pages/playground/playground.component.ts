@@ -68,7 +68,7 @@ export class PlaygroundComponent {
       }
     ];
 
-    this.electronService.setTitle('aily blockly - Playground');
+    this.electronService.setTitle('RobotSTEM - Playground');
   }
 
   keyword: string = '';

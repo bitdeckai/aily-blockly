@@ -1,6 +1,18 @@
-# aily blockly  
+# RobotSTEM
+
+<img src="public/robotstem.svg" width="96" height="96" alt="RobotSTEM" />
 
 [中文](README_ZH.md) | English
+
+RobotSTEM focuses on programming open-source robots. This branch currently supports **Crazyflie** with Blockly, 3D simulation and real-device control; rovers and robot arms are future adaptation targets, not selectable devices yet.
+
+Account login, cloud projects, AI assistance, model selection and custom model configuration remain available. Device entry uses the bundled Crazyflie catalog instead of the general development-board catalog. Shared toolchains and compatibility internals have not yet been removed.
+
+Product titles and installer names use RobotSTEM. Existing user-data directories, OAuth callbacks, service endpoints, `.abi` associations and `@aily-project` package identifiers are intentionally preserved for compatibility. Upstream automatic updates are disabled until RobotSTEM has its own update source.
+
+See [Crazyflie setup and first-phase scope](README_crazyflie.MD). Original copyright, license, sponsor attribution and service notices are retained; the following upstream documentation describes the original general-purpose platform, not the current supported-device list.
+
+## Upstream project documentation
 
 ## About This Software
 Aily Project is a hardware development integrated environment that plans to integrate numerous AI capabilities to help hardware developers develop more smoothly.  

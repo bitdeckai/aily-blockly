@@ -588,7 +588,7 @@ export class LibManagerComponent implements OnDestroy {
       const hasGeneratorJs = await this.electronService.exists(this.electronService.pathJoin(folderPath, 'generator.js'));
 
       if (!hasPackageJson || !hasBlockJson || !hasGeneratorJs) {
-        this.message.error(`${this.translate.instant('LIB_MANAGER.IMPORT_FAILED')}: 该路径下不是aily blockly库`);
+        this.message.error(`${this.translate.instant('LIB_MANAGER.IMPORT_FAILED')}: 该路径下不是兼容的积木库`);
         return;
       }
 

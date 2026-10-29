@@ -1,6 +1,18 @@
-# aily blockly  
+# RobotSTEM
+
+<img src="public/robotstem.svg" width="96" height="96" alt="RobotSTEM" />
 
 [English](README.md) | 中文
+
+RobotSTEM 面向开源机器人编程。目前已适配 **Crazyflie**，提供积木编程、三维模拟和真机控制；开源小车、机械臂为后续适配方向，尚未作为可选设备开放。
+
+本分支保留账户登录、云端工程、AI 助手、大模型选择和自定义模型配置。新建工程、设备切换及 AI 设备目录统一使用本地 Crazyflie 资源，不再展示通用开发板目录。共享工具链和底层兼容代码将在后续阶段解耦裁剪。
+
+产品标题和安装包使用 RobotSTEM；用户数据目录、OAuth 回调、服务接口、`.abi` 关联和 `@aily-project` 包标识保留兼容。独立更新源配置完成前，原产品自动更新通道停用。
+
+详见 [Crazyflie 使用与第一阶段范围](README_crazyflie.MD)。原作者版权、许可证、赞助归属及服务声明均予保留；以下保留的上游说明描述的是原通用开发平台，不代表当前设备支持范围。
+
+## 上游项目原始说明
 
 ## 关于本软件
 aily Project是一个硬件开发集成环境，计划集成诸多AI能力，帮助硬件开发者更畅快的进行开发。  
@@ -99,4 +111,3 @@ AI可以根据用户程序和需求生成模组连线图，方便用户参考。
     <td>由 <a href="https://signpath.io/">SignPath.io</a> 提供 Windows 免费代码签名，证书由 <a href="https://signpath.org/">SignPath Foundation</a> 颁发</td>
   </tr>
 </table>
-

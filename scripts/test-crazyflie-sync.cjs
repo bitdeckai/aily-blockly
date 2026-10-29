@@ -565,7 +565,7 @@ test('header uses simple radio names while retaining serial-based selection and 
   assert.equal(header.crazyradioSelectorTooltip, '选择无线收发器');
 });
 
-test('footer shows the current Crazyflie project name with nickname preference and full-name tooltip', () => {
+test('footer centers the current Crazyflie project name with nickname preference and full-name tooltip', async () => {
   const { FooterComponent } = load(path.join(root, 'src', 'app', 'main-window', 'components',
     'footer', 'footer.component.ts'));
   const footer = Object.create(FooterComponent.prototype);
@@ -584,12 +584,31 @@ test('footer shows the current Crazyflie project name with nickname preference a
   assert.equal(footer.showCrazyflieTelemetry, false);
   const html = fs.readFileSync(path.join(root, 'src', 'app', 'main-window', 'components',
     'footer', 'footer.component.html'), 'utf8');
+  const { parseTemplate } = await import('@angular/compiler');
+  assert.equal(parseTemplate(html, 'footer.component.html').errors, null);
   assert.match(html, /showCrazyflieTelemetry && projectName/);
   assert.match(html, /\[title\]="projectName"/);
+  assert.match(html, /\[class.footer-box--with-telemetry\]="showCrazyflieTelemetry"/);
   const styles = require('sass').compile(path.join(root, 'src', 'app', 'main-window', 'components',
     'footer', 'footer.component.scss')).css;
   assert.doesNotMatch(styles, /\.btn \.project-name/);
   assert.match(styles, /\.project-name__text\s*\{[^}]*text-overflow: ellipsis/);
+  assert.match(styles, /\.footer-box--with-telemetry\s*\{[^}]*grid-template-columns: minmax\(max-content, 1fr\) minmax\(0, 30%\) minmax\(max-content, 1fr\)/);
+  assert.match(styles, /\.project-name\s*\{[^}]*grid-column: 2;[^}]*justify-self: center/);
+  assert.match(styles, /\.cf-footer-telemetry\s*\{[^}]*grid-column: 3/);
+});
+
+test('footer reserves separate fixed percentage and voltage widths with tabular digits', () => {
+  const footer = path.join(root, 'src', 'app', 'main-window', 'components', 'footer', 'footer.component');
+  const html = fs.readFileSync(`${footer}.html`, 'utf8');
+  const styles = require('sass').compile(`${footer}.scss`).css;
+  assert.match(html, /class="cf-footer-telemetry__value">{{ linkQuality \?\? '--' }}%/);
+  assert.match(html, /class="cf-footer-telemetry__value">{{ batteryPercent \?\? '--' }}%<\/span>/);
+  assert.match(html, /class="cf-footer-telemetry__voltage">· {{ batteryVolts }} V/);
+  assert.match(styles, /\.cf-footer-telemetry__value\s*\{[^}]*width: calc\(3ch \+ 1em\)/);
+  assert.match(styles, /\.cf-footer-telemetry__voltage\s*\{[^}]*width: calc\(5ch \+ 2em\)/);
+  assert.match(styles, /\.cf-footer-telemetry__value,[\s\S]*?font-variant-numeric: tabular-nums/);
+  assert.match(styles, /\.cf-footer-telemetry__bar\s*\{[^}]*flex: 0 0 52px/);
 });
 
 test('header automatically detects inserted radios every two seconds, pauses while connected and stops on teardown', async ({ mock }) => {

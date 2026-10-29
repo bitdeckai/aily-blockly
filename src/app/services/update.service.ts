@@ -4,7 +4,8 @@ import { ElectronService } from './electron.service';
 // import { NzMessageService } from 'ng-zorro-antd/message';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { UpdateDialogComponent } from '../main-window/components/update-dialog/update-dialog.component';
-import { version } from '../../../package.json';
+import { version, productName } from '../../../package.json';
+import { TranslateService } from '@ngx-translate/core';
 import { ConfigService } from './config.service';
 
 @Injectable({
@@ -26,10 +27,15 @@ export class UpdateService {
     private electronService: ElectronService,
     // private message: NzMessageService,
     private modal: NzModalService,
-    private configService: ConfigService
+    private configService: ConfigService,
+    private translate: TranslateService
   ) { }
 
   init() {
+    if (productName === 'RobotSTEM') {
+      this.updateStatus.next('disabled');
+      return;
+    }
     if (!this.electronService.isElectron) {
       return;
     }
@@ -85,6 +91,10 @@ export class UpdateService {
   }
 
   checkForUpdates() {
+    if (productName === 'RobotSTEM') {
+      this.modal.info({ nzTitle: productName, nzContent: this.translate.instant('ROBOTSTEM.UPDATE_UNAVAILABLE') });
+      return;
+    }
     if (this.electronService.isElectron) {
       window['updater'].checkForUpdates();
     }

@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { NoticeOptions, NoticeService } from '../../services/notice.service';
 import { UiService } from '../../services/ui.service';
 import { TranslateModule } from '@ngx-translate/core';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-notification',
@@ -37,10 +38,15 @@ export class NotificationComponent {
     private uiService: UiService
   ) { }
 
-  timer;
+  private timer?: ReturnType<typeof setTimeout>;
+  private closeTimer?: ReturnType<typeof setTimeout>;
+  private noticeSubscription?: Subscription;
 
   ngOnInit(): void {
-    this.noticeService.stateSubject.subscribe((data) => {
+    this.noticeSubscription = this.noticeService.stateSubject.subscribe((data) => {
+      this.clearDismissTimers();
+      this.willClose = false;
+
       if (data && data.showProgress !== false) {
         data.showProgress = true;
       }
@@ -54,13 +60,13 @@ export class NotificationComponent {
         this.startProgressAnimation(this.data.progress);
       }
 
-      if (this.timer) {
-        clearTimeout(this.timer);
-      }
-      if (this.data?.setTimeout) {
+      const duration = this.data?.state === 'done' ? 5000
+        : this.data?.state === 'error' ? 0
+        : this.data?.setTimeout;
+      if (duration) {
         this.timer = setTimeout(() => {
           this.close();
-        }, this.data.setTimeout);
+        }, duration);
       }
       const dynamicWidth = 112 + this.getTextWidth();
       this.tempWidth = this.data?.telemetry ? Math.max(dynamicWidth, 420) : dynamicWidth;
@@ -69,21 +75,29 @@ export class NotificationComponent {
   }
 
   ngOnDestroy(): void {
+    this.noticeSubscription?.unsubscribe();
+    this.clearDismissTimers();
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
-    }
-    if (this.timer) {
-      clearTimeout(this.timer);
     }
   }
 
   close() {
+    this.clearDismissTimers();
     this.willClose = true;
-    setTimeout(() => {
+    this.closeTimer = setTimeout(() => {
+      this.closeTimer = undefined;
       this.data = null;
       this.willClose = false;
       this.cd.detectChanges();
     }, 500);
+  }
+
+  private clearDismissTimers(): void {
+    clearTimeout(this.timer);
+    clearTimeout(this.closeTimer);
+    this.timer = undefined;
+    this.closeTimer = undefined;
   }
 
   // 开始进度动画

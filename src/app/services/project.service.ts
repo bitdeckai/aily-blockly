@@ -20,6 +20,7 @@ import { TranslateService } from '@ngx-translate/core';
 import { NoticeService } from './notice.service';
 import { NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
 import { AppDataResourceLockService } from './appdata-resource-lock.service';
+import { isSupportedRobotDevice, isSupportedRobotProject, loadRobotDeviceCatalog } from './robot-device-catalog';
 
 interface ProjectPackageData {
   name: string;
@@ -69,7 +70,7 @@ export class ProjectService {
   projectActivation$ = this.projectActivationSubject.asObservable();
 
   currentPackageData: ProjectPackageData = {
-    name: 'aily blockly',
+    name: 'RobotSTEM',
   };
 
   projectRootPath: string;
@@ -203,28 +204,15 @@ export class ProjectService {
   // 新建项目
   async projectNew(newProjectData: NewProjectData, options: ProjectCreationOptions = {}): Promise<boolean> {
     try {
+      if (!isSupportedRobotDevice(newProjectData.board.name)) {
+        throw new Error(this.translate.instant('ROBOTSTEM.UNSUPPORTED_DEVICE'));
+      }
+      const localDevice = loadRobotDeviceCatalog()[0];
       const separator = this.platformService.getPlatformSeparator();
-      // console.log('newProjectData: ', newProjectData);
-      const appDataPath = window['path'].getAppDataPath();
       const projectPath = this.buildProjectPath(newProjectData);
-      const boardPackage = newProjectData.board.name + '@' + newProjectData.board.version;
-      const localBoardSourcePath = newProjectData.board.sourcePath;
-      const useLocalBoardSource = !!localBoardSourcePath && window['path'].isExists(localBoardSourcePath);
+      const templatePath = window['path'].join(localDevice.sourcePath, 'template');
 
       this.uiService.updateFooterState({ state: 'doing', text: this.translate.instant('PROJECT.CREATING_PROJECT') });
-      let templatePath = '';
-      if (useLocalBoardSource) {
-        templatePath = window['path'].join(localBoardSourcePath, 'template');
-      } else {
-        const npmInstallResult = await this.appDataResourceLock.runExclusive(`project:new:install-board:${boardPackage}`, () =>
-          this.cmdService.runAsync(`npm install ${boardPackage} --prefix "${appDataPath}"`)
-        );
-        if (npmInstallResult.code !== 0) {
-          throw new Error(npmInstallResult.stderr || npmInstallResult.stdout || `npm install failed with exit code ${npmInstallResult.code}`);
-        }
-        // const templatePath = `${appDataPath}${separator}node_modules${separator}${newProjectData.board.name}${separator}template`;
-        templatePath = window['path'].join(appDataPath, 'node_modules', newProjectData.board.name, 'template');
-      }
 
       if (!window['fs'].existsSync(templatePath)) {
         throw new Error(`板卡模板目录不存在，可能是板卡包安装失败或模板缺失: ${templatePath}`);
@@ -249,6 +237,13 @@ export class ProjectService {
 
   async projectNewFromTemplate(newProjectData: NewProjectData, templatePath: string, options: ProjectCreationOptions = {}): Promise<boolean> {
     try {
+      if (!isSupportedRobotDevice(newProjectData.board.name)) {
+        throw new Error(this.translate.instant('ROBOTSTEM.UNSUPPORTED_DEVICE'));
+      }
+      const templatePackage = JSON.parse(window['fs'].readFileSync(window['path'].join(templatePath, 'package.json'), 'utf8'));
+      if (!isSupportedRobotProject(templatePackage)) {
+        throw new Error(this.translate.instant('ROBOTSTEM.UNSUPPORTED_DEVICE'));
+      }
       const separator = this.platformService.getPlatformSeparator();
       const projectPath = this.buildProjectPath(newProjectData);
 
@@ -396,7 +391,7 @@ export class ProjectService {
     }
     this.currentProjectPath = '';
     this.currentPackageData = {
-      name: 'aily blockly',
+      name: 'RobotSTEM',
     };
     this.stateSubject.next('default');
     this.uiService.closeTerminal();
@@ -1780,6 +1775,10 @@ export class ProjectService {
 
   async changeBoard(boardInfo: { "name": string, "version": string }) {
     try {
+      if (!isSupportedRobotDevice(boardInfo.name)) {
+        throw new Error(this.translate.instant('ROBOTSTEM.UNSUPPORTED_DEVICE'));
+      }
+      const localDevice = loadRobotDeviceCatalog()[0];
       const separator = this.platformService.getPlatformSeparator();
       if (!this.currentProjectPath) {
         throw new Error('当前项目路径未设置');
@@ -1800,11 +1799,9 @@ export class ProjectService {
       }
       // 2. npm install 安装boardInfo.name@boardInfo.version 到 appDataPath（与 projectNew 一致）
       const appDataPath = window['path'].getAppDataPath();
-      const sourcePath = typeof (boardInfo as any)?.sourcePath === 'string' ? (boardInfo as any).sourcePath.trim() : '';
-      const hasLocalSourcePath = !!sourcePath && !!window['path']?.isExists?.(sourcePath);
-      const newBoardPackage = hasLocalSourcePath ? `"${sourcePath}"` : `${boardInfo.name}@${boardInfo.version}`;
-      const lockKeySuffix = hasLocalSourcePath ? `${boardInfo.name}:local` : `${boardInfo.name}@${boardInfo.version}`;
-      console.log('安装新开发板模块:', hasLocalSourcePath ? `${boardInfo.name} (local)` : newBoardPackage);
+      const newBoardPackage = `"${localDevice.sourcePath}"`;
+      const lockKeySuffix = `${localDevice.name}:local`;
+      console.log('安装机器人设备模块:', `${localDevice.name} (local)`);
       this.uiService.updateFooterState({ state: 'doing', text: this.translate.instant('PROJECT.INSTALLING_NEW_BOARD') });
       await this.cmdService.runAsyncChecked(`npm install ${newBoardPackage}`, this.currentProjectPath);
       await this.appDataResourceLock.runExclusive(`project:switch-board:install-appdata:${lockKeySuffix}`, () =>
@@ -1818,8 +1815,7 @@ export class ProjectService {
       // 读取当前package.json保留项目基本信息
       const currentPackageJson = await this.getPackageJson();
 
-      // 获取新开发板的模板package.json（从 appDataPath 读取）
-      const templatePath = `${appDataPath}${separator}node_modules${separator}${boardInfo.name}${separator}template`;
+      const templatePath = window['path'].join(localDevice.sourcePath, 'template');
       const templatePackageJsonPath = `${templatePath}${separator}package.json`;
 
       if (window['fs'].existsSync(templatePackageJsonPath)) {
@@ -1851,7 +1847,7 @@ export class ProjectService {
         window['fs'].writeFileSync(`${this.currentProjectPath}/package.json`, JSON.stringify(newPackageJson, null, 2));
         console.log('package.json 更新完成');
       } else {
-        console.warn('未找到新开发板的模板package.json，跳过配置更新');
+        throw new Error(`RobotSTEM device template is missing: ${templatePackageJsonPath}`);
       }
 
       // 同步更新 temp 副本，防止 projectOpen 重新加载时被旧的 temp/package.json 覆盖

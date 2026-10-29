@@ -1,4 +1,17 @@
 {
+    "ROBOTSTEM": {
+        "DEVICE": "硬件设备",
+        "SELECT_DEVICE": "选择机器人设备",
+        "SEARCH_DEVICES": "搜索机器人设备",
+        "DEVICE_DOCS": "设备文档",
+        "DEVICE_HINT": "当前支持 Crazyflie 飞行器：积木编程、三维模拟和真机控制。",
+        "DEVICE_UNAVAILABLE": "没有匹配的设备。若 Crazyflie 资源缺失，请检查安装和错误提示。",
+        "UNSUPPORTED_DEVICE": "当前仅支持 Crazyflie，请选择已适配的机器人设备。",
+        "AI_HINT": "保留账户登录、AI 编程助手、大模型选择和自定义模型配置。",
+        "SOURCE_HINT": "面向开源飞行器、小车和机械臂的编程平台，小车和机械臂为后续扩展方向。",
+        "CREDITS": "基于 aily-blockly（GPL-3.0）等开源项目，保留原作者版权及许可声明。",
+        "UPDATE_UNAVAILABLE": "RobotSTEM 尚未配置独立更新源，已停用原产品更新通道。"
+    },
     "CRAZYFLIE_HOME": {
         "MASTER": "主卧", "CHILD": "儿童房", "GUEST": "客卧", "LIVING": "客厅",
         "KITCHEN": "厨房", "BATHROOM": "卫生间", "ENTRY": "玄关与餐区", "BALCONY": "空中花园阳台", "HALLWAY": "走廊"
@@ -248,7 +261,7 @@
     "GUIDE": {
         "START": "开始",
         "RECENTLY": "最近",
-        "TITLE": "aily blockly IDE",
+        "TITLE": "RobotSTEM",
         "TUTORIAL": "教程与示例",
         "TUTORIAL_DESC": "查看教程与示例程序",
         "COMING_SOON": "coming soon",

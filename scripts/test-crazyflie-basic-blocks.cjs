@@ -128,6 +128,24 @@ test('all Settings languages include example names, instructions and explicit mo
   }
 });
 
+test('example menu emphasizes its trigger and separates titles, descriptions and selectable rows', () => {
+  const panel = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
+    'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component');
+  const html = fs.readFileSync(`${panel}.html`, 'utf8');
+  const css = require('sass').compile(`${panel}.scss`).css;
+  assert.match(html, /class="sim-btn sim-example-trigger"[^>]*nz-dropdown/);
+  assert.match(html, /class="sim-example-menu__item"[^>]*\[nzDisabled\]="running"[^>]*\(click\)="insertExample\(example.id\)"/);
+  assert.match(html, /class="sim-example-menu__title">{{ example.titleKey \| translate }}/);
+  assert.match(html, /class="sim-example-menu__description">{{ example.descriptionKey \| translate }}/);
+  assert.match(css, /\.sim-btn\.sim-example-trigger\s*\{[^}]*color: var\(--aily-text-primary\);[^}]*font-weight: 600/);
+  assert.match(css, /\.sim-example-menu\s*\{[^}]*width: min\(360px, 100vw - 24px\);[^}]*overflow-y: auto/);
+  assert.match(css, /\.sim-example-menu__item \+ \.sim-example-menu__item\s*\{[^}]*margin-top: 4px;[^}]*border-top: 1px solid var\(--aily-border-primary\)/);
+  assert.match(css, /\.sim-example-menu__title\s*\{[^}]*margin-bottom: 4px;[^}]*font-weight: 600/);
+  assert.match(css, /\.sim-example-menu__description\s*\{[^}]*font-weight: 400;[^}]*white-space: normal/);
+  assert.match(css, /\.sim-example-menu__item:hover:not\(\.ant-dropdown-menu-item-disabled\)/);
+  assert.match(css, /\.sim-example-menu__item\.ant-dropdown-menu-item-active:not\(\.ant-dropdown-menu-item-disabled\)/);
+});
+
 test('Crazyradio parameters generate addressed official URIs and round-trip saved blocks', () => {
   for (const rate of ['250K', '1M', '2M']) {
     const ws = workspace([chain(

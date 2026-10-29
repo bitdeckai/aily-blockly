@@ -9,6 +9,19 @@ $footer-inner-height: 28px;
   background: var(--aily-bg-primary);
   border-top: 2px solid var(--aily-border-primary);
   position: relative;
+
+  &--with-telemetry {
+    display: grid;
+    grid-template-columns: minmax(max-content, 1fr) minmax(0, 30%) minmax(max-content, 1fr);
+  }
+}
+
+.footer-start {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  grid-column: 1;
 }
 
 .btn {
@@ -32,8 +45,10 @@ $footer-inner-height: 28px;
   gap: 6px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 30vw;
+  max-width: calc(100% - 24px);
   margin: 0 12px;
+  grid-column: 2;
+  justify-self: center;
   color: var(--aily-text-secondary);
   font-size: 13px;
 
@@ -66,6 +81,8 @@ $footer-inner-height: 28px;
   }
 
   &.state--with-telemetry {
+    width: 0;
+    flex: 1 1 0;
     margin-left: 8px;
   }
 
@@ -87,6 +104,8 @@ $footer-inner-height: 28px;
   align-items: center;
   gap: 12px;
   flex: 0 0 auto;
+  grid-column: 3;
+  justify-self: end;
   margin: 0 10px 0 auto;
   color: var(--aily-text-secondary);
   font-size: 10px;
@@ -105,6 +124,7 @@ $footer-inner-height: 28px;
 }
 
 .cf-footer-telemetry__bar {
+  flex: 0 0 52px;
   width: 52px;
   height: 6px;
   overflow: hidden;
@@ -121,7 +141,18 @@ $footer-inner-height: 28px;
   &.level-danger { background: linear-gradient(90deg, #d65a5a, #f08787); }
 }
 
-.cf-footer-telemetry__value {
+.cf-footer-telemetry__value,
+.cf-footer-telemetry__voltage {
+  flex: 0 0 auto;
   color: var(--aily-text-primary);
   text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-footer-telemetry__value {
+  width: calc(3ch + 1em);
+}
+
+.cf-footer-telemetry__voltage {
+  width: calc(5ch + 2em);
 }

@@ -174,12 +174,14 @@ test('one upper-right attitude widget replaces the old compass while retaining t
     'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component');
   const html = fs.readFileSync(`${panel}.html`, 'utf8');
   const source = fs.readFileSync(`${panel}.ts`, 'utf8');
-  const style = fs.readFileSync(`${panel}.scss`, 'utf8');
+  const style = require('sass').compile(`${panel}.scss`).css;
   assert.equal((html.match(/class="sim-attitude-inset"/g) || []).length, 1);
   assert.doesNotMatch(html + source, /orientationCanvas|drawOrientationCompass|class="sim-orientation"/);
   assert.match(html, /X 前（红）、Y 左（绿）、Z 上（蓝）/);
   assert.match(html, /class="sim-attitude-inset__view"[^>]+aria-label="主场景标准视角"/);
   assert.equal((html.match(/\(change\)="setCameraView\(/g) || []).length, 1);
   assert.match(style, /\.sim-attitude-inset\s*\{[^}]*top: 8px/);
+  assert.match(style, /\.sim-attitude-inset\s*\{[^}]*position: absolute;[^}]*right: 8px/);
+  assert.match(style, /\.sim-attitude-inset__viewport\s*\{[^}]*height: clamp\(96px, 14vh, 124px\)/);
   assert.doesNotMatch(style, /\.sim-attitude-inset\s*\{[^}]*bottom:/);
 });

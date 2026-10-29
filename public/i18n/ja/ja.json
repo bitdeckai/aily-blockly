@@ -1,4 +1,17 @@
 {
+    "ROBOTSTEM": {
+        "DEVICE": "ハードウェア",
+        "SELECT_DEVICE": "ロボットを選択",
+        "SEARCH_DEVICES": "ロボットを検索",
+        "DEVICE_DOCS": "デバイス資料",
+        "DEVICE_HINT": "現在は Crazyflie のブロックプログラミング、3Dシミュレーション、実機制御に対応しています。",
+        "DEVICE_UNAVAILABLE": "該当するデバイスがありません。Crazyflie のリソースがない場合は、インストールとエラーを確認してください。",
+        "UNSUPPORTED_DEVICE": "現在対応しているのは Crazyflie のみです。対応済みのロボットを選択してください。",
+        "AI_HINT": "アカウントログイン、AIコーディング支援、モデル選択、カスタムモデル設定を引き続き利用できます。",
+        "SOURCE_HINT": "オープンソースのドローン、ローバー、ロボットアーム向けのプラットフォーム。ローバーとアームは今後の拡張対象です。",
+        "CREDITS": "aily-blockly（GPL-3.0）などのオープンソースプロジェクトに基づき、元の著作権とライセンス表記を保持しています。",
+        "UPDATE_UNAVAILABLE": "RobotSTEM 独自の更新元は未設定です。元製品の更新チャンネルは無効です。"
+    },
     "CRAZYFLIE_HOME": {
         "MASTER": "主寝室", "CHILD": "子供部屋", "GUEST": "客用寝室", "LIVING": "リビング",
         "KITCHEN": "キッチン", "BATHROOM": "浴室・トイレ", "ENTRY": "玄関とダイニング", "BALCONY": "空中庭園テラス", "HALLWAY": "廊下"
@@ -202,7 +215,7 @@
     "GUIDE": {
         "START": "スタート",
         "RECENTLY": "最近",
-        "TITLE": "aily blockly IDE",
+        "TITLE": "RobotSTEM",
         "TUTORIAL": "チュートリアルと例",
         "TUTORIAL_DESC": "チュートリアルとサンプルプログラムを見る",
         "COMING_SOON": "近日公開",

@@ -8,7 +8,7 @@ export const GUIDE_ONBOARDING_CONFIG: OnboardingConfig = {
     {
       target: '.menu-box .btn:first-child',
       titleKey: 'GUIDE.ONBOARDING.STEP1_TITLE',
-      descKey: 'GUIDE.ONBOARDING.STEP1_DESC',
+      descKey: 'ROBOTSTEM.DEVICE_HINT',
       position: 'right'
     },
     {
@@ -31,20 +31,20 @@ export const GUIDE_ONBOARDING_CONFIG: OnboardingConfig = {
     },
     {
       target: '.right-box .item:first-child',
-      titleKey: 'GUIDE.ONBOARDING.STEP5_TITLE',
-      descKey: 'GUIDE.ONBOARDING.STEP5_DESC',
+      titleKey: 'ROBOTSTEM.SELECT_DEVICE',
+      descKey: 'ROBOTSTEM.DEVICE_HINT',
       position: 'left'
     },
     {
       target: '.right-box .item:nth-child(2)',
-      titleKey: 'GUIDE.ONBOARDING.STEP6_TITLE',
-      descKey: 'GUIDE.ONBOARDING.STEP6_DESC',
+      titleKey: 'MENU.AI_ASSISTANT',
+      descKey: 'ROBOTSTEM.AI_HINT',
       position: 'left'
     },
     {
       target: '.right-box .item:nth-child(3)',
-      titleKey: 'GUIDE.ONBOARDING.STEP7_TITLE',
-      descKey: 'GUIDE.ONBOARDING.STEP7_DESC',
+      titleKey: 'GUIDE.GITHUB',
+      descKey: 'ROBOTSTEM.SOURCE_HINT',
       position: 'left'
     }
   ]

@@ -21,7 +21,7 @@ declare const window: any;
   styleUrl: './app.component.scss',
 })
 export class AppComponent implements OnInit, OnDestroy {
-  title = 'aily-blockly';
+  title = 'RobotSTEM';
 
   private electronService = inject(ElectronService);
   private configService = inject(ConfigService);

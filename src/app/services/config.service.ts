@@ -5,6 +5,7 @@ import { lastValueFrom, Subject } from 'rxjs';
 import { ElectronService } from './electron.service';
 import { API, setServerUrl, setRegistryUrl, setToolWebUrl } from '../configs/api.config';
 import { calculateSimilarity, extractKeywords } from '../utils/fuzzy-search.utils';
+import { loadRobotDeviceCatalog } from './robot-device-catalog';
 
 @Injectable({
   providedIn: 'root',
@@ -193,22 +194,12 @@ export class ConfigService {
     const localPath = `${configFilePath}/boards.json`;
 
     try {
-      if (this.electronService.exists(localPath)) {
-        this.boardList = this.parseBoardList(this.electronService.readFile(localPath));
-        const boardList = await this.loadBoardList();
-        if (boardList.length > 0) {
-          this.boardList = boardList;
-          this.electronService.writeFile(localPath, JSON.stringify(boardList));
-        }
-      } else {
-        // 首次启动软件，创建boards.json
-        const boardList = await this.fetchBoardListOrThrow();
-        this.boardList = boardList;
-        this.electronService.writeFile(localPath, JSON.stringify(boardList));
-      }
+      this.boardList = await this.fetchBoardListOrThrow();
+      this.electronService.writeFile(localPath, JSON.stringify(this.boardList));
     } catch (error) {
-      console.error('[ConfigService] boards.json 加载失败，尝试从线上恢复:', error);
-      await this.reloadBoardListFromRemote(localPath, error);
+      this.boardList = [];
+      console.error('[ConfigService] RobotSTEM 本地设备目录加载失败:', error);
+      this.showBoardLoadError(this.getErrorMessage(error));
     }
 
     this.boardDict = {};
@@ -216,7 +207,7 @@ export class ConfigService {
     this.boardList.forEach(board => {
       this.boardDict[board.name] = board;
     });
-    console.log(`[ConfigService] boardDict创建完成，共 ${Object.keys(this.boardDict).length} 个开发板`);
+    console.log(`[ConfigService] boardDict创建完成，共 ${Object.keys(this.boardDict).length} 个机器人设备`);
   }
 
   private async loadAndCacheLibraryList(configFilePath: string): Promise<void> {
@@ -369,30 +360,8 @@ export class ConfigService {
   boardDict = {};
   private errorNoticeState: Record<string, { message: string; at: number }> = {};
 
-  private parseBoardList(raw: string): any[] {
-    return this.parseArrayPayload(raw, 'boards.json 格式无效');
-  }
-
   private async fetchBoardListOrThrow(): Promise<any[]> {
-    return this.fetchRemoteArrayOrThrow('/boards.json', '线上 boards.json 格式无效');
-  }
-
-  private async reloadBoardListFromRemote(localPath: string, originalError: unknown): Promise<void> {
-    try {
-      const latestBoardList = await this.fetchBoardListOrThrow();
-      this.boardList = latestBoardList;
-      this.electronService.writeFile(localPath, JSON.stringify(latestBoardList));
-      console.log('[ConfigService] 已使用线上最新 boards.json 覆盖本地缓存');
-    } catch (remoteError) {
-      this.boardList = [];
-      const message = this.getBoardReloadFailureMessage(remoteError, originalError);
-      console.error('[ConfigService] 从线上恢复 boards.json 失败:', remoteError);
-      this.showBoardLoadError(message);
-    }
-  }
-
-  private getBoardReloadFailureMessage(remoteError: unknown, originalError: unknown): string {
-    return this.buildReloadFailureMessage('开发板列表', 'boards.json', remoteError, originalError);
+    return loadRobotDeviceCatalog();
   }
 
   private getErrorMessage(error: unknown): string {
@@ -420,9 +389,14 @@ export class ConfigService {
 
   async loadBoardList(): Promise<any[]> {
     try {
-      return await this.fetchBoardListOrThrow();
+      this.boardList = await this.fetchBoardListOrThrow();
+      this.boardDict = Object.fromEntries(this.boardList.map(board => [board.name, board]));
+      return this.boardList;
     } catch (error) {
+      this.boardList = [];
+      this.boardDict = {};
       console.error('Failed to load board list:', error);
+      this.showBoardLoadError(this.getErrorMessage(error));
       return [];
     }
   }
@@ -569,21 +543,12 @@ export class ConfigService {
     const localPath = `${configFilePath}/boards-index.json`;
 
     try {
-      // 优先从本地缓存读取
-      if (this.electronService.exists(localPath)) {
-        this.boardIndex = this.parseBoardIndex(this.electronService.readFile(localPath));
-        console.log('[ConfigService] 本地 boardIndex 加载成功, 数量:', this.boardIndex?.length || 0);
-      }
-      // 从远程加载最新数据
-      const boardIndex = await this.loadBoardIndex();
-      if (boardIndex.length > 0) {
-        this.boardIndex = boardIndex;
-        this.writeBoardIndexCache(localPath, boardIndex);
-        console.log('[ConfigService] 远程 boardIndex 加载成功并缓存, 数量:', boardIndex.length);
-      }
+      this.boardIndex = await this.fetchBoardIndexOrThrow();
+      this.writeBoardIndexCache(localPath, this.boardIndex);
     } catch (error) {
-      console.error('[ConfigService] boards-index.json 加载失败，尝试从线上恢复:', error);
-      await this.reloadBoardIndexFromRemote(localPath, error);
+      this.boardIndex = [];
+      console.error('[ConfigService] RobotSTEM 本地设备索引加载失败:', error);
+      this.showBoardIndexLoadError(this.getErrorMessage(error));
     }
   }
 
@@ -625,10 +590,6 @@ export class ConfigService {
     }
   }
 
-  private parseBoardIndex(raw: string): any[] {
-    return this.parseArrayPayload(raw, 'boards-index.json 格式无效', 'boards');
-  }
-
   private parseLibraryIndex(raw: string): any[] {
     return this.parseArrayPayload(raw, 'libraries-index.json 格式无效', 'libraries');
   }
@@ -654,25 +615,11 @@ export class ConfigService {
   }
 
   private async fetchBoardIndexOrThrow(): Promise<any[]> {
-    return this.fetchRemoteArrayOrThrow('/boards-index.json', '线上 boards-index.json 格式无效', 'boards');
+    return loadRobotDeviceCatalog();
   }
 
   private async fetchLibraryIndexOrThrow(): Promise<any[]> {
     return this.fetchRemoteArrayOrThrow('/libraries-index.json', '线上 libraries-index.json 格式无效', 'libraries');
-  }
-
-  private async reloadBoardIndexFromRemote(localPath: string, originalError: unknown): Promise<void> {
-    try {
-      const latestBoardIndex = await this.fetchBoardIndexOrThrow();
-      this.boardIndex = latestBoardIndex;
-      this.writeBoardIndexCache(localPath, latestBoardIndex);
-      console.log('[ConfigService] 已使用线上最新 boards-index.json 覆盖本地缓存');
-    } catch (remoteError) {
-      this.boardIndex = [];
-      const message = this.getBoardIndexReloadFailureMessage(remoteError, originalError);
-      console.error('[ConfigService] 从线上恢复 boards-index.json 失败:', remoteError);
-      this.showBoardIndexLoadError(message);
-    }
   }
 
   private async reloadLibraryIndexFromRemote(localPath: string, originalError: unknown): Promise<void> {
@@ -764,9 +711,12 @@ export class ConfigService {
 
   async loadBoardIndex(): Promise<any[]> {
     try {
-      return await this.fetchBoardIndexOrThrow();
+      this.boardIndex = await this.fetchBoardIndexOrThrow();
+      return this.boardIndex;
     } catch (error) {
+      this.boardIndex = [];
       console.warn('boards-index.json not available:', error);
+      this.showBoardIndexLoadError(this.getErrorMessage(error));
       return [];
     }
   }

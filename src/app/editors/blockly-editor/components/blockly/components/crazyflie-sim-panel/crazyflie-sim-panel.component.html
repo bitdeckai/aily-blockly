@@ -7,7 +7,7 @@
   </div>
 
   <div class="sim-panel__controls">
-    <button type="button" class="sim-btn" nz-dropdown [nzDropdownMenu]="examplesMenu" nzTrigger="click"
+    <button type="button" class="sim-btn sim-example-trigger" nz-dropdown [nzDropdownMenu]="examplesMenu" nzTrigger="click"
       [disabled]="running" [nzDisabled]="running">
       {{ 'CRAZYFLIE_EXAMPLES.MENU' | translate }} <i class="fa-light fa-chevron-down" aria-hidden="true"></i>
     </button>
@@ -18,9 +18,9 @@
     </select>
     <nz-dropdown-menu #examplesMenu="nzDropdownMenu">
       <ul nz-menu class="sim-example-menu">
-        <li nz-menu-item *ngFor="let example of flightExamples" [nzDisabled]="running" (click)="insertExample(example.id)">
+        <li nz-menu-item class="sim-example-menu__item" *ngFor="let example of flightExamples" [nzDisabled]="running" (click)="insertExample(example.id)">
           <div>
-            <div>{{ example.titleKey | translate }}</div>
+            <div class="sim-example-menu__title">{{ example.titleKey | translate }}</div>
             <div class="sim-example-menu__description">{{ example.descriptionKey | translate }}</div>
           </div>
         </li>

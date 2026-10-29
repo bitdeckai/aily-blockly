@@ -127,6 +127,7 @@ export let HEADER_MENU: IMenuItem[] = [
     name: 'MENU.UPDATE',
     action: 'check-update',
     icon: 'fa-light fa-cloud-arrow-down',
+    disabled: true,
   },
   {
     sep: true,
@@ -144,13 +145,13 @@ export let HEADER_MENU: IMenuItem[] = [
   {
     name: 'MENU.GITHUB',
     action: 'browser-open',
-    data: { type: 'other', action: 'openByBrowser', url: 'https://github.com/ailyProject/aily-blockly' },
+    data: { type: 'other', action: 'openByBrowser', url: 'https://github.com/bitdeckai/aily-blockly' },
     icon: 'fa-brands fa-github-alt',
   },
   {
     name: 'MENU.ABOUT',
-    action: 'browser-open',
-    data: { type: 'other', action: 'openByBrowser', url: 'https://aily.pro' },
+    action: 'about-open',
+    data: { type: 'window', path: 'about', alwaysOnTop: true, width: 640, height: 480 },
     icon: 'fa-light fa-globe-pointer',
   },
   {
@@ -186,7 +187,7 @@ export let GUIDE_MENU: IMenuItem[] = [
   {
     name: 'MENU.PROJECT_HUB',
     action: 'playground-open',
-    data: { type: 'other', action: 'openByBrowser', url: 'https://aily.pro' },
+    data: { type: 'other', action: 'openByBrowser', url: 'https://github.com/bitdeckai/aily-blockly' },
     icon: 'fa-light fa-album-collection',
   },
   {

@@ -560,9 +560,22 @@ test('mission layout constrains grid width and lets the footer scroll rather tha
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');
   const css = require('sass').compile(stylesheet).css;
   assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-rows: auto auto minmax\(220px, 1fr\) minmax\(0, auto\)/);
+  assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-rows: auto auto minmax\(min-content, 1fr\) minmax\(0, auto\)/);
+  assert.match(css, /\.sim-panel__canvas-wrap\s*\{[^}]*grid-template-rows: minmax\(220px, 1fr\) auto/);
+  assert.match(css, /\.sim-panel__canvas\s*\{[^}]*min-height: 220px/);
   assert.match(css, /\.sim-panel__footer\s*\{[^}]*min-height: 0;[^}]*overflow-y: auto/);
+  assert.match(css, /\.sim-panel__footer\s*\{[^}]*max-height: 280px/);
+});
+
+test('scene selector and view controls use themed native options in one scrollable toolbar', () => {
+  const stylesheet = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
+    'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');
+  const css = require('sass').compile(stylesheet).css;
+  assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(css, /\.sim-scene-select\s*\{[^}]*flex: 0 0 72px;[^}]*width: 72px;[^}]*min-width: 0;[^}]*max-width: 72px/);
+  assert.match(css, /\.sim-scene-select\s*\{[^}]*background-color: var\(--aily-bg-tertiary\);[^}]*color: var\(--aily-text-primary\);[^}]*color-scheme: dark/);
+  assert.match(css, /\.sim-scene-select option\s*\{[^}]*background-color: var\(--aily-bg-tertiary\);[^}]*color: var\(--aily-text-primary\)/);
+  assert.match(css, /:host-context\(\[data-theme=['"]?light['"]?\]\) \.sim-scene-select\s*\{[^}]*color-scheme: light/);
   assert.match(css, /\.sim-panel__controls\s*\{[^}]*align-items: center;[^}]*flex-wrap: nowrap;[^}]*min-width: 0;[^}]*overflow-x: auto/);
   assert.match(css, /\.sim-panel__controls > \.sim-btn\s*\{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap/);
   assert.match(css, /\.sim-view-tools\s*\{[^}]*flex-wrap: nowrap;[^}]*flex: 0 0 auto/);

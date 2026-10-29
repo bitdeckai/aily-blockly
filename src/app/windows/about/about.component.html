@@ -1,6 +1,14 @@
-<app-sub-window [title]="'关于'" [winBtns]="['close']">
+<app-sub-window [title]="'MENU.ABOUT' | translate" [winBtns]="['close']">
     <div class="window-inner">
         <div class="window-content">
-            </div>
+            <section style="padding: 24px; overflow: auto;">
+                <h1>RobotSTEM <small>{{ version }}</small></h1>
+                <p>{{ 'ROBOTSTEM.DEVICE_HINT' | translate }}</p>
+                <p>{{ 'ROBOTSTEM.AI_HINT' | translate }}</p>
+                <p>{{ 'ROBOTSTEM.SOURCE_HINT' | translate }}</p>
+                <p>{{ 'ROBOTSTEM.CREDITS' | translate }}</p>
+                <p>GNU General Public License v3.0 · Blockly · Three.js · Bitcraze cflib</p>
+            </section>
         </div>
+    </div>
 </app-sub-window>

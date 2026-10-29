@@ -4,7 +4,7 @@
       <div class="left">
         <div class="left-inner">
           <nz-steps [nzCurrent]="currentStep" nzDirection="vertical" nzSize="small">
-            <nz-step [nzTitle]="'PROJECT_NEW.STEPS.SELECT_BOARD' | translate"></nz-step>
+            <nz-step [nzTitle]="'ROBOTSTEM.SELECT_DEVICE' | translate"></nz-step>
             <nz-step [nzTitle]="'PROJECT_NEW.STEPS.BASIC_SETTINGS' | translate"></nz-step>
             <nz-step [nzTitle]="'PROJECT_NEW.STEPS.CREATE_PROJECT' | translate"
               [nzIcon]="currentStep == 2 ? iconTemplate : null"></nz-step>
@@ -17,7 +17,7 @@
         <div class="right-inner flex-start">
           <div class="search-box">
             <nz-input-group [nzSuffix]="suffixIconSearch" [nzSize]="'small'">
-              <input nz-input [placeholder]="'PROJECT_NEW.BOARD.SEARCH' | translate" [(ngModel)]="keyword"
+              <input nz-input [placeholder]="'ROBOTSTEM.SEARCH_DEVICES' | translate" [(ngModel)]="keyword"
                 (ngModelChange)="search()" />
             </nz-input-group>
             <ng-template #suffixIconSearch>
@@ -34,10 +34,11 @@
             </div> -->
             <div class="btns">
               <button nz-button nzType="primary" nzGhost nzSize="small" style="margin-right: 10px;" (click)="help()">
-                <i class="fa-light fa-question"></i>{{ 'PROJECT_NEW.BOARD.ADD_BOARD' | translate }}
+                <i class="fa-light fa-question"></i>{{ 'ROBOTSTEM.DEVICE_DOCS' | translate }}
               </button>
             </div>
           </div>
+          <p>{{ 'ROBOTSTEM.DEVICE_HINT' | translate }}</p>
           <div class="board-selector sscroll">
             @for (board of boardList; track board.name) {
             <div class="board ccenter btn" [ngClass]="{ selected: currentBoard == board, disabled: board.disabled }"
@@ -51,6 +52,8 @@
                 }
               </div>
             </div>
+            } @empty {
+              <p role="status">{{ 'ROBOTSTEM.DEVICE_UNAVAILABLE' | translate }}</p>
             }
           </div>
           @if(currentBoard){
@@ -71,9 +74,9 @@
         <!-- 基本设定页面 -->
         <div class="right-inner">
           <div class="item">
-            <div>{{ 'PROJECT_NEW.FORM.BOARD' | translate }}:</div>
+            <div>{{ 'ROBOTSTEM.DEVICE' | translate }}:</div>
             <nz-input-group [nzSuffix]="suffixIconSearch">
-              <input class="board" nz-input [(ngModel)]="newProjectData.board.name" [disabled]="true" />
+              <input class="board" nz-input [value]="newProjectData.board.nickname" [disabled]="true" />
             </nz-input-group>
             <ng-template #suffixIconSearch>
               <i class="fa-light fa-at"></i>
@@ -130,7 +133,7 @@
     <div class="window-footer">
       <div class="btns">
         @if (currentStep == 0) {
-        <button nz-button nzType="primary" (click)="nextStep()">
+        <button nz-button nzType="primary" [disabled]="!currentBoard" (click)="nextStep()">
           {{ 'PROJECT_NEW.BUTTONS.NEXT' | translate }}
         </button>
         } @else {

@@ -56,10 +56,8 @@ export class ProjectNewComponent {
 
   // 搜索开发板关键字
   keyword = '';
-  tagList = ['Arduino', 'ESP32', 'WiFiduino', 'XIAO', 'Seeed', 'OpenJumper', 'seekfree', 'keyesrobot', 'emakefun', 'Raspberry Pi'];
   _boardList: any[] = [];
   boardList: any[] = [];
-  tagListRandom;
 
   get resourceUrl() {
     return this.configService.getCurrentResourceUrl() + '/imgs/boards/';
@@ -95,72 +93,10 @@ export class ProjectNewComponent {
       this.newProjectData.path = window['path'].getUserDocuments() + `${pt}aily-project${pt}`;
     }
     await this.configService.init();
-    this._boardList = this.process(this.withLocalBoards(this.configService.boardList || []));
+    this._boardList = this.process(await this.configService.loadBoardList());
     this.boardList = JSON.parse(JSON.stringify(this._boardList));
-    this.currentBoard = this.boardList[0];
-
-    // 随机提取前五个
-    this.tagListRandom = this.tagList.sort(() => Math.random() - 0.5).slice(0, 5);
-
-    this.newProjectData.board.nickname = this.currentBoard.nickname;
-    this.newProjectData.board.name = this.currentBoard.name;
-    this.newProjectData.board.version = this.currentBoard.version;
-    this.newProjectData.board.sourcePath = this.currentBoard.sourcePath;
+    if (this.boardList.length > 0) this.selectBoard(this.boardList[0]);
     this.newProjectData.name = this.projectService.generateUniqueProjectName(this.newProjectData.path, 'project_');
-  }
-
-  private withLocalBoards(boardList: any[]): any[] {
-    const nextList = JSON.parse(JSON.stringify(Array.isArray(boardList) ? boardList : []));
-    const localCrazyflie = this.buildLocalCrazyflieBoard();
-    if (!localCrazyflie) {
-      return nextList;
-    }
-
-    const existingIndex = nextList.findIndex((item: any) => item?.name === localCrazyflie.name);
-    if (existingIndex >= 0) {
-      nextList[existingIndex] = { ...nextList[existingIndex], ...localCrazyflie };
-      return nextList;
-    }
-
-    return [localCrazyflie, ...nextList];
-  }
-
-  private buildLocalCrazyflieBoard(): BoardInfo | null {
-    try {
-      const childPath = window['path']?.getAilyChildPath?.();
-      if (!childPath) {
-        return null;
-      }
-
-      const sourcePath = window['path'].join(childPath, 'boards', 'board-crazyflie');
-      const packageJsonPath = window['path'].join(sourcePath, 'package.json');
-      const templatePath = window['path'].join(sourcePath, 'template');
-      const localImagePath = window['path'].join(sourcePath, 'crazyflie2.1.png');
-      if (!window['path'].isExists(packageJsonPath) || !window['path'].isExists(templatePath)) {
-        return null;
-      }
-
-      const pkg = JSON.parse(window['fs'].readFileSync(packageJsonPath, 'utf8'));
-      const boardName = pkg?.name || '@aily-project/board-crazyflie';
-      const boardVersion = pkg?.version || '0.0.1';
-
-      return {
-        name: boardName,
-        nickname: 'Crazyflie',
-        version: boardVersion,
-        img: '',
-        description: 'Local Crazyflie board for Crazyradio PA/2.0 control blocks.',
-        url: 'https://github.com/bitcraze/crazyflie-lib-python',
-        brand: 'bitcraze',
-        disabled: false,
-        type: 'crazyflie',
-        sourcePath,
-        imgLocalPath: window['path'].isExists(localImagePath) ? localImagePath : undefined,
-      };
-    } catch (error) {
-      console.warn('加载本地 Crazyflie 开发板失败:', error);
-      return null;
-    }
   }
 
   process(array) {
@@ -226,6 +162,10 @@ export class ProjectNewComponent {
   // 可用版本列表
   boardVersionList: any[] = [];
   async nextStep() {
+    if (!this.currentBoard) {
+      this.message.error('RobotSTEM: Crazyflie device is not available.');
+      return;
+    }
     this.boardVersionList = [this.newProjectData.board.version];
     this.currentStep = this.currentStep + 1;
     if (this.newProjectData.board.sourcePath) {
@@ -356,7 +296,7 @@ export class ProjectNewComponent {
   }
 
   help() {
-    this.electronService.openUrl("https://github.com/ailyProject/aily-blockly-boards/blob/main/readme.md");
+    this.electronService.openUrl("https://www.bitcraze.io/documentation/");
   }
 }
 

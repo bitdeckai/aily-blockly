@@ -276,6 +276,22 @@ async function downloadWithMirrors(mainWindow) {
 
 // 添加自动更新处理函数
 function registerUpdaterHandlers(mainWindow) {
+  if (require('../package.json').productName === 'RobotSTEM') {
+    const error = 'RobotSTEM updates are disabled until an independent update source is configured.';
+    const reportUnavailable = () => {
+      console.warn(error);
+      mainWindow?.webContents.send('update-status', { status: 'error', error });
+    };
+    const rejectUnavailable = () => {
+      reportUnavailable();
+      throw new Error(error);
+    };
+    ipcMain.handle('check-for-updates', rejectUnavailable);
+    ipcMain.handle('start-download', rejectUnavailable);
+    ipcMain.handle('cancel-download', reportUnavailable);
+    ipcMain.on('quit-and-install', reportUnavailable);
+    return;
+  }
 
   // 强制使用开发环境配置
   // if (process.env.DEV === 'true' || process.env.DEV === true) {

@@ -1,17 +1,12 @@
 {
   "name": "aily-blockly",
-  "productName": "aily blockly",
+  "productName": "RobotSTEM",
   "version": "0.9.52",
   "author": "coloz",
-  "description": "aily blockly dev",
+  "description": "RobotSTEM robotics programming platform",
   "main": "electron/main.js",
   "build": {
-    "publish": [
-      {
-        "provider": "generic",
-        "url": "https://dl.yiyu.pro/blockly"
-      }
-    ],
+    "publish": null,
     "appId": "blockly.aily.pro",
     "forceCodeSigning": false,
     "asar": true,
@@ -27,7 +22,7 @@
     ],
     "protocols": [
       {
-        "name": "Aily Blockly OAuth",
+        "name": "RobotSTEM OAuth",
         "schemes": [
           "ailyblockly"
         ]
@@ -63,7 +58,7 @@
         "to": "child/scripts"
       },
       {
-        "from": "public/icon.ico",
+        "from": "public/robotstem.ico",
         "to": "icon.ico"
       },
       {
@@ -75,14 +70,14 @@
       "target": "nsis",
       "sign": false,
       "signAndEditExecutable": true,
-      "artifactName": "aily-blockly-${version}.${ext}",
-      "icon": "public/icon.ico",
+      "artifactName": "RobotSTEM-${version}.${ext}",
+      "icon": "public/robotstem.ico",
       "fileAssociations": [
         {
           "ext": "abi",
-          "name": "Aily Blockly Project",
-          "description": "Aily Blockly Project File",
-          "icon": "public/icon.ico",
+          "name": "RobotSTEM Project",
+          "description": "RobotSTEM Project File",
+          "icon": "public/robotstem.ico",
           "role": "Editor"
         }
       ],
@@ -94,13 +89,13 @@
       ]
     },
     "mac": {
-      "icon": "public/icon-512.ico",
-      "artifactName": "aily-blockly-macos-${version}-${arch}.${ext}",
+      "icon": "public/robotstem.ico",
+      "artifactName": "RobotSTEM-macos-${version}-${arch}.${ext}",
       "fileAssociations": [
         {
           "ext": "abi",
-          "name": "Aily Blockly Project",
-          "description": "Aily Blockly Project File",
+          "name": "RobotSTEM Project",
+          "description": "RobotSTEM Project File",
           "role": "Editor"
         }
       ],
@@ -112,12 +107,12 @@
       ]
     },
     "linux": {
-      "icon": "public/icon.ico",
+      "icon": "public/robotstem.png",
       "fileAssociations": [
         {
           "ext": "abi",
-          "name": "Aily Blockly Project",
-          "description": "Aily Blockly Project File",
+          "name": "RobotSTEM Project",
+          "description": "RobotSTEM Project File",
           "mimeType": "application/x-aily-blockly-project"
         }
       ]
@@ -132,9 +127,9 @@
       "include": "build/installer.nsh",
       "runAfterFinish": true,
       "differentialPackage": false,
-      "artifactName": "aily-blockly-Setup-${version}.${ext}",
+      "artifactName": "RobotSTEM-Setup-${version}.${ext}",
       "createStartMenuShortcut": true,
-      "shortcutName": "aily blockly"
+      "shortcutName": "RobotSTEM"
     }
   },
   "scripts": {

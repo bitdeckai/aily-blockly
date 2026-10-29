@@ -161,7 +161,7 @@ export class BlocklyEditorComponent implements OnInit, AfterViewInit, OnDestroy 
     this._uploadService.cancel();
     this._uploadService.destroy();
     this.codeViewerIpcService.clear();
-    this.electronService.setTitle('aily blockly');
+    this.electronService.setTitle('RobotSTEM');
     this.blocklyService.reset();
     this.el.nativeElement.removeEventListener('mousemove', this._onMouseMoveBound);
     this.el.nativeElement.removeEventListener('mouseleave', this._onMouseLeaveBound);
@@ -191,7 +191,7 @@ export class BlocklyEditorComponent implements OnInit, AfterViewInit, OnDestroy 
       }
     }
 
-    this.electronService.setTitle(`aily blockly - ${packageJson.nickname || packageJson.name}`);
+    this.electronService.setTitle(`RobotSTEM - ${packageJson.nickname || packageJson.name}`);
     // 添加到最近打开的项目
     this.projectService.addRecentlyProject({
       name: packageJson.name,

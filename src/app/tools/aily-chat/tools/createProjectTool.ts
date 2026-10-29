@@ -122,20 +122,23 @@ export async function newProjectTool(prjRootPath: string, toolArgs: any, prjServ
         }
 
         const prjName = prjService.generateUniqueProjectName(prjRootPath);
-        await prjService.projectNew({
+        const created = await prjService.projectNew({
             name: prjName,
             path: prjRootPath,
             board: boardInfo
         }, {
             activationReason: 'chat-tool-create'
         });
+        if (!created) {
+            throw new Error('RobotSTEM 项目创建失败，请检查设备资源和错误提示');
+        }
 
         const projectPath = window["path"].join(prjRootPath, prjName);
         const result = collectProjectInfo(projectPath, prjName);
         toolResult = JSON.stringify(result, null, 2);
     } catch (e) {
         console.warn('创建项目失败:', e);
-        toolResult = `创建项目失败: ${e.message}，请务必使用正确的开发板名称或 JSON 格式的开发板信息。如：@aily-project/board-arduino_uno`;
+        toolResult = `创建项目失败: ${e.message}，请使用当前支持的设备名称：@aily-project/board-crazyflie`;
         is_error = true;
     }
 
