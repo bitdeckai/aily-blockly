@@ -59,6 +59,7 @@ export class CrazyflieSimService {
   floorPlanUrl$ = new BehaviorSubject<string | null>(null);
   sceneModelUrl$ = new BehaviorSubject<string | null>(null);
   readonly explorationProgress$ = new BehaviorSubject<ExplorationProgress>({ visited: [], dwelling: null, dwellPercent: 0 });
+  readonly mapTargetId$ = new BehaviorSubject<number | null>(null);
   private explorationTracker = new ExplorationTracker([]);
   private explorationClockMs = 0;
 
@@ -101,6 +102,7 @@ export class CrazyflieSimService {
 
   setRoomPreset(preset: CrazyflieRoomPreset): void {
     if (this.running$.value) throw new Error('运行期间不能切换场景');
+    this.mapTargetId$.next(null);
     this.roomPreset$.next(preset);
     if (preset === 'classroom') {
       this.roomSize$.next({ width: 8.2, depth: 6.2, height: 3 });
@@ -170,10 +172,19 @@ export class CrazyflieSimService {
     this.explorationProgress$.next({ visited: [], dwelling: null, dwellPercent: 0 });
   }
 
+  setMapTarget(id: number | null): void {
+    const scene = getExplorationScene(this.roomPreset$.value);
+    if (!scene?.geography) throw new Error('当前场景不支持地图区域目标');
+    if (id !== null && !scene.points.some(point => point.id === id)) throw new Error('不支持的地图区域目标');
+    this.mapTargetId$.next(id);
+    this.advanceExploration(0);
+  }
+
   private advanceExploration(durationMs: number): void {
     this.explorationClockMs += durationMs;
     const progress = this.explorationTracker.update(this.pose$.value, this.explorationClockMs,
-      this.running$.value && !this.paused$.value && !this.cancelRequested && this.poseSource$.value === 'simulation');
+      this.running$.value && !this.paused$.value && !this.cancelRequested && this.poseSource$.value === 'simulation',
+      getExplorationScene(this.roomPreset$.value)?.geography ? this.mapTargetId$.value : undefined);
     const previous = this.explorationProgress$.value;
     if (progress.dwelling !== previous.dwelling || progress.dwellPercent !== previous.dwellPercent
       || progress.visited.length !== previous.visited.length) this.explorationProgress$.next(progress);

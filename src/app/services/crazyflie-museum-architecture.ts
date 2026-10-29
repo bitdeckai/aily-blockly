@@ -145,21 +145,24 @@ export function buildMuseumArchitecture(root: Group, definition: ExplorationScen
         box(architecture, cream, x < 0 ? -8.4 : 8.4, 1.4, z, 0.14, 2.8, 0.14);
       }
     }
-    const aircraft = new Group();
-    aircraft.name = 'Suspended aircraft';
-    ball(aircraft, cream, 0, 2.8, 0, 1.25, 0.14, 0.16);
-    box(aircraft, paint('#c5a16b'), 0, 2.8, 0, 0.5, 0.04, 2.6);
-    box(aircraft, cream, -0.9, 2.83, 0, 0.35, 0.04, 0.9);
-    box(aircraft, cream, -1, 3, 0, 0.25, 0.4, 0.04);
-    for (const z of [-0.65, 0.65]) rod(aircraft, frame, new Vector3(0, 2.8, z), new Vector3(0, 3.7, z), 0.008);
-    architecture.add(aircraft);
+    const canopy = new Group();
+    canopy.name = 'Planetarium star canopy';
+    for (let i = 0; i < 3; i++) {
+      const arch = b.add(canopy, new TorusGeometry(1.8, 0.015, 6, 36, Math.PI), cream, 0, 2.8, 0);
+      arch.rotation.y = i * Math.PI / 3;
+    }
+    for (let i = 0; i < 18; i++) {
+      const a = i * 2.4, radius = 0.7 + i % 3 * 0.45;
+      ball(canopy, paint('#e6dcb4'), Math.cos(a) * radius, 3.1 + i % 4 * 0.3, Math.sin(a) * radius, 0.025);
+    }
+    architecture.add(canopy);
     for (const [x, z] of [[-7.5, -0.8], [7.5, 0.8], [-3.8, 6], [3.8, -6]]) caseDisplay(x, z, '#c2b9db');
     for (let i = 0; i < 6; i++) {
       cylinder(architecture, frame, -7.7 + i * 0.7, 0.4, 6, 0.12, 0.8);
       b.add(architecture, new CylinderGeometry(0, 0.12, 0.3, 12), cream, -7.7 + i * 0.7, 0.95, 6);
     }
     bench(-0.2, 2.1); bench(6.6, -0.8);
-  } else {
+  } else if (definition.id === 'ocean') {
     const tank = new Group();
     tank.name = 'Central Pacific tank';
     tank.position.set(-3, 0, 0);

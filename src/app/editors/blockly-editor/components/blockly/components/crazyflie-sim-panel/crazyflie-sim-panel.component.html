@@ -116,15 +116,22 @@
                 {{ 'CRAZYFLIE_EXPLORATION.RESET' | translate }}
               </button>
             </div>
+            @if (expedition.geography) {
+              <p class="sim-mission__hint">{{ 'CRAZYFLIE_EXPLORATION.MAP_HINT' | translate }}</p>
+              <input class="sim-mission__search" type="search" [value]="checkpointSearch" (input)="onCheckpointSearch($event)"
+                [attr.aria-label]="'CRAZYFLIE_EXPLORATION.REGION_SEARCH' | translate"
+                [placeholder]="'CRAZYFLIE_EXPLORATION.REGION_SEARCH' | translate">
+            }
             <div class="sim-mission__points">
-              @for (point of expedition.points; track point.id) {
+              @for (point of visibleCheckpoints; track point.id) {
                 <button type="button" class="sim-mission__point" [class.visited]="progress.visited.includes(point.id)"
                   [class.selected]="selectedCheckpointId === point.id" [attr.aria-pressed]="selectedCheckpointId === point.id"
-                  [class.dwelling]="progress.dwelling === point.id" [title]="'CRAZYFLIE_EXPLORATION.VIEW_ONLY' | translate"
+                  [class.dwelling]="progress.dwelling === point.id"
+                  [title]="(expedition.geography ? 'CRAZYFLIE_EXPLORATION.MAP_SELECT' : 'CRAZYFLIE_EXPLORATION.VIEW_ONLY') | translate"
                   (click)="focusCheckpoint(point)">
                   <span class="sim-mission__number">{{ progress.visited.includes(point.id) ? '✓' : point.id }}</span>
                   <span>
-                    <strong>{{ point.nameKey | translate }}</strong>
+                    <strong>{{ checkpointName(point) }}</strong>
                     <span class="sim-mission__coordinates">
                       X {{ point.forward | number:'1.0-1' }} · Y {{ point.left | number:'1.0-1' }} ·
                       {{ 'CRAZYFLIE_EXPLORATION.HEIGHT' | translate }} {{ point.height | number:'1.0-1' }} m
@@ -134,12 +141,16 @@
                     <span class="sim-mission__dwell">{{ progress.dwellPercent }}%</span>
                   }
                 </button>
+              } @empty {
+                @if (expedition.geography) {
+                  <p class="sim-mission__hint">{{ 'CRAZYFLIE_EXPLORATION.NO_REGIONS' | translate }}</p>
+                }
               }
             </div>
             @if (checkpointGuidance; as guidance) {
               <section class="sim-mission__guidance" [attr.aria-label]="'CRAZYFLIE_EXPLORATION.GUIDANCE' | translate">
                 <div class="sim-mission__guidance-title">
-                  <strong>{{ guidance.point.id }} · {{ guidance.point.nameKey | translate }}</strong>
+                  <strong>{{ guidance.point.id }} · {{ checkpointName(guidance.point) }}</strong>
                   <span>{{ 'CRAZYFLIE_EXPLORATION.DISTANCE' | translate }} {{ guidance.distanceCm | number:'1.0-1' }} cm</span>
                   <button type="button" class="sim-quick-btn" (click)="clearCheckpointSelection()">
                     {{ 'CRAZYFLIE_EXPLORATION.CLEAR_SELECTION' | translate }}
@@ -170,10 +181,11 @@
           } @else {
             <div class="sim-mission__hint">{{ 'CRAZYFLIE_EXPLORATION.DISABLED' | translate }}</div>
           }
-          <div class="sim-mission__hint" [title]="expedition.reference.url">
-            {{ 'CRAZYFLIE_EXPLORATION.REFERENCE' | translate }}：{{ expedition.reference.name }} ·
-            {{ 'CRAZYFLIE_EXPLORATION.TEACHING_MAP' | translate }}
+          <div *ngIf="expedition.reference as reference" class="sim-mission__hint" [title]="reference.url">
+            {{ 'CRAZYFLIE_EXPLORATION.REFERENCE' | translate }}：{{ reference.name }} ·
+            {{ (expedition.geography ? 'CRAZYFLIE_EXPLORATION.MAP_DATA' : 'CRAZYFLIE_EXPLORATION.TEACHING_MAP') | translate }}
           </div>
+          <div *ngIf="!expedition.reference" class="sim-mission__hint">{{ 'CRAZYFLIE_EXPLORATION.ORIGINAL_MAP' | translate }}</div>
         </details>
       }
     }

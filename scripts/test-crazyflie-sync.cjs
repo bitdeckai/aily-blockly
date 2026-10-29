@@ -17,7 +17,7 @@ function load(filename) {
   const exports = {};
   const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
-      experimentalDecorators: true },
+      experimentalDecorators: true, esModuleInterop: true },
   }).outputText;
   vm.runInNewContext(code, {
     exports, window: bridgeWindow, document: { getElementsByTagName: () => [] },
@@ -33,6 +33,7 @@ function load(filename) {
       if (name.endsWith('/crazyflie-attitude')) return load(path.join(services, 'crazyflie-attitude.ts'));
       if (name.endsWith('/crazyflie-classroom')) return load(path.join(services, 'crazyflie-classroom.ts'));
       if (name.endsWith('/crazyflie-exploration')) return load(path.join(services, 'crazyflie-exploration.ts'));
+      if (name.endsWith('/crazyflie-geography')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'crazyflie-geography.ts'));
       if (name.endsWith('/motion-blocks')) return load(path.join(generators, 'motion-blocks.ts'));
       if (name.endsWith('/radio-blocks')) return load(path.join(generators, 'radio-blocks.ts'));
       if (name.endsWith('/basic-blocks')) return load(path.join(generators, 'basic-blocks.ts'));
@@ -154,7 +155,7 @@ test('legacy/new project toolbox merges in either load order and hides only redu
   }
 });
 
-test('compact scene UI places all seven scenes directly after basic examples, with no removed controls and one camera reset', () => {
+test('compact scene UI places all eleven scenes directly after basic examples, with no removed controls and one camera reset', () => {
   const panelPath = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
     'blockly', 'components', 'crazyflie-sim-panel');
   const html = fs.readFileSync(path.join(panelPath, 'crazyflie-sim-panel.component.html'), 'utf8');
@@ -163,7 +164,7 @@ test('compact scene UI places all seven scenes directly after basic examples, wi
   const select = /<select class="sim-scene-select"[\s\S]+?<\/select>/.exec(html)[0];
   const { CRAZYFLIE_SCENE_OPTIONS } = load(path.join(services, 'crazyflie-exploration.ts'));
   assert.deepEqual(plain(CRAZYFLIE_SCENE_OPTIONS.map(scene => scene.id)),
-    ['classroom', 'home', 'animals', 'botanical', 'science', 'space', 'ocean']);
+    ['classroom', 'home', 'animals', 'botanical', 'science', 'space', 'ocean', 'beach', 'farm', 'china', 'world']);
   assert.match(select, /\*ngFor="let scene of sceneOptions" \[value\]="scene\.id"/);
   assert.match(select, /\[selected\]="scene\.id === simService\.roomPreset\$\.value"/);
   assert.match(select, /scene\.nameKey \| translate/);

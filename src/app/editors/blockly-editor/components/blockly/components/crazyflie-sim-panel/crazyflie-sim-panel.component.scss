@@ -52,9 +52,18 @@
 
 .sim-panel__controls {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  flex-wrap: nowrap;
+  min-width: 0;
   gap: 6px;
   padding: 0 12px 10px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+
+  > .sim-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
 
 .sim-attitude-inset {
@@ -177,6 +186,10 @@
 }
 
 .sim-scene-select {
+  flex: 0 0 72px;
+  width: 72px;
+  min-width: 0;
+  max-width: 72px;
   height: 27px;
   padding: 0 6px;
   border-radius: 6px;
@@ -184,7 +197,7 @@
   background: color-mix(in srgb, var(--aily-bg-tertiary) 90%, transparent);
   color: var(--aily-text-secondary);
   font-size: 12px;
-  max-width: 180px;
+  text-overflow: ellipsis;
 }
 
 .sim-mission {
@@ -194,6 +207,20 @@
   background: color-mix(in srgb, var(--aily-bg-tertiary) 65%, transparent);
   color: var(--aily-text-secondary);
   font-size: 12px;
+
+  &__search {
+    display: block;
+    box-sizing: border-box;
+    width: calc(100% - 16px);
+    min-width: 0;
+    margin: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--aily-border-primary);
+    border-radius: 6px;
+    background: var(--aily-bg-tertiary);
+    color: var(--aily-text-primary);
+    font: inherit;
+  }
 
   summary {
     display: flex;
@@ -412,10 +439,9 @@
 
 .sim-view-tools {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
   flex: 0 0 auto;
-  max-width: 100%;
 }
 
 .sim-icon-btn {

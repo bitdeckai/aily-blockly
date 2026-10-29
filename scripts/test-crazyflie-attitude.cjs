@@ -591,7 +591,9 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
       if (name === 'rxjs') return require(name);
       if (name.endsWith('/crazyflie-attitude')) return helper.exports;
       if (name.endsWith('/crazyflie-classroom')) return classroom.exports;
-      if (name.endsWith('/crazyflie-exploration')) return require(path.join(root, 'src', 'app', 'services', 'crazyflie-exploration.ts'));
+      if (name.endsWith('/crazyflie-exploration') || name.endsWith('/crazyflie-geography')) {
+        return require('./helpers/load-crazyflie-data.cjs')(path.join(root, 'src', 'app', 'services', `${name.split('/').at(-1)}.ts`));
+      }
       if (name.endsWith('/GLTFLoader.js')) return { GLTFLoader: class {} };
       if (name.endsWith('/ColladaLoader.js')) return { ColladaLoader: class {} };
       if (name.endsWith('/RoundedBoxGeometry.js')) return require(name);
@@ -632,6 +634,30 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
     get rendered() { return rendered; },
   };
 }
+
+test('geography initializes and resets to a north-up top view while other scenes keep their isometric view', () => {
+  const THREE = require('three');
+  const { panel, sim } = panelHarness();
+  panel.camera = new THREE.PerspectiveCamera();
+  panel.controls = { target: new THREE.Vector3(), update() {}, enableDamping: true };
+  let fits = 0;
+  panel.setupSubscriptions = () => {};
+  panel.fitCameraToScene = () => { fits++; };
+  for (const preset of ['china', 'world', 'animals', 'home', 'classroom']) {
+    sim.roomPreset$.value = preset;
+    panel.ngOnInit();
+    assert.equal(panel.selectedView, ['china', 'world'].includes(preset) ? 'top' : 'iso');
+    panel.selectedView = '';
+    panel.resetCameraView();
+    assert.equal(panel.selectedView, ['china', 'world'].includes(preset) ? 'top' : 'iso');
+    if (['china', 'world'].includes(preset)) {
+      near(panel.camera.position.x, 0);
+      near(panel.camera.position.y, 20);
+      near(panel.controls.target.length(), 0);
+    }
+  }
+  assert.equal(fits, 4);
+});
 
 test('exploration camera fit keeps all floor and exhibit bounds visible in narrow and wide viewports', () => {
   const THREE = require('three');

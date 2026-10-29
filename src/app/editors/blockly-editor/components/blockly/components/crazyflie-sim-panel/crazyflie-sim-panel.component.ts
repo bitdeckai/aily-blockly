@@ -74,6 +74,7 @@ import {
   createExplorationScene, disposeExplorationScene, updateExplorationGuide, updateExplorationMarkers,
 } from '../../../../../../services/crazyflie-exploration-scene';
 import { createHomeScene } from '../../../../../../services/crazyflie-home-scene';
+import { geographyRegionName } from '../../../../../../services/crazyflie-geography';
 import { getClassroomDeskLayout } from '../../../../../../services/crazyflie-classroom';
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
 import { BlocklyService } from '../../../../services/blockly.service';
@@ -117,6 +118,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   readonly flightExamples = CRAZYFLIE_EXAMPLES;
   readonly sceneOptions = CRAZYFLIE_SCENE_OPTIONS;
   selectedCheckpointId: number | null = null;
+  checkpointSearch = '';
   attitudeMetrics: ReturnType<AttitudeReception['metrics']>;
   private attitudePreview: CrazyflieAttitudePreview | null = null;
   private attitudeViewport = { x: 0, y: 0, width: 0, height: 0 };
@@ -203,6 +205,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   ngOnInit(): void {
+    this.selectedView = this.explorationScene?.geography ? 'top' : 'iso';
     this.setupSubscriptions();
   }
 
@@ -285,6 +288,22 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     return this.explorationScene?.points.find(point => point.id === this.selectedCheckpointId);
   }
 
+  checkpointName(point: ExplorationPoint): string {
+    return point.region ? geographyRegionName(point.region, this.translate.currentLang || 'en') : this.translate.instant(point.nameKey);
+  }
+
+  get visibleCheckpoints(): readonly ExplorationPoint[] {
+    const points = this.explorationScene?.points ?? [];
+    const query = this.checkpointSearch.trim().toLocaleLowerCase();
+    return query && this.explorationScene?.geography ? points.filter(point =>
+      [this.checkpointName(point), point.region?.name, point.region?.nameZh, point.region?.code]
+        .some(name => name?.toLocaleLowerCase().includes(query))) : points;
+  }
+
+  onCheckpointSearch(event: Event): void {
+    this.checkpointSearch = (event.target as HTMLInputElement).value;
+  }
+
   get checkpointGuidance() {
     const point = this.selectedCheckpoint;
     if (!point || !this.explorationEnabled) return null;
@@ -298,6 +317,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   clearCheckpointSelection(): void {
+    if (this.explorationScene?.geography) this.simService.setMapTarget(null);
     this.selectedCheckpointId = null;
     this.updateExplorationMarkers();
   }
@@ -305,6 +325,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   focusCheckpoint(point: ExplorationPoint): void {
     if (!this.explorationEnabled) return;
     this.selectedCheckpointId = point.id;
+    if (this.explorationScene?.geography) this.simService.setMapTarget(point.id);
     this.updateExplorationMarkers();
     const position = explorationPointPosition(point);
     const bounds = new Box3(
@@ -312,7 +333,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       new Vector3(position.x + 0.9, 2, position.z + 0.9),
     );
     const exhibit = this.presetInteriorRoot?.children.find(child => child.userData.exhibitId === point.id);
-    if (exhibit) bounds.expandByObject(exhibit);
+    if (exhibit && !this.explorationScene?.geography) bounds.expandByObject(exhibit);
     this.frameCameraBounds(bounds, 0, true);
   }
 
@@ -480,13 +501,15 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       return;
     }
     this.settleCameraControls();
-    this.camera.position.copy(this.defaultCameraPosition);
-    this.camera.lookAt(this.defaultCameraTarget);
+    const geography = this.explorationScene?.geography;
+    const target = geography ? new Vector3(0, 0, 0) : this.defaultCameraTarget;
+    this.camera.position.copy(geography ? new Vector3(0, 20, 0.001) : this.defaultCameraPosition);
+    this.camera.lookAt(target);
     if (this.controls) {
-      this.controls.target.copy(this.defaultCameraTarget);
+      this.controls.target.copy(target);
       this.controls.update();
     }
-    this.selectedView = 'iso';
+    this.selectedView = geography ? 'top' : 'iso';
     if (this.explorationScene || this.simService.roomPreset$.value === 'home') this.fitCameraToScene();
   }
 
@@ -1141,12 +1164,19 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.subscriptions.push(
       this.simService.roomPreset$.subscribe((preset) => {
-        this.selectedCheckpointId = null;
+        this.selectedCheckpointId = this.simService.mapTargetId$.value;
+        this.checkpointSearch = '';
         this.rebuildPresetInterior(preset, this.currentRoomSize);
       }),
     );
 
     this.subscriptions.push(
+      this.simService.mapTargetId$.subscribe(id => {
+        if (this.explorationScene?.geography) {
+          this.selectedCheckpointId = id;
+          this.updateExplorationMarkers();
+        }
+      }),
       this.simService.explorationProgress$.subscribe(() => this.updateExplorationMarkers()),
       this.simService.poseSource$.subscribe(() => this.updateExplorationMarkers()),
       this.runtime.policy$.subscribe(() => this.updateExplorationMarkers()),
@@ -2692,7 +2722,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       return;
     }
     if (exploration) {
-      this.presetInteriorRoot = createExplorationScene(exploration, key => this.translate.instant(key));
+      this.presetInteriorRoot = createExplorationScene(exploration, key => this.translate.instant(key), this.translate.currentLang || 'en');
       this.scene.add(this.presetInteriorRoot);
       this.updateExplorationMarkers();
       return;

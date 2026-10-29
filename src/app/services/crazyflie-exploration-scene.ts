@@ -8,16 +8,25 @@ import {
 } from './crazyflie-exploration';
 import { createSceneBuilder } from './crazyflie-scene-builder';
 import { buildMuseumArchitecture } from './crazyflie-museum-architecture';
+import { buildDiscoveryCollections, buildOutdoorArchitecture, buildOutdoorExhibit } from './crazyflie-discovery-scene';
+import { buildGeographyScene, updateGeographyMarkers } from './crazyflie-geography-scene';
 
-export function createExplorationScene(definition: ExplorationScene, text: (key: string) => string): Group {
+export function createExplorationScene(definition: ExplorationScene, text: (key: string) => string, locale = 'en'): Group {
   const root = new Group();
   root.name = `Exploration ${definition.id}`;
   root.userData.exploration = true;
   const builder = createSceneBuilder(definition.accent);
+  if (definition.geography) {
+    buildGeographyScene(root, definition, builder, text, locale);
+    attachExplorationGuide(root);
+    return root;
+  }
   const { paint, add, ball, box, cylinder, rod, ring, label } = builder;
   const cream = paint('#f4e8d1'), dark = paint('#334652'), gold = paint('#d7aa61', 0.25);
   const accent = paint(definition.accent), green = paint('#679878');
-  buildMuseumArchitecture(root, definition, builder, text);
+  if (definition.id === 'beach' || definition.id === 'farm') buildOutdoorArchitecture(root, definition, builder, text);
+  else buildMuseumArchitecture(root, definition, builder, text);
+  buildDiscoveryCollections(root, definition, builder);
   builder.pad(root);
 
   const flower = (parent: Group, x: number, z: number, color: string, height = 0.65): void => {
@@ -370,7 +379,8 @@ export function createExplorationScene(definition: ExplorationScene, text: (key:
     else if (definition.id === 'botanical') makeBotanical(exhibit, index);
     else if (definition.id === 'science') makeScience(exhibit, index);
     else if (definition.id === 'space') makeSpace(exhibit, index);
-    else makeOcean(exhibit, index);
+    else if (definition.id === 'ocean') makeOcean(exhibit, index);
+    else if (definition.id === 'beach' || definition.id === 'farm') buildOutdoorExhibit(exhibit, definition.id, index, builder);
     for (const [companionIndex, position] of point.companions.entries()) {
       const collection = exhibit.clone(true);
       collection.userData = { collection: true };
@@ -380,7 +390,7 @@ export function createExplorationScene(definition: ExplorationScene, text: (key:
       collection.rotation.y = companionIndex ? 0.3 : -0.3;
       root.add(collection);
     }
-    label(exhibit, text(point.nameKey), 0, 1.95, 0, 1.2);
+    label(exhibit, text(point.nameKey), 0, definition.id === 'beach' || definition.id === 'farm' ? 2.7 : 1.95, 0, 1.2);
     root.add(exhibit);
 
     const checkpoint = new Group();
@@ -409,6 +419,11 @@ export function createExplorationScene(definition: ExplorationScene, text: (key:
     label(checkpoint, String(point.id), 0, 0.32, 0, 0.24, true);
     root.add(checkpoint);
   });
+  attachExplorationGuide(root);
+  return root;
+}
+
+function attachExplorationGuide(root: Group): void {
   const guideGeometry = new BufferGeometry();
   guideGeometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3));
   guideGeometry.setAttribute('lineDistance', new Float32BufferAttribute([0, 0], 1));
@@ -418,12 +433,15 @@ export function createExplorationScene(definition: ExplorationScene, text: (key:
   guide.name = 'Checkpoint guidance';
   guide.visible = false;
   root.add(guide);
-  return root;
 }
 
 export function updateExplorationMarkers(
   root: Group, progress: ExplorationProgress, enabled: boolean, selectedId: number | null = null,
 ): void {
+  if (root.userData.geography) {
+    updateGeographyMarkers(root, progress, enabled, selectedId);
+    return;
+  }
   for (const child of root.children) {
     const id: unknown = child.userData.checkpointId;
     if (typeof id !== 'number') continue;

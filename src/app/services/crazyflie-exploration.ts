@@ -1,4 +1,6 @@
-export type ExplorationTheme = 'animals' | 'botanical' | 'science' | 'space' | 'ocean';
+import { GEOGRAPHY_MAPS, GeographyMapId, GeographyRegion, geographyPosition } from './crazyflie-geography';
+
+export type ExplorationTheme = 'animals' | 'botanical' | 'science' | 'space' | 'ocean' | 'beach' | 'farm' | GeographyMapId;
 export type CrazyflieRoomPreset = 'classroom' | 'home' | 'custom' | ExplorationTheme;
 
 export const EXPLORATION_RADIUS_M = 0.25;
@@ -14,6 +16,7 @@ export interface ExplorationPoint {
   readonly height: number;
   readonly exhibit: { readonly x: number; readonly z: number };
   readonly companions: readonly { readonly x: number; readonly z: number }[];
+  readonly region?: GeographyRegion;
 }
 
 export interface ExplorationScene {
@@ -26,7 +29,24 @@ export interface ExplorationScene {
   readonly points: readonly ExplorationPoint[];
   readonly size: { readonly width: number; readonly depth: number; readonly height: number };
   readonly boundary: readonly (readonly [number, number])[];
-  readonly reference: { readonly name: string; readonly url: string };
+  readonly reference?: { readonly name: string; readonly url: string };
+  readonly geography?: GeographyMapId;
+}
+
+function geographyScene(id: GeographyMapId): ExplorationScene {
+  const size = id === 'china' ? { width: 44, depth: 32, height: 5 } : { width: 74, depth: 40, height: 5 };
+  return {
+    id, geography: id, nameKey: `CRAZYFLIE_EXPLORATION.${id.toUpperCase()}`,
+    accent: '#cba36d', floor: '#a6c5cc', background: '#dde9ed', size,
+    boundary: [[-size.width / 2, -size.depth / 2], [size.width / 2, -size.depth / 2],
+      [size.width / 2, size.depth / 2], [-size.width / 2, size.depth / 2]],
+    reference: { name: 'Natural Earth · Public domain', url: 'https://www.naturalearthdata.com/about/terms-of-use/' },
+    stations: GEOGRAPHY_MAPS[id].map(region => region.code),
+    points: GEOGRAPHY_MAPS[id].map((region, index) => {
+      const { x, z } = geographyPosition(id, region.center[0], region.center[1]);
+      return { id: index + 1, nameKey: '', region, forward: -x, left: z, height: 0.8, exhibit: { x, z }, companions: [] };
+    }),
+  };
 }
 
 type StationPlacement = readonly [
@@ -92,6 +112,22 @@ export const EXPLORATION_SCENES: readonly ExplorationScene[] = [
     [['CORAL', -4, -3.7, 0.6, -5, -4.7], ['TURTLE', 1, -3.2, 0.8, 1, -4.7],
       ['JELLYFISH', 4.5, -1.8, 1.1, 5.8, -2.6], ['SHIP', 4.2, 2.6, 0.7, 5.5, 3.7],
       ['SUBMARINE', -3.7, 3.7, 0.9, -5, 4.7]]),
+  explorationScene('beach', '#daac68', '#e3cc98', '#dcebf0',
+    { width: 26, depth: 20, height: 6 },
+    [[-13, -7], [-10, -10], [10, -10], [13, -7], [13, 7], [9, 10], [-11, 10], [-13, 7]],
+    undefined,
+    [['SANDCASTLE', -5, -4.5, 0.6, -6.5, -6.5], ['TIDEPOOL', 2.5, -4.8, 0.6, 4.5, -5.8],
+      ['LIGHTHOUSE', 7, 5.5, 1, 9, 6.5], ['SAILBOAT', 8, -3.5, 0.8, 10, -4],
+      ['SHELLS', -4, 5.2, 0.6, -5.5, 6.8]]),
+  explorationScene('farm', '#91b77c', '#9daf80', '#e0ead3',
+    { width: 24, depth: 20, height: 6 },
+    [[-12, -8], [-9, -10], [10, -10], [12, -7], [12, 8], [9, 10], [-10, 10], [-12, 7]],
+    undefined,
+    [['BARN', -5.5, -4.5, 0.7, -8, -6], ['TRACTOR', 5.5, -4.5, 0.8, 7.5, -6],
+      ['ORCHARD', 5.5, 4.8, 1, 7.5, 5.8], ['VEGETABLES', -5.5, 4.8, 0.6, -7.5, 5.8],
+      ['DUCKPOND', 0, -4.5, 0.7, 0, -6.5]]),
+  geographyScene('china'),
+  geographyScene('world'),
 ];
 
 export const CRAZYFLIE_SCENE_OPTIONS: readonly { id: Exclude<CrazyflieRoomPreset, 'custom'>; nameKey: string }[] = [
@@ -147,12 +183,12 @@ export class ExplorationTracker {
     this.points = points;
   }
 
-  update(position: { x: number; y: number; z: number }, now: number, active: boolean): ExplorationProgress {
+  update(position: { x: number; y: number; z: number }, now: number, active: boolean, selectedId?: number | null): ExplorationProgress {
     const valid = [position.x, position.y, position.z, now].every(Number.isFinite);
     const target = active && valid && now >= this.lastTime
       ? this.points.find(point => {
         const goal = explorationPointPosition(point);
-        return !this.visited.has(point.id)
+        return (selectedId === undefined || point.id === selectedId) && !this.visited.has(point.id)
           && Math.hypot(position.x - goal.x, position.y - goal.y, position.z - goal.z) <= EXPLORATION_RADIUS_M;
       }) : undefined;
     this.lastTime = Number.isFinite(now) ? now : 0;
