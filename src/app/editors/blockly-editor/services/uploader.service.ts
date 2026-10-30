@@ -253,6 +253,7 @@ export class _UploaderService {
           const total = Number(stepMatch[2] || 0);
           const label = (stepMatch[3] || '').trim();
           if (followPosition) {
+            this.crazyflieSimService.prepareRealStep(label);
             this.crazyflieSimService.step$.next({ current, total, label });
             this.crazyflieSimService.logs$.next(
               [...this.crazyflieSimService.logs$.value.slice(-5), `real: ${label}`]);
@@ -357,7 +358,7 @@ export class _UploaderService {
       if (followPosition) {
         this.crazyflieSimService.endRealFollow(synchronizationError
           ? `同步异常：${synchronizationError}`
-          : result?.success ? '真机流程已结束，保留末次实测位置和姿态'
+          : result?.success ? '真机流程已结束，保留末次机载估计位置和姿态'
           : result?.message || '真机流程未完成');
       }
       this.clearBlocklySelection();

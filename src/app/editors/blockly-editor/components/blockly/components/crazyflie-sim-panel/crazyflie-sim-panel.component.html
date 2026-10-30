@@ -45,7 +45,7 @@
     <div class="sim-hud">
       <span>{{ realPoseShown ? '真机估计 X' : (attitudeActive ? '模拟位置 X' : 'X') }} {{ telemetry.xCm }} cm</span>
       <span>Y {{ telemetry.yCm }} cm</span>
-      <span>高度 {{ telemetry.altitudeCm }} cm</span>
+      <span>相对起点高度 {{ telemetry.altitudeCm }} cm</span>
       @if (displayedAttitude; as sample) {
         <span>{{ realPoseShown ? '相对航向' : '真机航向' }} {{ sample.yaw | number:'1.0-0' }}°</span>
       } @else {
@@ -96,11 +96,19 @@
       <button class="sim-quick-btn" [class.active]="gridVisible" (click)="toggleGrid()">网格</button>
       <button class="sim-quick-btn" [class.active]="flightPathVisible" (click)="toggleFlightPath()">轨迹</button>
       <button class="sim-quick-btn" (click)="cycleTrailTheme()">轨迹颜色：{{ trailThemeLabel }}</button>
-      <button class="sim-quick-btn" (click)="resetCameraView()">重置视角</button>
+      <span class="sim-quick-reset-actions">
+        <button class="sim-quick-btn" (click)="resetCameraView()">重置视角</button>
+        <button type="button" class="sim-quick-btn" [disabled]="running"
+          title="仅复位三维模型和轨迹，不控制真机，也不会解除固件锁定" (click)="resetDronePose()">复位</button>
+      </span>
     </div>
   </div>
 
   <div class="sim-panel__footer">
+    <div class="sim-flight-readiness" role="status" [attr.data-state]="flightReadiness.status">
+      <strong>真机 · {{ flightReadiness.label }}</strong>
+      <span>{{ flightReadiness.message }}</span>
+    </div>
     @if (explorationScene; as expedition) {
       @if (simService.explorationProgress$ | async; as progress) {
         <details class="sim-mission" open [class.sim-mission--complete]="progress.visited.length === expedition.points.length && explorationEnabled">
@@ -195,6 +203,7 @@
       {{ attitudeMetrics.stale ? '（暂无新数据，保持末次实测值）' : '' }}
     </div>
     <div *ngIf="realPoseShown" class="attitude-metrics">{{ simService.realStatus$.value }}</div>
+    <div *ngIf="realPoseShown" class="attitude-metrics">XYZ 来自机载估计，非外部实测；场景停机坪只是虚拟参考点，定位误差可能造成画面漂移。</div>
     <div class="sim-panel__step" [title]="stepText">{{ stepText }}</div>
     <div *ngIf="logs.length" class="sim-panel__logs">
       @for (log of logs; track $index) {

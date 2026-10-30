@@ -458,7 +458,7 @@
   padding: 6px 10px;
   cursor: pointer;
 
-  &:hover {
+  &:hover:not(:disabled) {
     border-color: rgba(120, 188, 255, 0.8);
     color: #ffffff;
   }
@@ -467,6 +467,29 @@
     border-color: rgba(120, 188, 255, 0.8);
     background: rgba(43, 89, 128, 0.88);
   }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.sim-quick-reset-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.sim-flight-readiness {
+  margin-bottom: 6px;
+  color: var(--aily-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+
+  strong { display: block; }
+  &[data-state='ready'] strong { color: #63d5a1; }
+  &[data-state='needs-arming'] strong { color: #f0c470; }
+  &[data-state='flying'] strong { color: #80bfff; }
+  &[data-state='blocked'] strong { color: #ff8b8b; }
 }
 
 .sim-panel__footer {

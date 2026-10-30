@@ -66,7 +66,7 @@ function frontend(api) {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true },
     }).outputText;
     vm.runInNewContext(code, {
-      exports, window: { crazyflie: api }, Date, console, performance,
+      exports, window: { crazyflie: api }, Date, console, performance, setTimeout, clearTimeout,
       require: name => name === '@angular/core' ? { Injectable: () => type => type }
         : name === './crazyflie-telemetry.service' ? load('crazyflie-telemetry.service')
         : name === './crazyflie-attitude' ? load('crazyflie-attitude') : require(name),
@@ -78,6 +78,65 @@ function frontend(api) {
   const connection = new (load('crazyflie-connection.service').CrazyflieConnectionService)(telemetry, { run: fn => fn() });
   return { connection, telemetry };
 }
+
+test('connection telemetry selects supported firmware permission logs without adding a connection or motor command', () => {
+  const python = process.platform === 'win32' ? 'py' : 'python3';
+  const args = process.platform === 'win32' ? ['-3'] : [];
+  const result = spawnSync(python, [...args, '-B', '-c', `
+import sys, types
+from pathlib import Path
+sys.path.insert(0, str(Path('child') / 'scripts'))
+from crazyflie_session import connection_telemetry
+class Callback:
+    def __init__(self): self.callbacks = []
+    def add_callback(self, callback): self.callbacks.append(callback)
+    def remove_callback(self, callback): self.callbacks.remove(callback)
+    def call(self, *args):
+        for callback in list(self.callbacks): callback(*args)
+class Config:
+    def __init__(self, *args):
+        self.variables = []
+        self.data_received_cb, self.error_cb = Callback(), Callback()
+        self.stopped = self.deleted = False
+        configs.append(self)
+    def add_variable(self, *args): self.variables.append(args)
+    def start(self): self.data_received_cb.call(0, data, self)
+    def stop(self): self.stopped = True
+    def delete(self): self.deleted = True
+for available, expected, name, value in [
+    ({'supervisor.info', 'sys.canfly'}, 'supervisor', 'supervisor.info', 64),
+    ({'sys.canfly'}, 'legacy', 'sys.canfly', 0),
+    (set(), 'unavailable', None, None),
+    ({'supervisor.info'}, 'invalid', 'supervisor.info', None),
+    ({'supervisor.info'}, 'invalid', 'supervisor.info', float('nan')),
+    ({'supervisor.info'}, 'invalid', 'supervisor.info', 65536),
+    ({'supervisor.info'}, 'invalid', 'supervisor.info', True),
+    ({'sys.canfly'}, 'invalid', 'sys.canfly', 2),
+]:
+    configs, messages, errors = [], [], []
+    data = {'pm.vbat': 4.0}
+    if name and value is not None: data[name] = value
+    quality = Callback()
+    scf = types.SimpleNamespace(cf=types.SimpleNamespace(
+        log=types.SimpleNamespace(add_config=lambda cfg: None, toc=types.SimpleNamespace(
+            get_element_by_complete_name=lambda name: object() if name in available else None)),
+        link_statistics=types.SimpleNamespace(link_quality_updated=quality),
+        disconnected=Callback(), connection_lost=Callback()))
+    with connection_telemetry(scf, Config, messages.append, errors.append) as healthy:
+        healthy()
+        expected_value = None if expected == 'invalid' else value
+        assert messages[0]['payload']['flightReadiness'] == {'source': expected, 'value': expected_value}, messages
+        expected_variables = [('pm.vbat', 'float')]
+        if name: expected_variables.append((name, 'uint16_t' if name == 'supervisor.info' else 'uint8_t'))
+        assert configs[0].variables == expected_variables, configs[0].variables
+        quality.call(90)
+        assert 'flightReadiness' not in messages[-1]['payload'], 'link quality must not refresh old permission'
+    assert not errors, errors
+    assert configs[0].stopped and configs[0].deleted
+    assert not quality.callbacks and not configs[0].data_received_cb.callbacks
+`], { cwd: root, encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+});
 
 test('header connection subscribes to real state and continuous telemetry, requires a radio selection, and disconnects the backend', async () => {
   let stateEvent, telemetryEvent, attitudeEvent, calls = 0, disconnects = 0, disposed = 0;
@@ -136,6 +195,58 @@ test('header connection subscribes to real state and continuous telemetry, requi
   assert.equal(connection.state$.value.status, 'disconnected');
   connection.ngOnDestroy();
   assert.equal(disposed, 3);
+});
+
+test('firmware flight permission is distinct from connection health, expires, and clears on disconnect', async t => {
+  let stateEvent, telemetryEvent;
+  const { connection } = frontend({
+    onConnection: callback => { stateEvent = callback; return () => {}; },
+    onTelemetry: callback => { telemetryEvent = callback; return () => {}; },
+    onAttitude: () => () => {},
+    getConnectionState: async () => ({ status: 'disconnected' }),
+    listInterfaces: async () => ({ success: true, radios: [] }),
+    connect: async () => ({ success: true }), disconnect: async () => ({ success: true }),
+  });
+  t.after(() => connection.ngOnDestroy());
+  await tick();
+  stateEvent({ status: 'ready' });
+  assert.equal(connection.flightReadiness$.value.status, 'unknown', 'a healthy radio does not prove flight permission');
+  for (const [source, value, status, message] of [
+    ['supervisor', 8, 'ready', /允许起飞/],
+    ['supervisor', 24, 'flying', /飞行中/],
+    ['supervisor', 1, 'needs-arming', /解锁/],
+    ['supervisor', 64, 'blocked', /锁定.*重启/],
+    ['supervisor', 32, 'blocked', /翻倒/],
+    ['supervisor', 128, 'blocked', /碰撞/],
+    ['supervisor', 2048, 'blocked', /扩展板/],
+    ['supervisor', 0, 'blocked', /未允许/],
+    ['legacy', 1, 'ready', /允许起飞/],
+    ['legacy', 0, 'blocked', /未允许/],
+    ['unavailable', null, 'unknown', /固件.*未提供/],
+    ['supervisor', 65536, 'unknown', /无效/],
+    ['supervisor', true, 'unknown', /无效/],
+    ['supervisor', -1, 'unknown', /无效/],
+    ['supervisor', 1.5, 'unknown', /无效/],
+    ['legacy', 2, 'unknown', /无效/],
+    ['supervisor', 72, 'blocked', /锁定.*重启/],
+    ['supervisor', 40, 'blocked', /翻倒/],
+  ]) {
+    telemetryEvent({ flightReadiness: { source, value } });
+    assert.equal(connection.flightReadiness$.value.status, status);
+    assert.match(connection.flightReadiness$.value.message, message);
+    assert.equal(connection.state$.value.status, 'ready', 'flight permission must not rewrite connection health');
+  }
+  telemetryEvent({ flightReadiness: { source: 'supervisor', value: 8 } });
+  const batteryOnly = setInterval(() => telemetryEvent({ batteryVolts: 4, linkQuality: 99 }), 100);
+  try { await new Promise(resolve => setTimeout(resolve, 1650)); }
+  finally { clearInterval(batteryOnly); }
+  assert.equal(connection.flightReadiness$.value.status, 'unknown');
+  assert.match(connection.flightReadiness$.value.message, /过期/);
+  telemetryEvent({ flightReadiness: { source: 'supervisor', value: 8 } });
+  stateEvent({ status: 'disconnected' });
+  assert.equal(connection.flightReadiness$.value.status, 'unknown');
+  telemetryEvent({ flightReadiness: { source: 'supervisor', value: 8 } });
+  assert.equal(connection.flightReadiness$.value.status, 'unknown', 'late data cannot resurrect permission');
 });
 
 test('radio discovery handles hotplug and renumbering, shares pending reads and recovers after enumeration errors', async () => {

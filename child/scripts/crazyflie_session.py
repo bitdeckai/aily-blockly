@@ -15,6 +15,17 @@ from crazyflie_run_flow import _append_cflib_path, parse_commands, run_flow
 def connection_telemetry(scf, log_config_class, emit, failed):
     config = log_config_class("AilyConnection", 500)
     config.add_variable("pm.vbat", "float")
+    readiness_name, readiness_source = None, "unavailable"
+    toc = getattr(scf.cf.log, "toc", None)
+    if toc is not None:
+        for name, source, variable_type in [
+            ("supervisor.info", "supervisor", "uint16_t"),
+            ("sys.canfly", "legacy", "uint8_t"),
+        ]:
+            if toc.get_element_by_complete_name(name) is not None:
+                readiness_name, readiness_source = name, source
+                config.add_variable(name, variable_type)
+                break
     ready = Event()
     latest = {"batteryPercent": None, "batteryVolts": None, "linkQuality": None}
     received = {"battery": time.monotonic(), "quality": 0.0}
@@ -32,7 +43,13 @@ def connection_telemetry(scf, log_config_class, emit, failed):
             latest["batteryPercent"] = max(0, min(100, round((volts - 3.4) / 0.8 * 100)))
             if time.monotonic() - received["quality"] > 3:
                 latest["linkQuality"] = None
-            emit({"type": "telemetry", "payload": dict(latest)})
+            readiness = {"source": readiness_source, "value": data.get(readiness_name)}
+            if readiness_name is not None:
+                value = readiness["value"]
+                maximum = 0xffff if readiness_source == "supervisor" else 1
+                if type(value) is not int or not 0 <= value <= maximum:
+                    readiness = {"source": "invalid", "value": None}
+            emit({"type": "telemetry", "payload": {**latest, "flightReadiness": readiness}})
         ready.set()
 
     def on_quality(value):

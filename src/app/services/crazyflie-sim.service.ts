@@ -49,6 +49,9 @@ export class CrazyflieSimService {
   realReception = new AttitudeReception();
   private realReference: FlightPoseSample | null = null;
   private realOrigin: CrazyfliePose | null = null;
+  private realFlightOrigin: CrazyfliePose | null = null;
+  private takeoffReferenceOrigin: CrazyfliePose | null = null;
+  private hasRealTakeoff = false;
 
   roomPreset$ = new BehaviorSubject<CrazyflieRoomPreset>('classroom');
   roomSize$ = new BehaviorSubject<{ width: number; depth: number; height: number }>({
@@ -161,6 +164,7 @@ export class CrazyflieSimService {
     if (this.running$.value) throw new Error('运行期间不能复位模型');
     this.poseSource$.next('simulation');
     this.realAttitude$.next(null);
+    this.realFlightOrigin = null;
     this.pose$.next(this.getResetPoseForPreset(this.roomPreset$.value));
     this.resetExploration();
   }
@@ -194,6 +198,9 @@ export class CrazyflieSimService {
     if (this.running$.value) throw new Error('已有运行中的流程，请先结束当前流程');
     this.resetPose();
     this.realOrigin = { ...this.pose$.value };
+    this.realFlightOrigin = { ...this.realOrigin };
+    this.takeoffReferenceOrigin = null;
+    this.hasRealTakeoff = false;
     this.resetRealReference();
     this.logs$.next([]);
     this.step$.next(null);
@@ -204,11 +211,30 @@ export class CrazyflieSimService {
     this.running$.next(true);
   }
 
+  prepareRealStep(label: string): void {
+    if (!this.followingReal$.value) return;
+    this.takeoffReferenceOrigin = null;
+    if (label === 'takeoff' || label.startsWith('motion:takeoff:')) {
+      // Only the commanded takeoff calibration discards drift accumulated before the first takeoff.
+      const origin = this.hasRealTakeoff ? this.pose$.value : this.realFlightOrigin;
+      if (!origin) throw new Error('真机同步起点尚未初始化，不能校准起飞参考点');
+      this.takeoffReferenceOrigin = { ...origin };
+      this.hasRealTakeoff = true;
+    }
+  }
+
+  get relativeAltitudeCm(): number {
+    const origin = this.poseSource$.value === 'real' && this.realFlightOrigin
+      ? this.realFlightOrigin : this.getResetPoseForPreset(this.roomPreset$.value);
+    return Math.round((this.pose$.value.y - origin.y) * 100);
+  }
+
   resetRealReference(): void {
-    if (this.followingReal$.value) this.realOrigin = { ...this.pose$.value };
+    if (this.followingReal$.value) this.realOrigin = { ...(this.takeoffReferenceOrigin ?? this.pose$.value) };
+    this.takeoffReferenceOrigin = null;
     this.realReference = null;
     this.realReception = new AttitudeReception();
-    this.realStatus$.next('等待真机位置和姿态，首帧对齐场景起点…');
+    this.realStatus$.next('等待机载估计位置和姿态，首帧对齐参考点…');
   }
 
   receiveRealPose(value: unknown, now: number): void {
@@ -223,6 +249,7 @@ export class CrazyflieSimService {
   }
 
   endRealFollow(message: string): void {
+    this.takeoffReferenceOrigin = null;
     this.realStatus$.next(message);
     this.followingReal$.next(false);
     this.running$.next(false);

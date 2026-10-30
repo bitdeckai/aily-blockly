@@ -791,6 +791,62 @@ test('combined mode compiles once, executes once, follows telemetry during fligh
   assert.equal(h.flowLog, null);
 });
 
+test('takeoff estimator calibration does not carry preflight drift into the flight origin', async () => {
+  const h = uploaderHarness(async ({ sim, emit, log }) => {
+    const origin = { ...sim.pose$.value };
+    emit(sample(0, { x: 10, y: 20, z: 0 }));
+    emit(sample(50, { x: 11.44, y: 20.61, z: 0 }));
+    log('__STEP__:2/3:motion:takeoff:0.3:0.2');
+    emit({ type: 'reference' });
+    emit(sample(100, { x: 0, y: 0, z: 0 }));
+    assert.deepEqual(plain(sim.pose$.value), origin, 'calibration must align to the start, not retain ground-estimator drift');
+    emit(sample(150, { x: 0, y: 0, z: 0.3 }));
+    assert.equal(sim.relativeAltitudeCm, 30, 'relative height must not include the virtual desk height');
+    return { success: true, executed: [] };
+  });
+  assert.equal((await h.uploader.runCrazyflieSimAndReal()).state, 'done');
+});
+
+test('subsequent takeoffs and unrelated estimator resets retain their actual reference positions', () => {
+  const sim = simulator();
+  sim.beginRealFollow();
+  sim.receiveRealPose(sample(0), 0);
+  sim.prepareRealStep('takeoff');
+  sim.resetRealReference();
+  sim.receiveRealPose(sample(50), 50);
+  sim.receiveRealPose(sample(100, { x: 1, z: 0.3 }), 100);
+  sim.prepareRealStep('motion:land:0.2');
+  sim.receiveRealPose(sample(150, { x: 1 }), 150);
+  const landing = plain(sim.pose$.value);
+  sim.prepareRealStep('motion:takeoff:0.3:0.2');
+  sim.resetRealReference();
+  sim.receiveRealPose(sample(200), 200);
+  assert.deepEqual(plain(sim.pose$.value), landing, 'a second takeoff must not jump to the original pad');
+  sim.receiveRealPose(sample(250, { x: 0.2, z: 0.3 }), 250);
+  sim.prepareRealStep('motion:land:0.2');
+  const before = plain(sim.pose$.value);
+  sim.resetRealReference();
+  sim.receiveRealPose(sample(300), 300);
+  assert.deepEqual(plain(sim.pose$.value), before, 'a mid-flight reset must preserve continuity');
+  sim.endRealFollow('done');
+  sim.resetPose();
+  assert.equal(sim.relativeAltitudeCm, 0);
+});
+
+test('missing takeoff reset notification cannot rebase a later unrelated reset to the original pad', () => {
+  const sim = simulator();
+  sim.beginRealFollow();
+  sim.receiveRealPose(sample(0), 0);
+  sim.prepareRealStep('takeoff');
+  sim.receiveRealPose(sample(50, { x: 1, z: 0.3 }), 50);
+  sim.prepareRealStep('wait:1');
+  const before = plain(sim.pose$.value);
+  sim.resetRealReference();
+  sim.receiveRealPose(sample(100), 100);
+  assert.deepEqual(plain(sim.pose$.value), before);
+  sim.endRealFollow('done');
+});
+
 test('combined mode ignores automatic idle RPY/error packets but still requires flow XYZ, preserving radio selection', async () => {
   const h = uploaderHarness(async ({ options, emit, sim }) => {
     assert.equal(options.radioId, 'AABBCCDD0002');

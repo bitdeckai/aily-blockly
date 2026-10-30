@@ -347,6 +347,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   get liveAttitude() { return this.connectionService.attitude$.value; }
+  get flightReadiness() { return this.connectionService.flightReadiness$.value; }
 
   get attitudePreviewState(): 'connecting' | 'disconnected' | 'waiting' | 'error' | 'stale' | 'live' {
     const state = this.connectionService.state$.value;
@@ -377,6 +378,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   resetDronePose(): void {
     this.simService.resetPose();
+    this.clearFlightPath();
+    if (this.droneGroup) this.droneGroup.position.copy(this.targetPosition);
   }
 
   toggleGrid(): void {
@@ -1147,7 +1150,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.telemetry = {
           xCm: Math.round(-pose.x * 100),
           yCm: Math.round(pose.z * 100),
-          altitudeCm: Math.max(0, Math.round(pose.y * 100)),
+          altitudeCm: this.simService.relativeAltitudeCm,
           yawDeg: Math.round(MathUtils.radToDeg(pose.yaw)),
         };
         this.updateCheckpointGuide();

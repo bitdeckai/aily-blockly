@@ -126,6 +126,22 @@ $header-inner-height: 38px;
     text-overflow: ellipsis;
   }
 
+  .cf-flight-readiness {
+    flex: 0 0 auto;
+    margin: 0 6px;
+    padding: 4px 7px;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    color: var(--aily-text-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+
+    &[data-state='ready'] { color: #63d5a1; }
+    &[data-state='needs-arming'] { color: #f0c470; }
+    &[data-state='flying'] { color: #80bfff; }
+    &[data-state='blocked'] { color: #ff8b8b; }
+  }
+
   .cf-runtime-control__label,
   .cf-connection-status {
     color: var(--aily-text-secondary);

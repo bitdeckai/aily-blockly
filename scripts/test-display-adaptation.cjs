@@ -6,6 +6,13 @@ const { test } = require('node:test');
 const ts = require('typescript');
 const THREE = require('three');
 
+test('model and view reset controls wrap together with independent spacing', () => {
+  const filename = path.join(__dirname, '..', 'src', 'app', 'editors', 'blockly-editor',
+    'components', 'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');
+  const css = require('sass').compile(filename).css;
+  assert.match(css, /(?:^|\n)\.sim-quick-reset-actions \{\s*display: inline-flex;\s*gap: 6px;\s*\}/);
+});
+
 const blocklyDirectory = path.join(__dirname, '..', 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly');
 function loadMethods(filename, names, context = {}, observeLayout = false) {
   const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);

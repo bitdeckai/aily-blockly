@@ -72,6 +72,10 @@
         </button>
       </div>
   </div>
+  <span class="cf-flight-readiness" role="status" aria-live="polite"
+    [attr.data-state]="flightReadiness.status" [title]="flightReadiness.message">
+    真机 · {{ flightReadiness.label }}
+  </span>
   }
   <div class="null-box drag" (dblclick)="maximize()"></div>
   @if (!canShowSimulatorControls()) {

@@ -613,6 +613,7 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
   const { BehaviorSubject } = require('rxjs');
   const connection = { state$: new BehaviorSubject({ status: 'disconnected' }),
     attitude$: new BehaviorSubject(null), attitudeError$: new BehaviorSubject(null),
+    flightReadiness$: new BehaviorSubject({ status: 'unknown', label: '未确认', message: 'not connected' }),
     attitudeReception: new AttitudeReception() };
   const panel = new exports.CrazyflieSimPanelComponent(sim, connection, {},
     { error: text => messages.push(text), warning: text => messages.push(text) },
@@ -634,6 +635,29 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
     get rendered() { return rendered; },
   };
 }
+
+test('model reset beside view reset clears the trail and restores the model without moving the camera or controlling hardware', () => {
+  const { panel, sim } = panelHarness();
+  const camera = panel.camera;
+  let resets = 0;
+  sim.resetPose = () => { resets++; panel.targetPosition.set(0, 0.76573, 0); };
+  panel.droneGroup.position.set(1.44, 1.1, 0.61);
+  panel.trailPoints.push(new Vector3(1, 1, 1));
+  panel.lastTrailPoint = new Vector3(1, 1, 1);
+  panel.resetDronePose();
+  assert.equal(resets, 1);
+  assert.deepEqual(panel.droneGroup.position.toArray(), [0, 0.76573, 0]);
+  assert.equal(panel.trailPoints.length, 0);
+  assert.equal(panel.lastTrailPoint, null);
+  assert.equal(panel.camera, camera);
+  panel.trailPoints.push(new Vector3(1, 1, 1));
+  sim.resetPose = () => { throw new Error('running'); };
+  assert.throws(() => panel.resetDronePose(), /running/);
+  assert.equal(panel.trailPoints.length, 1, 'a guarded reset must not clear the active flight trail');
+  const html = fs.readFileSync(path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
+    'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.html'), 'utf8');
+  assert.match(html, /重置视角<\/button>\s*<button[^>]*\[disabled\]="running"[^>]*\(click\)="resetDronePose\(\)">复位<\/button>/);
+});
 
 test('geography initializes and resets to a north-up top view while other scenes keep their isometric view', () => {
   const THREE = require('three');

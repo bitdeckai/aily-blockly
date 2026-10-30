@@ -17,6 +17,14 @@ export interface CrazyflieConnectionState {
   radioSerial?: string;
   radioIndex?: number;
 }
+export interface CrazyflieFlightReadiness {
+  status: 'unknown' | 'ready' | 'needs-arming' | 'flying' | 'blocked';
+  label: string;
+  message: string;
+}
+interface ConnectionTelemetry extends Partial<CrazyflieTelemetryState> {
+  flightReadiness?: unknown;
+}
 interface ConnectionResult {
   success: boolean;
   message?: string;
@@ -30,7 +38,7 @@ interface ConnectionApi {
   listInterfaces(): Promise<ConnectionResult>;
   getConnectionState(): Promise<CrazyflieConnectionState>;
   onConnection(callback: (state: CrazyflieConnectionState) => void): () => void;
-  onTelemetry(callback: (state: Partial<CrazyflieTelemetryState>) => void): () => void;
+  onTelemetry(callback: (state: ConnectionTelemetry) => void): () => void;
   onAttitude(callback: (event: AttitudeEvent) => void): () => void;
 }
 function connectionApi(): ConnectionApi | undefined {
@@ -51,6 +59,9 @@ export class CrazyflieConnectionService implements OnDestroy {
   readonly detectedDecks$ = new BehaviorSubject<CrazyflieDeckType[]>([]);
   readonly attitude$ = new BehaviorSubject<AttitudeSample | null>(null);
   readonly attitudeError$ = new BehaviorSubject<string | null>(null);
+  readonly flightReadiness$ = new BehaviorSubject<CrazyflieFlightReadiness>({
+    status: 'unknown', label: '未确认', message: '尚未连接真机，无法确认固件是否允许起飞',
+  });
   attitudeReception = new AttitudeReception();
   readonly state$ = new BehaviorSubject<CrazyflieConnectionState>({
     status: 'unknown', message: '尚未连接飞行器', updatedAt: null,
@@ -59,13 +70,17 @@ export class CrazyflieConnectionService implements OnDestroy {
   selectedRadioSerial = '';
   private readonly dispose: Array<() => void> = [];
   private radioRefresh: Promise<void> | null = null;
+  private readinessTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private telemetry: CrazyflieTelemetryService, private zone: NgZone) {
     const api = connectionApi();
     if (!api) return;
     this.dispose.push(api.onConnection(state => this.zone.run(() => this.receiveState(state))));
     this.dispose.push(api.onTelemetry(state => this.zone.run(() => {
-      if (['ready', 'checking'].includes(this.state$.value.status)) this.telemetry.setTelemetry(state);
+      if (['ready', 'checking'].includes(this.state$.value.status)) {
+        this.telemetry.setTelemetry(state);
+        if ('flightReadiness' in state) this.receiveReadiness(state.flightReadiness);
+      }
     })));
     this.dispose.push(api.onAttitude(event => this.zone.run(() => this.receiveAttitude(event))));
     const initial = this.state$.value;
@@ -74,7 +89,65 @@ export class CrazyflieConnectionService implements OnDestroy {
     }).catch(error => this.zone.run(() => this.setResult(false, String(error))));
   }
 
-  ngOnDestroy(): void { this.dispose.forEach(dispose => dispose()); }
+  ngOnDestroy(): void {
+    if (this.readinessTimer !== null) clearTimeout(this.readinessTimer);
+    this.dispose.forEach(dispose => dispose());
+  }
+
+  private clearReadiness(message = '连接未就绪，无法确认固件是否允许起飞'): void {
+    if (this.readinessTimer !== null) clearTimeout(this.readinessTimer);
+    this.readinessTimer = null;
+    this.flightReadiness$.next({ status: 'unknown', label: '未确认', message });
+  }
+
+  private receiveReadiness(payload: unknown): void {
+    if (typeof payload === 'object' && payload !== null && 'source' in payload) {
+      if (payload.source === 'unavailable') {
+        this.clearReadiness('当前固件未提供可飞状态；无线已连接不代表允许起飞');
+        return;
+      }
+      if ('value' in payload && typeof payload.value === 'number' && Number.isInteger(payload.value)
+        && payload.value >= 0
+        && ((payload.source === 'supervisor' && payload.value <= 0xffff)
+          || (payload.source === 'legacy' && payload.value <= 1))) {
+        const info = payload.value;
+        const supervisor = payload.source === 'supervisor';
+        let state: CrazyflieFlightReadiness;
+        if (supervisor && (info & 0x0040)) {
+          state = { status: 'blocked', label: '禁止起飞',
+            message: '固件已锁定。确认电机已停、检查机体并放平，安全断电重启后重新连接；复位模型不能解锁真机' };
+        } else if (supervisor && (info & 0x0020)) {
+          state = { status: 'blocked', label: '禁止起飞',
+            message: '固件检测到机体翻倒。确认电机已停，放平机体并等待固件恢复；不要盲目重复运行' };
+        } else if (supervisor && (info & 0x0080)) {
+          state = { status: 'blocked', label: '禁止起飞',
+            message: '固件检测到碰撞。确认电机已停，检查机体并按固件要求恢复' };
+        } else if (supervisor && (info & 0x0800)) {
+          state = { status: 'blocked', label: '禁止起飞',
+            message: '固件报告扩展板故障。确认电机已停，检查扩展板连接与定位配置' };
+        } else if (supervisor && (info & 0x0010)) {
+          state = { status: 'flying', label: '飞行中', message: '固件报告飞行中；请勿重复启动另一段起飞流程' };
+        } else if (supervisor ? Boolean(info & 0x0008) : info === 1) {
+          state = { status: 'ready', label: '允许起飞',
+            message: '固件当前允许起飞；这不是安全保证，仍需确认姿态、定位、电量和周围环境' };
+        } else if (supervisor && (info & 0x0001) && !(info & 0x0002)) {
+          state = { status: 'needs-arming', label: '待解锁',
+            message: '固件允许解锁，但尚未允许起飞。请先确认姿态、定位与电量；执行流程中的解锁结果以固件状态为准' };
+        } else {
+          state = { status: 'blocked', label: '禁止起飞',
+            message: '固件尚未允许起飞。请检查机体姿态、定位与电量；当前信息不足以判断是否需要重启' };
+        }
+        if (this.readinessTimer !== null) clearTimeout(this.readinessTimer);
+        this.flightReadiness$.next(state);
+        this.readinessTimer = setTimeout(() => this.zone.run(() =>
+          this.clearReadiness('固件可飞状态已过期，无法确认是否允许起飞')), 1500);
+        return;
+      }
+    }
+    const message = '收到无效的固件可飞状态，无法确认是否允许起飞';
+    if (this.flightReadiness$.value.message !== message) console.warn(message);
+    this.clearReadiness(message);
+  }
 
   private receiveAttitude(event: AttitudeEvent): void {
     if (!['ready', 'checking'].includes(this.state$.value.status)) return;
@@ -112,7 +185,10 @@ export class CrazyflieConnectionService implements OnDestroy {
       this.setResult(false, '收到无效的飞行器连接状态');
       return;
     }
-    if (state.status !== 'ready') this.clearAttitude();
+    if (state.status !== 'ready') {
+      this.clearAttitude();
+      this.clearReadiness();
+    }
     const identity = state.radioSerial ? `无线收发器 ${state.radioIndex} · ${state.radioSerial}` : 'Crazyflie';
     const message = state.status === 'ready'
       ? `${identity} → ${state.uri}（${state.busy ? '执行中' : '已连接'}）`
@@ -127,6 +203,7 @@ export class CrazyflieConnectionService implements OnDestroy {
 
   setChecking(): void {
     this.clearAttitude();
+    this.clearReadiness();
     this.state$.next({ ...this.state$.value, status: 'checking', message: '正在连接飞行器…', updatedAt: Date.now() });
   }
 
@@ -134,6 +211,7 @@ export class CrazyflieConnectionService implements OnDestroy {
     const current = this.state$.value;
     if (current.status === 'ready') return;
     this.clearAttitude();
+    this.clearReadiness();
     this.state$.next({ ...current, status: success ? 'unknown' : 'error',
       message: message || (success ? '无线收发器检测完成，尚未连接飞行器' : '飞行器连接失败'), updatedAt: Date.now() });
     this.telemetry.clear();

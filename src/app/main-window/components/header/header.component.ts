@@ -152,6 +152,10 @@ export class HeaderComponent implements OnDestroy {
     return this.crazyflieSimService.panelVisible$.value;
   }
 
+  get flightReadiness() {
+    return this.crazyflieConnectionService.flightReadiness$.value;
+  }
+
   get boardControlsWidth(): number | null {
     return this.canShowSimulatorControls() && this.router.url.includes('/main/blockly-editor')
       ? this.uiService.blocklyToolboxWidth - (this.isMac && !this.isMacFullScreen ? 80 : 0) : null;
