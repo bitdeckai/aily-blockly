@@ -6,6 +6,18 @@ const { test } = require('node:test');
 const ts = require('typescript');
 const THREE = require('three');
 
+test('compact attitude inset and the left telemetry HUD reserve the same responsive width', () => {
+  const filename = path.join(__dirname, '..', 'src', 'app', 'editors', 'blockly-editor',
+    'components', 'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');
+  const css = require('sass').compile(filename).css;
+  assert.match(css, /\.sim-panel__canvas-wrap\s*\{[^}]*--sim-attitude-inset-width: clamp\(96px, 20%, 120px\)/);
+  assert.match(css, /\.sim-attitude-inset\s*\{[^}]*width: var\(--sim-attitude-inset-width\)/);
+  assert.match(css, /\.sim-attitude-inset__viewport\s*\{[^}]*aspect-ratio: 1\.3/);
+  assert.match(css, /\.sim-hud\s*\{[^}]*max-width: calc\(100% - var\(--sim-attitude-inset-width\) - 26px\)/);
+  assert.match(css, /\.sim-hud__attitude\s*\{[^}]*flex-wrap: wrap;[^}]*flex-basis: 100%/);
+  assert.match(css, /\.sim-hud__attitude > span\s*\{[^}]*white-space: nowrap/);
+});
+
 test('model and view reset controls wrap together with independent spacing', () => {
   const filename = path.join(__dirname, '..', 'src', 'app', 'editors', 'blockly-editor',
     'components', 'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');

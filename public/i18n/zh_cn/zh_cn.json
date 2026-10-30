@@ -17,6 +17,10 @@
         "KITCHEN": "厨房", "BATHROOM": "卫生间", "ENTRY": "玄关与餐区", "BALCONY": "空中花园阳台", "HALLWAY": "走廊"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "坐标系",
+        "GRID_FINE": "网格：10 cm（粗线 1 m）",
+        "GRID_COARSE": "网格：1 m",
+        "COORDINATE_HINT": "仅测试：原点 (0,0,0)，X 红/前、Y 绿/左、Z 蓝/上，单位米。坐标轴固定，网格随缩放切换；不代表真实场地或定位精度。",
         "REFERENCE": "布局参考", "TEACHING_MAP": "原创缩比教学地图，非原馆精确复刻",
         "SCENE": "探索场景",
         "CLASSROOM": "教室",
@@ -60,6 +64,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "LED 灯环：三色切换",
+        "LED_COLORS_DESCRIPTION": "需要 LED 灯环；红、绿、蓝各显示 1 秒，最后关灯，不起飞。仅模拟输出日志。",
+        "LED_BLINK": "LED 灯环：循环闪烁",
+        "LED_BLINK_DESCRIPTION": "需要 LED 灯环；蓝灯亮灭各 0.5 秒，循环 3 次，最后关灯，不起飞。仅模拟输出日志。",
+        "BUZZER_RHYTHM": "蜂鸣器：提示音节奏",
+        "BUZZER_RHYTHM_DESCRIPTION": "需要蜂鸣器及相应固件支持；3 次短音后等待 1 秒，再发出 1 次长音，不起飞。仅模拟输出日志。",
+        "RANGE_MONITOR": "测距避障：五向距离观察",
+        "RANGE_MONITOR_DESCRIPTION": "需要测距避障模块；每轮打印前后左右和上方距离，共 5 轮，间隔 1 秒。不起飞、不自动避障；模拟测距只参考场景边界。",
+        "DECK_NOTICE": "扩展示例已添加，不会自动运行或切换模式。无起飞/电机指令；真机需相应扩展板。仅模拟输出日志，测距示例不自动避障。",
         "MENU": "基础示例",
         "SELF_TEST": "基础自检（不飞行）",
         "SELF_TEST_DESCRIPTION": "检测无线收发器、连接、自检，步骤间留有等待。真机自检会测试电机。",
@@ -90,7 +103,7 @@
             "DESCRIPTION": "利用光流和下视测距辅助定位，可配合起飞、移动、等待等积木编写飞行流程。"
         },
         "MULTIRANGER": {
-            "NAME": "多向测距",
+            "NAME": "测距避障",
             "DESCRIPTION": "读取前、后、左、右和上方的距离，可用于障碍物判断与避障逻辑。"
         },
         "LED_RING": {

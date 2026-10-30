@@ -136,9 +136,9 @@ const CRAZYFLIE_BLOCK_TRANSLATIONS: Record<CrazyflieBlockLanguage, Record<string
     cf_crazyflie_link: { message0: '连接', tooltip: '复用当前飞行器连接，未连接时先连接；飞行流程也会自动连接，不会重复连接。' },
     cf_test_crazyflie_link: { message0: '自检', tooltip: '测试电机，不起飞；等待固件确认完成后执行下一步，请先卸下螺旋桨' },
     cf_detect_flow_v2: { message0: '探测光流定位', tooltip: '检测是否安装光流定位模块' },
-    cf_detect_multiranger: { message0: '探测多向测距', tooltip: '检测是否安装多向测距模块' },
+    cf_detect_multiranger: { message0: '探测测距避障', tooltip: '检测是否安装测距避障模块' },
     cf_mr_get_distance: {
-      message0: '读取多向测距 %1', tooltip: '读取指定方向的距离（米）',
+      message0: '读取测距避障 %1', tooltip: '读取指定方向的距离（米）',
       optionLabels: { 0: { front: '前方', back: '后方', left: '左侧', right: '右侧', up: '上方' } },
     },
     cf_mr_has_obstacle: {

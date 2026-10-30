@@ -74,6 +74,7 @@ import {
   createExplorationScene, disposeExplorationScene, updateExplorationGuide, updateExplorationMarkers,
 } from '../../../../../../services/crazyflie-exploration-scene';
 import { createHomeScene } from '../../../../../../services/crazyflie-home-scene';
+import { createCoordinateScene, updateCoordinateGrid } from '../../../../../../services/crazyflie-coordinate-scene';
 import { geographyRegionName } from '../../../../../../services/crazyflie-geography';
 import { getClassroomDeskLayout } from '../../../../../../services/crazyflie-classroom';
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
@@ -117,6 +118,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   selectedView = 'iso';
   readonly flightExamples = CRAZYFLIE_EXAMPLES;
   readonly sceneOptions = CRAZYFLIE_SCENE_OPTIONS;
+  coordinateGridSpacing: 0.1 | 1 = 1;
   selectedCheckpointId: number | null = null;
   checkpointSearch = '';
   attitudeMetrics: ReturnType<AttitudeReception['metrics']>;
@@ -221,7 +223,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   ngOnDestroy(): void {
     this.destroyed = true;
-    if (this.presetInteriorRoot?.userData.exploration || this.presetInteriorRoot?.userData.home) this.disposePresetInterior();
+    if (this.presetInteriorRoot?.userData.exploration || this.presetInteriorRoot?.userData.home
+      || this.presetInteriorRoot?.userData.coordinates) this.disposePresetInterior();
     this.attitudePreview?.dispose();
     this.attitudePreview = null;
     this.subscriptions.forEach((sub) => sub.unsubscribe());
@@ -262,8 +265,16 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.message.error('请先结束当前流程再切换场景');
       return;
     }
+    const previous = this.simService.roomPreset$.value;
     this.simService.setRoomPreset(preset);
-    if (getExplorationScene(preset) || preset === 'home') this.resetCameraView();
+    if (preset === 'coordinates' || previous === 'coordinates') {
+      this.clearFlightPath();
+      this.clearMeasurement();
+      if (this.droneGroup) this.droneGroup.position.copy(this.targetPosition);
+    }
+    if (getExplorationScene(preset) || preset === 'home' || preset === 'coordinates' || previous === 'coordinates') {
+      this.resetCameraView();
+    }
   }
 
   onPresetSelected(event: Event): void {
@@ -385,8 +396,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   toggleGrid(): void {
     this.gridVisible = !this.gridVisible;
     if (this.gridHelper) {
-      this.gridHelper.visible = this.gridVisible;
+      this.gridHelper.visible = this.gridVisible && this.simService.roomPreset$.value !== 'coordinates';
     }
+    const grids = this.presetInteriorRoot?.getObjectByName('Coordinate grids');
+    if (grids) grids.visible = this.gridVisible;
   }
 
   toggleFlightPath(): void {
@@ -482,8 +495,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       } finally {
         Blockly.Events.setGroup(previousGroup);
       }
-      this.message.warning(this.translate.instant(id === 'self-test'
-        ? 'CRAZYFLIE_EXAMPLES.SELF_TEST_NOTICE' : 'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE'));
+      this.message.warning(this.translate.instant(example.noticeKey));
     } catch (error) {
       console.error('插入 Crazyflie 示例失败:', error);
       this.message.error(this.translate.instant('CRAZYFLIE_EXAMPLES.ERROR'));
@@ -505,8 +517,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
     this.settleCameraControls();
     const geography = this.explorationScene?.geography;
-    const target = geography ? new Vector3(0, 0, 0) : this.defaultCameraTarget;
-    this.camera.position.copy(geography ? new Vector3(0, 20, 0.001) : this.defaultCameraPosition);
+    const coordinates = this.simService.roomPreset$.value === 'coordinates';
+    const target = geography || coordinates ? new Vector3(0, 0, 0) : this.defaultCameraTarget;
+    this.camera.position.copy(geography ? new Vector3(0, 20, 0.001)
+      : coordinates ? new Vector3(2.4, 1.8, 2.4) : this.defaultCameraPosition);
     this.camera.lookAt(target);
     if (this.controls) {
       this.controls.target.copy(target);
@@ -537,7 +551,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   fitCameraToScene(): void {
-    if ((this.explorationScene || this.simService.roomPreset$.value === 'home') && this.presetInteriorRoot) {
+    if ((this.explorationScene || this.simService.roomPreset$.value === 'home'
+      || this.simService.roomPreset$.value === 'coordinates') && this.presetInteriorRoot) {
       const bounds = new Box3().setFromObject(this.presetInteriorRoot);
       if (this.droneGroup) bounds.expandByObject(this.droneGroup);
       this.frameCameraBounds(bounds, 0, true);
@@ -740,7 +755,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.applyFloorPlanTexture(this.simService.floorPlanUrl$.value);
     this.applySceneModel(this.simService.sceneModelUrl$.value);
     this.updateAttitudeViewport();
-    if (this.explorationScene || this.simService.roomPreset$.value === 'home') this.resetCameraView();
+    if (this.explorationScene || this.simService.roomPreset$.value === 'home'
+      || this.simService.roomPreset$.value === 'coordinates') this.resetCameraView();
   }
 
   private createDroneMesh(): Group {
@@ -1167,6 +1183,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.subscriptions.push(
       this.simService.roomPreset$.subscribe((preset) => {
+        if (preset === 'coordinates') this.gridVisible = true;
         this.selectedCheckpointId = this.simService.mapTargetId$.value;
         this.checkpointSearch = '';
         this.rebuildPresetInterior(preset, this.currentRoomSize);
@@ -1301,6 +1318,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         const root = gltf.scene;
         root.position.set(0, 0, 0);
         root.scale.set(1, 1, 1);
+        root.visible = this.simService.roomPreset$.value !== 'coordinates';
         this.sceneModelRoot = root;
         this.scene.add(root);
       },
@@ -2706,10 +2724,15 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.disposePresetInterior();
 
     const exploration = getExplorationScene(preset);
-    this.scene.background = new Color(exploration?.background ?? '#dfe8f2');
-    if (this.floorMesh) this.floorMesh.visible = !exploration && preset !== 'home';
-    if (this.roomWireframe) this.roomWireframe.visible = !exploration && preset !== 'home';
-    if (this.gridHelper) this.gridHelper.position.y = exploration || preset === 'home' ? 0.012 : 0.001;
+    const coordinates = preset === 'coordinates';
+    this.scene.background = new Color(coordinates ? '#17212c' : exploration?.background ?? '#dfe8f2');
+    if (this.floorMesh) this.floorMesh.visible = !coordinates && !exploration && preset !== 'home';
+    if (this.roomWireframe) this.roomWireframe.visible = !coordinates && !exploration && preset !== 'home';
+    if (this.sceneModelRoot) this.sceneModelRoot.visible = !coordinates;
+    if (this.gridHelper) {
+      this.gridHelper.position.y = exploration || preset === 'home' ? 0.012 : 0.001;
+      this.gridHelper.visible = !coordinates && this.gridVisible;
+    }
     if (this.defaultLighting) {
       this.defaultLighting.visible = preset !== 'classroom';
     }
@@ -2717,6 +2740,13 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       this.renderer.toneMapping = preset === 'classroom' || preset === 'home' || exploration ? ACESFilmicToneMapping : NoToneMapping;
     }
     if (preset === 'custom') {
+      return;
+    }
+    if (coordinates) {
+      this.presetInteriorRoot = createCoordinateScene();
+      const grids = this.presetInteriorRoot.getObjectByName('Coordinate grids');
+      if (grids) grids.visible = this.gridVisible;
+      this.scene.add(this.presetInteriorRoot);
       return;
     }
     if (preset === 'home') {
@@ -3215,7 +3245,8 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     }
 
     this.scene.remove(this.presetInteriorRoot);
-    if (this.presetInteriorRoot.userData.exploration || this.presetInteriorRoot.userData.home) {
+    if (this.presetInteriorRoot.userData.exploration || this.presetInteriorRoot.userData.home
+      || this.presetInteriorRoot.userData.coordinates) {
       disposeExplorationScene(this.presetInteriorRoot);
       this.presetInteriorRoot = null;
       return;
@@ -3326,6 +3357,11 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.updateFlightPath(this.droneGroup.position);
       }
       this.controls?.update();
+
+      if (this.presetInteriorRoot?.userData.coordinates) {
+        const spacing = updateCoordinateGrid(this.presetInteriorRoot, this.camera, this.canvasHostRef.nativeElement.clientHeight);
+        if (spacing !== this.coordinateGridSpacing) this.zone.run(() => { this.coordinateGridSpacing = spacing; });
+      }
 
       if (this.flightAxes) {
         this.flightAxes.position.copy(this.droneGroup.position);

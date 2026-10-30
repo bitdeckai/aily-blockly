@@ -5,7 +5,7 @@ import { getClassroomDeskLayout } from './crazyflie-classroom';
 import { AttitudeReception, AttitudeSample, FlightPoseSample, isFlightPoseSample, relativeFlightPose } from './crazyflie-attitude';
 import { MotionCommand, motionDurationSeconds, parseMotionCall, validateMotionSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/motion-blocks';
 import { validateRadioScanSequence } from '../editors/blockly-editor/components/blockly/generators/crazyflie/radio-blocks';
-import { CrazyflieRoomPreset, ExplorationProgress, ExplorationTracker, getExplorationScene, HOME_ROOM_SIZE } from './crazyflie-exploration';
+import { CrazyflieRoomPreset, ExplorationProgress, ExplorationTracker, getExplorationScene, HOME_ROOM_SIZE, COORDINATE_ROOM_SIZE } from './crazyflie-exploration';
 export type { CrazyflieRoomPreset } from './crazyflie-exploration';
 
 export interface CrazyfliePose {
@@ -111,6 +111,8 @@ export class CrazyflieSimService {
       this.roomSize$.next({ width: 8.2, depth: 6.2, height: 3 });
     } else if (preset === 'home') {
       this.roomSize$.next({ ...HOME_ROOM_SIZE });
+    } else if (preset === 'coordinates') {
+      this.roomSize$.next({ ...COORDINATE_ROOM_SIZE });
     } else {
       const exploration = getExplorationScene(preset);
       if (exploration) this.roomSize$.next({ ...exploration.size });
@@ -530,6 +532,7 @@ export class CrazyflieSimService {
   }
 
   private getResetPoseForPreset(preset: CrazyflieRoomPreset): CrazyfliePose {
+    if (preset === 'coordinates') return { x: 0, y: 0, z: 0, yaw: 0 };
     if (preset === 'classroom') {
       return getClassroomDeskLayout().helipadPose;
     }
@@ -537,6 +540,7 @@ export class CrazyflieSimService {
   }
 
   private getLandingReferenceY(): number {
+    if (this.roomPreset$.value === 'coordinates') return 0;
     return Math.max(0.06, this.getResetPoseForPreset(this.roomPreset$.value).y);
   }
 

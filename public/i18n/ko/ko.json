@@ -17,6 +17,10 @@
         "KITCHEN": "주방", "BATHROOM": "욕실", "ENTRY": "현관과 식사 공간", "BALCONY": "하늘 정원 테라스", "HALLWAY": "복도"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "좌표 테스트",
+        "GRID_FINE": "격자: 10 cm (굵은 선: 1 m)",
+        "GRID_COARSE": "격자: 1 m",
+        "COORDINATE_HINT": "테스트 전용: 원점 (0,0,0), X 빨강/앞, Y 초록/왼쪽, Z 파랑/위. 단위는 미터입니다. 축은 고정되며 확대에 따라 격자 간격이 바뀝니다. 실제 지도나 위치 정확도를 보장하지 않습니다.",
         "BEACH": "해변", "FARM": "농장", "CHINA": "중국", "WORLD": "세계",
         "ORIGINAL_MAP": "독창적인 야외 학습 장면", "REGION_SEARCH": "지역 이름 또는 코드 검색", "NO_REGIONS": "일치하는 지역이 없습니다",
         "MAP_SELECT": "현재 프로그래밍 목표로 선택하고 보기. 자동 비행하지 않습니다",
@@ -49,6 +53,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "LED 링: 세 가지 색상",
+        "LED_COLORS_DESCRIPTION": "LED 링이 필요합니다. 빨강, 초록, 파랑을 각각 1초 표시한 뒤 끕니다. 비행하지 않으며 시뮬레이션은 로그만 출력합니다.",
+        "LED_BLINK": "LED 링: 깜박임 반복",
+        "LED_BLINK_DESCRIPTION": "LED 링이 필요합니다. 파란 불을 0.5초씩 켜고 끄는 동작을 3회 반복합니다. 비행하지 않으며 시뮬레이션은 로그만 출력합니다.",
+        "BUZZER_RHYTHM": "부저: 알림 리듬",
+        "BUZZER_RHYTHM_DESCRIPTION": "부저와 지원 펌웨어가 필요합니다. 짧게 3회 울리고 1초 기다린 뒤 길게 1회 울립니다. 비행하지 않으며 시뮬레이션은 로그만 출력합니다.",
+        "RANGE_MONITOR": "거리 측정: 5방향 관찰",
+        "RANGE_MONITOR_DESCRIPTION": "Multiranger가 필요합니다. 앞뒤, 좌우, 위쪽 거리를 1초 간격으로 5회 출력합니다. 비행이나 자동 회피는 하지 않으며 모의 측정은 장면 경계만 사용합니다.",
+        "DECK_NOTICE": "실행이나 모드 변경 없이 추가했습니다. 비행/모터 명령은 없으며 실제 사용에는 해당 확장 보드가 필요합니다. 시뮬레이션은 로그만 출력하고 자동 회피하지 않습니다.",
         "MENU": "기본 예제",
         "SELF_TEST": "자가 진단 (비행 없음)",
         "SELF_TEST_DESCRIPTION": "무선 확인, 연결, 자가 진단 사이에 대기합니다. 실제 진단은 모터를 작동시킵니다.",
@@ -79,7 +92,7 @@
             "DESCRIPTION": "광학 흐름과 하향 거리 측정으로 이륙, 이동, 대기 중 위치 추정을 돕습니다."
         },
         "MULTIRANGER": {
-            "NAME": "Multiranger 데크",
+            "NAME": "거리 측정·장애물 회피",
             "DESCRIPTION": "앞뒤, 좌우, 위쪽 거리를 읽어 장애물을 감지하고 회피합니다."
         },
         "LED_RING": {

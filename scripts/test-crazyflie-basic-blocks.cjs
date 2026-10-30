@@ -80,8 +80,9 @@ test('legacy straight-line flight still generates valid Python', () => {
   assert.doesNotMatch(code, /while True/);
 });
 
-test('basic example list compiles exact self-test and flight plans with deliberate waits', () => {
-  assert.deepEqual(CRAZYFLIE_EXAMPLES.map(example => example.id), ['self-test', 'hover', 'back-and-forth', 'square']);
+test('basic example list compiles exact self-test, flight and ground deck plans with deliberate waits', () => {
+  assert.deepEqual(CRAZYFLIE_EXAMPLES.map(example => example.id),
+    ['self-test', 'hover', 'back-and-forth', 'square', 'led-colors', 'led-blink', 'buzzer-rhythm', 'range-monitor']);
   const expected = {
     'self-test': ['cf_test_link()', 'cf_delay(2)', 'cf_crazyflie_link()', 'cf_delay(2)',
       'cf_test_crazyflie_link()', 'cf_delay(3)'],
@@ -94,12 +95,26 @@ test('basic example list compiles exact self-test and flight plans with delibera
       'cf_motion("move", [0.3, 0, 0, 0.2])', 'cf_delay(1)', 'cf_motion("move", [0, 0.3, 0, 0.2])', 'cf_delay(1)',
       'cf_motion("move", [-0.3, 0, 0, 0.2])', 'cf_delay(1)', 'cf_motion("move", [0, -0.3, 0, 0.2])', 'cf_delay(1)',
       'cf_motion("land", [0.2])', 'cf_delay(2)'],
+    'led-colors': ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_detect_led_ring()', 'cf_delay(1)',
+      'cf_led_ring_set_color(64, 0, 0)', 'cf_delay(1)', 'cf_led_ring_set_color(0, 64, 0)', 'cf_delay(1)',
+      'cf_led_ring_set_color(0, 0, 64)', 'cf_delay(1)', 'cf_led_ring_off()'],
+    'led-blink': ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_detect_led_ring()', 'cf_delay(1)',
+      ...Array.from({ length: 3 }, () => ['cf_led_ring_set_color(0, 0, 64)', 'cf_delay(0.5)',
+        'cf_led_ring_off()', 'cf_delay(0.5)']).flat()],
+    'buzzer-rhythm': ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_detect_buzzer()', 'cf_delay(1)',
+      'cf_buzzer_beep(120, 3)', 'cf_delay(1)', 'cf_buzzer_beep(300, 1)', 'cf_delay(1)'],
+    'range-monitor': ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_detect_multiranger()', 'cf_delay(1)',
+      ...Array.from({ length: 5 }, () => ['cf_mr_log_all_distances()', 'cf_delay(1)']).flat()],
   };
   const sim = simulator();
   for (const example of CRAZYFLIE_EXAMPLES) {
     const state = createCrazyflieExample(example.id);
     const original = JSON.stringify(state);
     const ws = workspace([state]);
+    if (example.noticeKey === 'CRAZYFLIE_EXAMPLES.DECK_NOTICE') {
+      assert.doesNotMatch(compile(ws), /cf_(?:motion|takeoff|land|move|motor|test_crazyflie_link)\s*\(/,
+        'ground examples must not contain flight or motor commands');
+    }
     assert.deepEqual(JSON.parse(JSON.stringify(sim.parseCommands(compile(ws)))),
       JSON.parse(JSON.stringify(sim.parseCommands(expected[example.id].join('\n')))), example.id);
     assert.equal(JSON.stringify(state), original, 'loading cannot mutate reusable example data');
@@ -111,9 +126,46 @@ test('basic example list compiles exact self-test and flight plans with delibera
   assert.throws(() => createCrazyflieExample('unknown'), /Unknown Crazyflie example/);
 });
 
+test('ground deck examples execute offline with bounded actions, visible logs and no pose changes', async () => {
+  for (const example of CRAZYFLIE_EXAMPLES.filter(example => example.noticeKey === 'CRAZYFLIE_EXAMPLES.DECK_NOTICE')) {
+    const sim = simulator();
+    const pose = { ...sim.pose$.value };
+    const waits = [];
+    sim.waitWithControl = async ms => { waits.push(ms); };
+    const result = await sim.runCode(compile(workspace([createCrazyflieExample(example.id)])));
+    assert.equal(result.success, true, `${example.id}: ${result.message}`);
+    assert.deepEqual({ ...sim.pose$.value }, pose, example.id);
+    assert.ok(waits.every(ms => Number.isFinite(ms) && ms >= 0));
+    assert.doesNotMatch(result.executed.join('\n'), /^(?:motion|takeoff|land|move|motor|test_crazyflie_link)(?::|$)/m);
+    const actions = result.executed.filter(command => /^(?:led_ring_|buzzer_beep|mr_log_)/.test(command));
+    switch (example.id) {
+      case 'led-colors':
+        assert.deepEqual(Array.from(actions), [
+          'led_ring_set_color:64:0:0', 'led_ring_set_color:0:64:0', 'led_ring_set_color:0:0:64', 'led_ring_off',
+        ]);
+        break;
+      case 'led-blink':
+        assert.deepEqual(Array.from(actions),
+          Array.from({ length: 3 }, () => ['led_ring_set_color:0:0:64', 'led_ring_off']).flat());
+        break;
+      case 'buzzer-rhythm':
+        assert.deepEqual(Array.from(actions), ['buzzer_beep:120:3:1', 'buzzer_beep:300:1:1']);
+        break;
+      case 'range-monitor':
+        assert.equal(actions.length, 5);
+        for (const action of actions) {
+          assert.match(action, /^mr_log_all_distances:front=[^,]+,back=[^,]+,left=[^,]+,right=[^,]+,up=[^,]+$/);
+        }
+        break;
+      default:
+        assert.fail(`Missing execution assertion for ${example.id}`);
+    }
+  }
+});
+
 test('all Settings languages include example names, instructions and explicit motor warnings', () => {
   const languages = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', 'i18n.json'), 'utf8'));
-  const keys = [...CRAZYFLIE_EXAMPLES.flatMap(example => [example.titleKey, example.descriptionKey]),
+  const keys = [...CRAZYFLIE_EXAMPLES.flatMap(example => [example.titleKey, example.descriptionKey, example.noticeKey]),
     ...['MENU', 'SELF_TEST_NOTICE', 'FLIGHT_NOTICE', 'BUSY', 'ERROR'].map(key => `CRAZYFLIE_EXAMPLES.${key}`),
     'CRAZYFLIE_TOOLBOX.UNAVAILABLE'];
   for (const { code } of languages) {

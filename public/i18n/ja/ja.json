@@ -17,6 +17,10 @@
         "KITCHEN": "キッチン", "BATHROOM": "浴室・トイレ", "ENTRY": "玄関とダイニング", "BALCONY": "空中庭園テラス", "HALLWAY": "廊下"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "座標テスト",
+        "GRID_FINE": "グリッド：10 cm（太線 1 m）",
+        "GRID_COARSE": "グリッド：1 m",
+        "COORDINATE_HINT": "テスト専用：原点 (0,0,0)、X 赤/前、Y 緑/左、Z 青/上。単位はメートル。軸は固定され、ズームで間隔が変わります。実際の地図や測位精度を表すものではありません。",
         "BEACH": "海辺", "FARM": "農場", "CHINA": "中国", "WORLD": "世界",
         "ORIGINAL_MAP": "オリジナルの屋外学習シーン", "REGION_SEARCH": "地域名やコードで検索", "NO_REGIONS": "該当する地域はありません",
         "MAP_SELECT": "現在の目標として選択し表示。自動飛行しません",
@@ -49,6 +53,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "LED リング：3 色切替",
+        "LED_COLORS_DESCRIPTION": "LED リングが必要です。赤・緑・青を各 1 秒表示し、消灯します。飛行せず、シミュレーションはログのみです。",
+        "LED_BLINK": "LED リング：点滅ループ",
+        "LED_BLINK_DESCRIPTION": "LED リングが必要です。青の点灯と消灯を各 0.5 秒、3 回繰り返して消灯します。飛行せず、シミュレーションはログのみです。",
+        "BUZZER_RHYTHM": "ブザー：通知リズム",
+        "BUZZER_RHYTHM_DESCRIPTION": "ブザーと対応ファームウェアが必要です。短音 3 回、1 秒待機、長音 1 回。飛行せず、シミュレーションはログのみです。",
+        "RANGE_MONITOR": "測距・回避：5 方向の観察",
+        "RANGE_MONITOR_DESCRIPTION": "Multiranger が必要です。前後左右と上の距離を 1 秒間隔で 5 回出力します。飛行や自動回避はしません。模擬測距はシーン境界のみを参照します。",
+        "DECK_NOTICE": "実行やモード変更なしで追加しました。飛行・モーター指令はなく、実機には対応デッキが必要です。模擬実行はログのみで、自動回避はしません。",
         "MENU": "基本サンプル",
         "SELF_TEST": "セルフテスト（飛行なし）",
         "SELF_TEST_DESCRIPTION": "無線確認、接続、セルフテストの間に待機します。実機テストではモーターが回転します。",
@@ -79,7 +92,7 @@
             "DESCRIPTION": "オプティカルフローと下向き測距で位置推定を補助し、離陸、移動、待機に利用できます。"
         },
         "MULTIRANGER": {
-            "NAME": "Multiranger デッキ",
+            "NAME": "測距・障害物回避",
             "DESCRIPTION": "前後左右と上方の距離を読み取り、障害物の検出や回避に利用できます。"
         },
         "LED_RING": {

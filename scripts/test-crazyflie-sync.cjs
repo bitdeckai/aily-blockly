@@ -155,7 +155,7 @@ test('legacy/new project toolbox merges in either load order and hides only redu
   }
 });
 
-test('compact scene UI places all eleven scenes directly after basic examples, with no removed controls and one camera reset', () => {
+test('compact scene UI places all twelve scenes directly after basic examples, with no removed controls and one camera reset', () => {
   const panelPath = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
     'blockly', 'components', 'crazyflie-sim-panel');
   const html = fs.readFileSync(path.join(panelPath, 'crazyflie-sim-panel.component.html'), 'utf8');
@@ -164,7 +164,7 @@ test('compact scene UI places all eleven scenes directly after basic examples, w
   const select = /<select class="sim-scene-select"[\s\S]+?<\/select>/.exec(html)[0];
   const { CRAZYFLIE_SCENE_OPTIONS } = load(path.join(services, 'crazyflie-exploration.ts'));
   assert.deepEqual(plain(CRAZYFLIE_SCENE_OPTIONS.map(scene => scene.id)),
-    ['classroom', 'home', 'animals', 'botanical', 'science', 'space', 'ocean', 'beach', 'farm', 'china', 'world']);
+    ['classroom', 'home', 'coordinates', 'animals', 'botanical', 'science', 'space', 'ocean', 'beach', 'farm', 'china', 'world']);
   assert.match(select, /\*ngFor="let scene of sceneOptions" \[value\]="scene\.id"/);
   assert.match(select, /\[selected\]="scene\.id === simService\.roomPreset\$\.value"/);
   assert.match(select, /scene\.nameKey \| translate/);
@@ -274,7 +274,7 @@ test('toolbox has no separate language control and its deck labels use app trans
       const labels = data.CRAZYFLIE_TOOLBOX;
       assert.equal(labels.FLOW_V2.NAME, '光流定位');
       assert.equal(labels.DECKS, lang === 'zh_cn' ? '扩展' : '擴展');
-      assert.equal(labels.MULTIRANGER.NAME, lang === 'zh_cn' ? '多向测距' : '多向測距');
+      assert.equal(labels.MULTIRANGER.NAME, lang === 'zh_cn' ? '测距避障' : '測距避障');
       assert.equal(labels.LED_RING.NAME, lang === 'zh_cn' ? 'LED 灯环' : 'LED 燈環');
       assert.equal(labels.BUZZER.NAME, lang === 'zh_cn' ? '蜂鸣器' : '蜂鳴器');
       assert.doesNotMatch(JSON.stringify(labels), /甲板/);
@@ -460,7 +460,7 @@ test('legacy flight blocks use concise bilingual labels and the motion palette w
     }
     if (language === 'zh') {
       for (const [type, message] of [
-        ['cf_detect_flow_v2', '探测光流定位'], ['cf_detect_multiranger', '探测多向测距'],
+        ['cf_detect_flow_v2', '探测光流定位'], ['cf_detect_multiranger', '探测测距避障'],
         ['cf_detect_led_ring', '探测 LED 灯环'], ['cf_detect_buzzer', '探测蜂鸣器'],
       ]) {
         const definition = translated.find(block => block.type === type);

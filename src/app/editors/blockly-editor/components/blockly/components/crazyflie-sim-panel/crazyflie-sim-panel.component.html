@@ -45,12 +45,21 @@
     <div class="sim-hud">
       <span>{{ realPoseShown ? '真机估计 X' : (attitudeActive ? '模拟位置 X' : 'X') }} {{ telemetry.xCm }} cm</span>
       <span>Y {{ telemetry.yCm }} cm</span>
-      <span>相对起点高度 {{ telemetry.altitudeCm }} cm</span>
+      <span>Z {{ telemetry.altitudeCm }} cm</span>
+      @if (simService.roomPreset$.value === 'coordinates') {
+        <span>{{ (coordinateGridSpacing === 0.1 ? 'CRAZYFLIE_EXPLORATION.GRID_FINE' : 'CRAZYFLIE_EXPLORATION.GRID_COARSE') | translate }}</span>
+      }
       @if (displayedAttitude; as sample) {
         <span>{{ realPoseShown ? '相对航向' : '真机航向' }} {{ sample.yaw | number:'1.0-0' }}°</span>
       } @else {
         <span>模拟航向 {{ telemetry.yawDeg }}°</span>
       }
+      <div class="sim-hud__attitude" role="group" aria-label="真机姿态数值，仅显示真实姿态，不代表真实位置"
+        [attr.data-state]="attitudePreviewState">
+        <span>{{ 'CRAZYFLIE_ATTITUDE.ROLL' | translate }} {{ liveAttitude ? (liveAttitude.roll | number:'1.0-0') : '--' }}°</span>
+        <span>{{ 'CRAZYFLIE_ATTITUDE.PITCH' | translate }} {{ liveAttitude ? (liveAttitude.pitch | number:'1.0-0') : '--' }}°</span>
+        <span>{{ 'CRAZYFLIE_ATTITUDE.YAW' | translate }} {{ liveAttitude ? (liveAttitude.yaw | number:'1.0-0') : '--' }}°</span>
+      </div>
       <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel | translate }}</span>
       <span *ngIf="measureStatus" class="sim-hud__measure">{{ measureStatus }}</span>
     </div>
@@ -64,20 +73,6 @@
         </div>
         <div #attitudeViewport class="sim-attitude-inset__viewport" role="img"
           aria-label="真机姿态与机体坐标：X 前（红）、Y 左（绿）、Z 上（蓝）；仅显示真实姿态，不代表真实位置"></div>
-        <div class="sim-attitude-inset__values">
-          <span>
-            <span>{{ 'CRAZYFLIE_ATTITUDE.ROLL' | translate }}</span>
-            <span>{{ liveAttitude ? (liveAttitude.roll | number:'1.0-0') : '--' }}°</span>
-          </span>
-          <span>
-            <span>{{ 'CRAZYFLIE_ATTITUDE.PITCH' | translate }}</span>
-            <span>{{ liveAttitude ? (liveAttitude.pitch | number:'1.0-0') : '--' }}°</span>
-          </span>
-          <span>
-            <span>{{ 'CRAZYFLIE_ATTITUDE.YAW' | translate }}</span>
-            <span>{{ liveAttitude ? (liveAttitude.yaw | number:'1.0-0') : '--' }}°</span>
-          </span>
-        </div>
         <select class="sim-attitude-inset__view" aria-label="主场景标准视角" title="按飞行器坐标选择主场景观察方向，不改变真机姿态"
           [value]="selectedView" (change)="setCameraView($any($event.target).value)">
           <option value="" disabled>自由视角</option>
@@ -105,6 +100,9 @@
   </div>
 
   <div class="sim-panel__footer">
+    @if (simService.roomPreset$.value === 'coordinates') {
+      <div class="attitude-metrics">{{ 'CRAZYFLIE_EXPLORATION.COORDINATE_HINT' | translate }}</div>
+    }
     <div class="sim-flight-readiness" role="status" [attr.data-state]="flightReadiness.status">
       <strong>真机 · {{ flightReadiness.label }}</strong>
       <span>{{ flightReadiness.message }}</span>

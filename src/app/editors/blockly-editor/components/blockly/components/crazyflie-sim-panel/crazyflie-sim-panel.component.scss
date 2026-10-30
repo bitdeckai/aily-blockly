@@ -114,7 +114,7 @@
   position: absolute;
   right: 8px;
   top: 8px;
-  width: clamp(136px, 30%, 184px);
+  width: var(--sim-attitude-inset-width);
   z-index: 4;
   overflow: hidden;
   border: 1px solid #536a7c;
@@ -125,8 +125,7 @@
   line-height: 1.4;
   cursor: default;
 
-  &__header,
-  &__values {
+  &__header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -141,29 +140,15 @@
     color: #acb7c3;
   }
 
-  &__values {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-items: stretch;
-    white-space: normal;
-    text-align: center;
-
-    > span {
-      display: grid;
-      grid-template-rows: 1fr auto;
-      overflow-wrap: anywhere;
-    }
-  }
-
   &__viewport {
     position: relative;
-    height: clamp(96px, 14vh, 124px);
+    aspect-ratio: 1.3;
   }
 
   &__view {
     display: block;
     width: 100%;
-    height: 27px;
+    height: 24px;
     border: 0;
     border-top: 1px solid #536a7c;
     background: #303a3e;
@@ -322,6 +307,7 @@
 }
 
 .sim-panel__canvas-wrap {
+  --sim-attitude-inset-width: clamp(96px, 20%, 120px);
   display: grid;
   grid-template-rows: minmax(220px, 1fr) auto;
   position: relative;
@@ -425,7 +411,23 @@
   display: flex;
   flex-wrap: wrap;
   gap: 3px 10px;
-  max-width: calc(100% - 136px);
+  max-width: calc(100% - var(--sim-attitude-inset-width) - 26px);
+}
+
+.sim-hud__attitude {
+  display: flex;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+  gap: 3px 10px;
+  padding-top: 3px;
+  border-top: 1px solid #ffffff40;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+
+  > span { white-space: nowrap; }
+
+  &[data-state='stale'],
+  &[data-state='error'] { color: #ffd295; }
 }
 
 .sim-hud__measure {

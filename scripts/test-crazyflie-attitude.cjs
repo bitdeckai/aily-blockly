@@ -793,6 +793,70 @@ test('the furnished apartment replaces the legacy room, fits on reset and releas
   assert.equal(panel.presetInteriorRoot, null);
 });
 
+test('coordinate preset hides all room content, keeps world axes when hiding the grid, updates density and restores other scenes', () => {
+  const THREE = require('three');
+  const scene = new THREE.Group();
+  scene.userData.coordinates = true;
+  const grids = new THREE.Group();
+  grids.name = 'Coordinate grids';
+  scene.add(grids);
+  let disposed = 0, updates = 0;
+  const { panel, sim, render } = panelHarness({ modules: {
+    '../../../../../../services/crazyflie-coordinate-scene': {
+      createCoordinateScene: () => scene,
+      updateCoordinateGrid: (_root, camera, height) => {
+        assert.equal(height, 400);
+        assert.ok(camera instanceof THREE.PerspectiveCamera);
+        updates++;
+        return 0.1;
+      },
+    },
+    '../../../../../../services/crazyflie-exploration-scene': {
+      disposeExplorationScene: root => { assert.equal(root, scene); disposed++; },
+    },
+  } });
+  panel.scene = new THREE.Scene();
+  panel.floorMesh = { visible: true };
+  panel.roomWireframe = { visible: true };
+  panel.sceneModelRoot = new THREE.Group();
+  panel.gridHelper = new THREE.GridHelper();
+  panel.canvasHostRef = { nativeElement: { clientHeight: 400 } };
+  panel.camera = new THREE.PerspectiveCamera();
+  panel.controls = { target: new THREE.Vector3(), update() {} };
+  panel.gridVisible = true;
+  sim.roomPreset$.value = 'coordinates';
+  panel.rebuildPresetInterior('coordinates', { width: 6, depth: 6, height: 6 });
+  assert.equal(panel.floorMesh.visible, false);
+  assert.equal(panel.roomWireframe.visible, false);
+  assert.equal(panel.sceneModelRoot.visible, false);
+  assert.equal(panel.gridHelper.visible, false);
+  panel.resetCameraView();
+  assert.deepEqual(panel.camera.position.toArray(), [2.4, 1.8, 2.4]);
+  assert.equal(panel.controls.target.length(), 0);
+  render(1);
+  assert.equal(updates, 1);
+  assert.equal(panel.coordinateGridSpacing, 0.1);
+  panel.toggleGrid();
+  assert.equal(grids.visible, false);
+  assert.equal(scene.visible, true);
+  assert.equal(panel.gridHelper.visible, false);
+  panel.toggleGrid();
+  assert.equal(grids.visible, true);
+  sim.roomPreset$.value = 'custom';
+  panel.rebuildPresetInterior('custom', { width: 6, depth: 6, height: 6 });
+  assert.equal(disposed, 1);
+  assert.equal(panel.floorMesh.visible, true);
+  assert.equal(panel.roomWireframe.visible, true);
+  assert.equal(panel.sceneModelRoot.visible, true);
+  assert.equal(panel.gridHelper.visible, true);
+  scene.userData.coordinates = true;
+  panel.presetInteriorRoot = scene;
+  panel.renderer = null;
+  panel.controls = null;
+  panel.ngOnDestroy();
+  assert.equal(disposed, 2, 'closing the panel must release its coordinate scene');
+});
+
 test('classroom palettes cache distinct light finishes, share detail maps and retry failed variants', async () => {
   const THREE = require('three');
   let fetches = 0;
@@ -1038,7 +1102,11 @@ test('attitude labels use Settings translations in both live and empty states fo
     const componentDir = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
       'components', 'crazyflie-sim-panel');
     const html = fs.readFileSync(path.join(componentDir, 'crazyflie-sim-panel.component.html'), 'utf8');
-    const values = html.match(/<div class="sim-attitude-inset__values">([\s\S]*?)<\/div>/)[1];
+    const values = html.match(/<div class="sim-hud__attitude"[^>]*>([\s\S]*?)<\/div>/)[1];
+    assert.ok(html.indexOf('class="sim-hud__attitude"') < html.indexOf('#canvasHost'),
+      'RPY values belong with position readings in the top-left HUD');
+    assert.doesNotMatch(html, /sim-attitude-inset__values/);
+    assert.match(html, /<span>Z \{\{ telemetry\.altitudeCm \}\} cm<\/span>/);
     for (const [index, axis] of ['roll', 'pitch', 'yaw'].entries()) {
       assert.ok(values.includes(`'${keys[index]}' | translate`));
       assert.ok(values.includes(`liveAttitude ? (liveAttitude.${axis} | number:'1.0-0') : '--'`),
@@ -1089,11 +1157,10 @@ test('example selection preserves the old page, adds rendered-ready blocks and n
       assert.equal(workspace.getTopBlocks(false).length, 1);
       assert.ok(workspace.getAllBlocks(false).some(block => block.type === 'cf_core_delay'));
     }
-    assert.equal(savedPages.length, 4);
+    assert.equal(savedPages.length, examples.CRAZYFLIE_EXAMPLES.length);
     assert.equal(savedPages[0].state.blocks.blocks[0].id, 'existing');
     assert.equal(savedPages[0].state.blocks.blocks[0].fields.NUM, 42);
-    assert.deepEqual(messages, ['CRAZYFLIE_EXAMPLES.SELF_TEST_NOTICE',
-      'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE', 'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE', 'CRAZYFLIE_EXAMPLES.FLIGHT_NOTICE']);
+    assert.deepEqual(messages, Array.from(examples.CRAZYFLIE_EXAMPLES, example => example.noticeKey));
   } finally {
     Blockly.Events.setGroup(false);
     workspace.dispose();
@@ -1127,7 +1194,7 @@ test('running, missing blocks and invalid examples cannot replace the existing p
 
 test('detected module names share the localized toolbox labels', () => {
   const { panel } = panelHarness();
-  const expected = { 'flow-v2': '光流定位', multiranger: '多向测距', 'led-ring': 'LED 灯环', buzzer: '蜂鸣器' };
+  const expected = { 'flow-v2': '光流定位', multiranger: '测距避障', 'led-ring': 'LED 灯环', buzzer: '蜂鸣器' };
   const data = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', 'zh_cn', 'zh_cn.json'), 'utf8'));
   for (const [type, name] of Object.entries(expected)) {
     const key = panel.deckLabels[type];

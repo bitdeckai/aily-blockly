@@ -17,6 +17,10 @@
         "KITCHEN": "Cuisine", "BATHROOM": "Salle de bains", "ENTRY": "Entrée et salle à manger", "BALCONY": "Terrasse-jardin", "HALLWAY": "Couloir"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "Coordonnées",
+        "GRID_FINE": "Grille : 10 cm (lignes principales : 1 m)",
+        "GRID_COARSE": "Grille : 1 m",
+        "COORDINATE_HINT": "Test uniquement : origine (0,0,0), X rouge/avant, Y vert/gauche, Z bleu/haut. Unité : mètre. Axes fixes ; le zoom change le pas. Ni carte réelle ni garantie de positionnement.",
         "BEACH": "Plage", "FARM": "Ferme", "CHINA": "Chine", "WORLD": "Monde",
         "ORIGINAL_MAP": "Scène pédagogique originale", "REGION_SEARCH": "Chercher un nom ou un code", "NO_REGIONS": "Aucune région trouvée",
         "MAP_SELECT": "Choisir la cible de programmation et la cadrer, sans vol automatique",
@@ -49,6 +53,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "Anneau LED : trois couleurs",
+        "LED_COLORS_DESCRIPTION": "Anneau LED requis. Rouge, vert et bleu pendant 1 seconde chacun, puis extinction. Aucun vol ; simulation par journal uniquement.",
+        "LED_BLINK": "Anneau LED : clignotement",
+        "LED_BLINK_DESCRIPTION": "Anneau LED requis. Bleu allumé/éteint 0,5 seconde chacun, 3 fois, puis éteint. Aucun vol ; simulation par journal uniquement.",
+        "BUZZER_RHYTHM": "Buzzer : rythme de notification",
+        "BUZZER_RHYTHM_DESCRIPTION": "Buzzer et micrologiciel compatibles requis. 3 sons courts, pause de 1 seconde, puis 1 son long. Aucun vol ; simulation par journal uniquement.",
+        "RANGE_MONITOR": "Distance : cinq directions",
+        "RANGE_MONITOR_DESCRIPTION": "Multiranger requis. Affiche les distances avant/arrière/gauche/droite/haut 5 fois, avec pauses de 1 seconde. Aucun vol ni évitement automatique ; simulation limitée aux limites de la scène.",
+        "DECK_NOTICE": "Ajouté sans exécution ni changement de mode. Aucune commande de vol ou de moteur ; carte adaptée requise. Simulation par journal uniquement, sans évitement automatique.",
         "MENU": "Exemples de base",
         "SELF_TEST": "Autotest (sans vol)",
         "SELF_TEST_DESCRIPTION": "Vérifier la radio, connecter et tester, avec des pauses. Le test réel active les moteurs.",
@@ -79,7 +92,7 @@
             "DESCRIPTION": "Le flux optique et la télémétrie vers le bas facilitent le positionnement au décollage, en déplacement et en attente."
         },
         "MULTIRANGER": {
-            "NAME": "Carte Multiranger",
+            "NAME": "Distance et évitement",
             "DESCRIPTION": "Mesure les distances devant, derrière, à gauche, à droite et au-dessus pour détecter les obstacles."
         },
         "LED_RING": {

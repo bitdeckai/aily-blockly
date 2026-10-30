@@ -1,12 +1,13 @@
 import { GEOGRAPHY_MAPS, GeographyMapId, GeographyRegion, geographyPosition } from './crazyflie-geography';
 
 export type ExplorationTheme = 'animals' | 'botanical' | 'science' | 'space' | 'ocean' | 'beach' | 'farm' | GeographyMapId;
-export type CrazyflieRoomPreset = 'classroom' | 'home' | 'custom' | ExplorationTheme;
+export type CrazyflieRoomPreset = 'classroom' | 'home' | 'coordinates' | 'custom' | ExplorationTheme;
 
 export const EXPLORATION_RADIUS_M = 0.25;
 export const EXPLORATION_DWELL_MS = 1000;
 export const EXPLORATION_LAUNCH_Y = 0.06;
 export const HOME_ROOM_SIZE = { width: 14, depth: 12, height: 3.2 } as const;
+export const COORDINATE_ROOM_SIZE = { width: 6, depth: 6, height: 6 } as const;
 
 export interface ExplorationPoint {
   readonly id: number;
@@ -133,6 +134,7 @@ export const EXPLORATION_SCENES: readonly ExplorationScene[] = [
 export const CRAZYFLIE_SCENE_OPTIONS: readonly { id: Exclude<CrazyflieRoomPreset, 'custom'>; nameKey: string }[] = [
   { id: 'classroom', nameKey: 'CRAZYFLIE_EXPLORATION.CLASSROOM' },
   { id: 'home', nameKey: 'CRAZYFLIE_EXPLORATION.HOME' },
+  { id: 'coordinates', nameKey: 'CRAZYFLIE_EXPLORATION.COORDINATE_TEST' },
   ...EXPLORATION_SCENES.map(({ id, nameKey }) => ({ id, nameKey })),
 ];
 

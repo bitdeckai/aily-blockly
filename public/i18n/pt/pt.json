@@ -17,6 +17,10 @@
         "KITCHEN": "Cozinha", "BATHROOM": "Banheiro", "ENTRY": "Entrada e sala de jantar", "BALCONY": "Terraço-jardim", "HALLWAY": "Corredor"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "Coordenadas",
+        "GRID_FINE": "Grelha: 10 cm (linhas principais: 1 m)",
+        "GRID_COARSE": "Grelha: 1 m",
+        "COORDINATE_HINT": "Apenas teste: origem (0,0,0), X vermelho/frente, Y verde/esquerda, Z azul/cima. Unidade: metros. Eixos fixos; o zoom altera o espaçamento. Não é um mapa real nem garante precisão de posição.",
         "BEACH": "Praia", "FARM": "Quinta", "CHINA": "China", "WORLD": "Mundo",
         "ORIGINAL_MAP": "Cenário educativo original", "REGION_SEARCH": "Pesquisar nome ou código", "NO_REGIONS": "Nenhuma região encontrada",
         "MAP_SELECT": "Selecionar o alvo de programação e focar; sem voo automático",
@@ -49,6 +53,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "Anel LED: três cores",
+        "LED_COLORS_DESCRIPTION": "Requer anel LED. Vermelho, verde e azul durante 1 segundo cada, depois apagar. Sem voo; a simulação apenas regista mensagens.",
+        "LED_BLINK": "Anel LED: ciclo intermitente",
+        "LED_BLINK_DESCRIPTION": "Requer anel LED. Azul ligado/desligado durante 0,5 segundos cada, 3 vezes, terminando desligado. Sem voo; a simulação apenas regista mensagens.",
+        "BUZZER_RHYTHM": "Buzzer: ritmo de aviso",
+        "BUZZER_RHYTHM_DESCRIPTION": "Requer buzzer e firmware compatível. 3 sinais curtos, esperar 1 segundo e 1 sinal longo. Sem voo; a simulação apenas regista mensagens.",
+        "RANGE_MONITOR": "Distância: cinco direções",
+        "RANGE_MONITOR_DESCRIPTION": "Requer Multiranger. Imprime distâncias à frente/atrás/esquerda/direita/acima 5 vezes, com pausas de 1 segundo. Sem voo ou desvio automático; a simulação usa apenas os limites da cena.",
+        "DECK_NOTICE": "Adicionado sem executar nem mudar o modo. Sem comandos de voo ou motor; requer a expansão correspondente. A simulação apenas regista mensagens, sem desvio automático.",
         "MENU": "Exemplos básicos",
         "SELF_TEST": "Autoteste (sem voo)",
         "SELF_TEST_DESCRIPTION": "Verificar rádio, conectar e testar, com pausas. O teste real aciona os motores.",
@@ -79,7 +92,7 @@
             "DESCRIPTION": "O fluxo óptico e a medição de distância inferior auxiliam o posicionamento na descolagem, no movimento e na espera."
         },
         "MULTIRANGER": {
-            "NAME": "Módulo Multiranger",
+            "NAME": "Distância e desvio",
             "DESCRIPTION": "Lê distâncias à frente, atrás, à esquerda, à direita e acima para detetar obstáculos."
         },
         "LED_RING": {

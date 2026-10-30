@@ -17,6 +17,10 @@
         "KITCHEN": "廚房", "BATHROOM": "浴室", "ENTRY": "玄關與飯廳", "BALCONY": "空中花園露台", "HALLWAY": "走廊"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "座標系",
+        "GRID_FINE": "網格：10 cm（粗線 1 m）",
+        "GRID_COARSE": "網格：1 m",
+        "COORDINATE_HINT": "僅供測試：原點 (0,0,0)，X 紅/前、Y 綠/左、Z 藍/上，單位米。座標軸固定，網格隨縮放切換；不代表真實場地或定位精度。",
         "BEACH": "海灘", "FARM": "農場", "CHINA": "中國", "WORLD": "世界",
         "ORIGINAL_MAP": "原創自然探索教學場景", "REGION_SEARCH": "搜尋區域名稱或代碼", "NO_REGIONS": "沒有符合的區域",
         "MAP_SELECT": "選為目前編程目標並聚焦，不會自動飛行",
@@ -49,6 +53,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "LED 燈環：三色切換",
+        "LED_COLORS_DESCRIPTION": "需要 LED 燈環；紅、綠、藍各顯示 1 秒，最後關燈，不起飛。僅模擬輸出日誌。",
+        "LED_BLINK": "LED 燈環：循環閃爍",
+        "LED_BLINK_DESCRIPTION": "需要 LED 燈環；藍燈亮滅各 0.5 秒，循環 3 次，最後關燈，不起飛。僅模擬輸出日誌。",
+        "BUZZER_RHYTHM": "蜂鳴器：提示音節奏",
+        "BUZZER_RHYTHM_DESCRIPTION": "需要蜂鳴器及相應韌體支援；3 次短音後等待 1 秒，再發出 1 次長音，不起飛。僅模擬輸出日誌。",
+        "RANGE_MONITOR": "測距避障：五向距離觀察",
+        "RANGE_MONITOR_DESCRIPTION": "需要測距避障模組；每輪列印前後左右和上方距離，共 5 輪，間隔 1 秒。不起飛、不自動避障；模擬測距只參考場景邊界。",
+        "DECK_NOTICE": "擴展範例已新增，不會自動執行或切換模式。無起飛/馬達指令；真機需相應擴展板。僅模擬輸出日誌，測距範例不自動避障。",
         "MENU": "基礎範例",
         "SELF_TEST": "基礎自檢（不飛行）",
         "SELF_TEST_DESCRIPTION": "偵測無線收發器、連線、自檢，步驟間設有等待。真機自檢會測試馬達。",
@@ -79,7 +92,7 @@
             "DESCRIPTION": "利用光流和下視測距輔助定位，可配合起飛、移動、等待等積木編寫飛行流程。"
         },
         "MULTIRANGER": {
-            "NAME": "多向測距",
+            "NAME": "測距避障",
             "DESCRIPTION": "讀取前、後、左、右和上方的距離，可用於障礙物判斷與避障邏輯。"
         },
         "LED_RING": {

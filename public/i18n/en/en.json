@@ -17,6 +17,10 @@
         "KITCHEN": "Kitchen", "BATHROOM": "Bathroom", "ENTRY": "Entry and dining", "BALCONY": "Sky garden terrace", "HALLWAY": "Hallway"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "Coordinates",
+        "GRID_FINE": "Grid: 10 cm (major lines: 1 m)",
+        "GRID_COARSE": "Grid: 1 m",
+        "COORDINATE_HINT": "Test only: origin (0,0,0), X red/forward, Y green/left, Z blue/up. Units: meters. Fixed world axes; zoom changes grid spacing. This is not a real-world map or a positioning guarantee.",
         "REFERENCE": "Layout reference", "TEACHING_MAP": "Original scaled teaching map, not an exact replica",
         "SCENE": "Exploration scene",
         "CLASSROOM": "Classroom",
@@ -60,6 +64,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "LED ring: three colors",
+        "LED_COLORS_DESCRIPTION": "Requires an LED ring. Show red, green and blue for 1 second each, then turn off. No flight; simulation logs only.",
+        "LED_BLINK": "LED ring: blinking loop",
+        "LED_BLINK_DESCRIPTION": "Requires an LED ring. Blink blue on/off for 0.5 seconds each, repeat 3 times, finish off. No flight; simulation logs only.",
+        "BUZZER_RHYTHM": "Buzzer: notification rhythm",
+        "BUZZER_RHYTHM_DESCRIPTION": "Requires a buzzer and firmware support. Play 3 short beeps, wait 1 second, then 1 long beep. No flight; simulation logs only.",
+        "RANGE_MONITOR": "Ranging: five-direction monitor",
+        "RANGE_MONITOR_DESCRIPTION": "Requires a Multiranger deck. Print front/back/left/right/up distances 5 times, with 1-second waits. No flight or automatic avoidance; simulated ranges use scene bounds only.",
+        "DECK_NOTICE": "Added without running or switching modes. No flight or motor commands; real use requires the matching deck. Simulation logs only; ranging does not automatically avoid obstacles.",
         "MENU": "Basic examples",
         "SELF_TEST": "Basic self-test (no flight)",
         "SELF_TEST_DESCRIPTION": "Check the radio, connect and self-test, with waits between steps. A real self-test runs the motors.",
@@ -90,7 +103,7 @@
             "DESCRIPTION": "Optical flow and downward ranging assist positioning for takeoff, movement and waiting tasks."
         },
         "MULTIRANGER": {
-            "NAME": "Multiranger deck",
+            "NAME": "Ranging & avoidance",
             "DESCRIPTION": "Read front, back, left, right and upward distances for obstacle detection and avoidance."
         },
         "LED_RING": {

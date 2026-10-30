@@ -17,6 +17,10 @@
         "KITCHEN": "Küche", "BATHROOM": "Badezimmer", "ENTRY": "Eingang und Essbereich", "BALCONY": "Gartenterrasse", "HALLWAY": "Flur"
     },
     "CRAZYFLIE_EXPLORATION": {
+        "COORDINATE_TEST": "Koordinaten",
+        "GRID_FINE": "Raster: 10 cm (Hauptlinien: 1 m)",
+        "GRID_COARSE": "Raster: 1 m",
+        "COORDINATE_HINT": "Nur zum Testen: Ursprung (0,0,0), X rot/vorwärts, Y grün/links, Z blau/oben. Einheit: Meter. Feste Achsen; Zoom ändert die Rasterweite. Keine reale Karte oder Positionsgarantie.",
         "BEACH": "Strand", "FARM": "Bauernhof", "CHINA": "China", "WORLD": "Welt",
         "ORIGINAL_MAP": "Eigene Lernlandschaft", "REGION_SEARCH": "Region oder Code suchen", "NO_REGIONS": "Keine passende Region",
         "MAP_SELECT": "Als aktuelles Programmierziel auswählen und anzeigen; kein automatischer Flug",
@@ -49,6 +53,15 @@
         }
     },
     "CRAZYFLIE_EXAMPLES": {
+        "LED_COLORS": "LED-Ring: drei Farben",
+        "LED_COLORS_DESCRIPTION": "LED-Ring erforderlich. Rot, Grün und Blau je 1 Sekunde anzeigen, dann ausschalten. Kein Flug; Simulation nur als Protokoll.",
+        "LED_BLINK": "LED-Ring: Blinkschleife",
+        "LED_BLINK_DESCRIPTION": "LED-Ring erforderlich. Blau je 0,5 Sekunden ein/aus, 3 Wiederholungen, am Ende aus. Kein Flug; Simulation nur als Protokoll.",
+        "BUZZER_RHYTHM": "Summer: Signalrhythmus",
+        "BUZZER_RHYTHM_DESCRIPTION": "Summer und passende Firmware erforderlich. 3 kurze Töne, 1 Sekunde warten, dann 1 langer Ton. Kein Flug; Simulation nur als Protokoll.",
+        "RANGE_MONITOR": "Abstand: fünf Richtungen",
+        "RANGE_MONITOR_DESCRIPTION": "Multiranger erforderlich. Abstände vorne/hinten/links/rechts/oben 5-mal mit 1 Sekunde Pause ausgeben. Kein Flug oder automatisches Ausweichen; simulierte Werte nutzen nur Szenengrenzen.",
+        "DECK_NOTICE": "Ohne Start oder Moduswechsel hinzugefügt. Keine Flug- oder Motorbefehle; passende Erweiterung erforderlich. Simulation nur als Protokoll, ohne automatisches Ausweichen.",
         "MENU": "Grundbeispiele",
         "SELF_TEST": "Selbsttest (ohne Flug)",
         "SELF_TEST_DESCRIPTION": "Funk prüfen, verbinden und Selbsttest, mit Wartezeiten. Der echte Selbsttest startet die Motoren.",
@@ -79,7 +92,7 @@
             "DESCRIPTION": "Optischer Fluss und Abstandsmessung nach unten unterstützen die Positionierung bei Start, Bewegung und Warten."
         },
         "MULTIRANGER": {
-            "NAME": "Multiranger-Deck",
+            "NAME": "Abstand & Ausweichen",
             "DESCRIPTION": "Misst Abstände vorne, hinten, links, rechts und oben zur Hinderniserkennung."
         },
         "LED_RING": {

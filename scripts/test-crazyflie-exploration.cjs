@@ -35,11 +35,107 @@ const { EXPLORATION_SCENES, ExplorationTracker, explorationPointPosition, EXPLOR
 const themedScenes = EXPLORATION_SCENES.filter(scene => !scene.geography);
 const models = load(path.join(services, 'crazyflie-exploration-scene.ts'));
 const homes = load(path.join(services, 'crazyflie-home-scene.ts'));
+const coordinates = load(path.join(services, 'crazyflie-coordinate-scene.ts'));
 const { CrazyflieSimService } = load(path.join(services, 'crazyflie-sim.service.ts'));
 const plain = value => JSON.parse(JSON.stringify(value));
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
 const simulator = () => new CrazyflieSimService({ setDeckDetected() {} });
 const getTranslation = (values, key) => key.split('.').reduce((value, part) => value?.[part], values);
+
+test('coordinate test scene contains only fixed flight-frame axes, meter labels and three perpendicular grids', () => {
+  const scene = coordinates.createCoordinateScene();
+  try {
+    assert.equal(scene.userData.coordinates, true);
+    assert.equal(exploration.isSelectableRoomPreset('coordinates'), true);
+    assert.equal(exploration.getExplorationScene('coordinates'), undefined);
+    const grids = scene.getObjectByName('Coordinate grids');
+    let gridCount = 0;
+    grids.traverse(node => { if (node instanceof THREE.GridHelper) gridCount++; });
+    assert.equal(gridCount, 6);
+    const xy = scene.getObjectByName('XY grid 0.1 m');
+    const positions = xy.geometry.getAttribute('position');
+    near(positions.getZ(4) - positions.getZ(0), 0.1);
+    for (const plane of ['XY', 'XZ', 'YZ']) {
+      const grid = scene.getObjectByName(`${plane} grid 1 m`);
+      scene.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(grid);
+      const size = bounds.getSize(new THREE.Vector3()).toArray();
+      assert.equal(size.filter(value => Math.abs(value - 6) < 1e-6).length, 2);
+      assert.equal(size.filter(value => Math.abs(value) < 1e-6).length, 1);
+    }
+    for (const [label, direction] of [['X', [-1, 0, 0]], ['Y', [0, 0, 1]], ['Z', [0, 1, 0]]]) {
+      const axis = scene.getObjectByName(`World ${label} axis`);
+      const vector = new THREE.Vector3(...direction);
+      near(new THREE.Vector3(0, 1, 0).applyQuaternion(axis.quaternion).distanceTo(vector), 0);
+      near(axis.position.distanceTo(vector.multiplyScalar(-3)), 0);
+    }
+    assert.ok(scene.children.every(node => node instanceof THREE.Group
+      || node instanceof THREE.ArrowHelper || node instanceof THREE.Sprite));
+    const owned = new Set(), disposed = new Map();
+    scene.traverse(node => {
+      if (node.isMesh || node.isLine) owned.add(node.geometry);
+      if (node.material) {
+        for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+          owned.add(material);
+          if (material.map) owned.add(material.map);
+        }
+      }
+    });
+    owned.forEach(resource => resource.addEventListener('dispose', () =>
+      disposed.set(resource, (disposed.get(resource) || 0) + 1)));
+    models.disposeExplorationScene(scene);
+    for (const resource of owned) assert.equal(disposed.get(resource), 1);
+  } catch (error) {
+    models.disposeExplorationScene(scene);
+    throw error;
+  }
+});
+
+test('coordinate grid switches from 10 cm to 1 m at the measured 8 CSS pixel density threshold', () => {
+  const scene = coordinates.createCoordinateScene();
+  const camera = new THREE.PerspectiveCamera(58);
+  try {
+    for (const height of [220, 400, 800]) for (const zoom of [1, 2]) {
+      camera.zoom = zoom;
+      const distance = 0.1 * height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2) * 8);
+      for (const [scale, spacing] of [[0.99, 0.1], [1.01, 1]]) {
+        camera.position.set(0, 0, distance * scale);
+        assert.equal(coordinates.updateCoordinateGrid(scene, camera, height), spacing);
+        assert.equal(scene.getObjectByName('Coordinate minor grid').visible, spacing === 0.1);
+        assert.equal(scene.getObjectByName('XY grid 1 m').visible, true);
+      }
+    }
+  } finally { models.disposeExplorationScene(scene); }
+});
+
+test('coordinate simulation starts, lands and resets at exact zero and real-follow uses the same launch origin', async () => {
+  const sim = simulator();
+  sim.setRoomPreset('coordinates');
+  const origin = { x: 0, y: 0, z: 0, yaw: 0 };
+  assert.deepEqual(plain(sim.pose$.value), origin);
+  assert.deepEqual(plain(sim.roomSize$.value), plain(exploration.COORDINATE_ROOM_SIZE));
+  const heights = [];
+  const sub = sim.pose$.subscribe(pose => heights.push(pose.y));
+  const result = await sim.runCode('cf_motion("takeoff", [0.3, 0.5])\ncf_delay(0.1)\ncf_motion("land", [0.5])');
+  assert.equal(result.success, true, result.message);
+  near(Math.max(...heights), 0.3);
+  assert.deepEqual(plain(sim.pose$.value), origin);
+  assert.equal(sim.relativeAltitudeCm, 0);
+  sub.unsubscribe();
+  sim.beginRealFollow();
+  assert.throws(() => sim.setRoomPreset('classroom'), /运行期间/);
+  const sample = (timestampMs, z) => ({ type: 'sample', timestampMs, roll: 0, pitch: 0, yaw: 0, x: 10, y: 20, z });
+  sim.receiveRealPose(sample(0, 2), 0);
+  assert.deepEqual(plain(sim.pose$.value), origin);
+  sim.receiveRealPose(sample(50, 2.3), 50);
+  near(sim.pose$.value.y, 0.3);
+  assert.equal(sim.relativeAltitudeCm, 30);
+  sim.endRealFollow('done');
+  sim.resetPose();
+  assert.deepEqual(plain(sim.pose$.value), origin);
+  sim.setRoomPreset('classroom');
+  near(sim.pose$.value.y, 0.76573);
+});
 
 test('target guidance inverts the real simulator body transform at any heading and does not mutate the pose', () => {
   const sim = simulator();
