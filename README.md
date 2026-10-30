@@ -111,6 +111,21 @@ node --test $tests.FullName
 
 These regressions do not perform real flights. Build-channel and platform details are in the [Crazyflie development guide](./README_crazyflie.MD) and [general development notes](./develop.md).
 
+## Displays and Interface Scaling
+
+- The interface follows system DPI without forcing page zoom based on resolution. Use `Ctrl/Cmd +`, `Ctrl/Cmd -`, and `Ctrl/Cmd 0` to adjust or reset interface zoom.
+- On Windows, startup restores bounds inside the display work area and minimum dimensions follow that area. Monitor moves, display-setting changes, and monitor removal trigger rechecks without restricting normal cross-monitor dragging.
+- Narrow windows give editing space back from the toolbox and restore its preferred width when enlarged. Very narrow editors scroll horizontally; short simulator panels and mission areas remain scrollable.
+- Three-dimensional rendering refreshes when DPI changes, capped at a pixel ratio of 2 to limit GPU load, without resetting the camera.
+
+Display regressions (no hardware connection):
+
+```powershell
+node --test scripts\test-window-startup.cjs scripts\test-display-adaptation.cjs
+```
+
+The actual templates, styles, and WebGL renderer passed 52 emulated browser scenarios: logical viewports from 640×360 to 3840×2160, 100%/125%/150%/200% DPI, and the pixel-ratio cap at higher DPI. This does not replace cross-monitor testing on physical displays.
+
 ## Compatibility and Roadmap
 
 - **Preserved:** account login, AI/model configuration, cloud features, existing user data and legacy project loading.

@@ -563,7 +563,8 @@ test('mission layout constrains grid width and lets the footer scroll rather tha
   assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-rows: auto auto minmax\(min-content, 1fr\) minmax\(0, auto\)/);
   assert.match(css, /\.sim-panel__canvas-wrap\s*\{[^}]*grid-template-rows: minmax\(220px, 1fr\) auto/);
   assert.match(css, /\.sim-panel__canvas\s*\{[^}]*min-height: 220px/);
-  assert.match(css, /\.sim-panel__footer\s*\{[^}]*min-height: 0;[^}]*overflow-y: auto/);
+  assert.match(css, /\.sim-panel__footer\s*\{[^}]*min-height: 48px;[^}]*overflow-y: auto/);
+  assert.match(css, /\.sim-panel__footer:has\(\.sim-mission\)\s*\{[^}]*min-height: 96px/);
   assert.match(css, /\.sim-panel__footer\s*\{[^}]*max-height: 280px/);
 });
 

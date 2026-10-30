@@ -3248,23 +3248,25 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   private observeResize(): void {
-    const host = this.canvasHostRef.nativeElement;
-    this.resizeObserver = new ResizeObserver(() => {
-      if (!this.camera || !this.renderer) {
-        return;
-      }
-      const width = Math.max(1, host.clientWidth || 420);
-      const height = Math.max(220, host.clientHeight || 300);
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(width, height);
-      this.updateAttitudeViewport();
-      if (this.controls) {
-        this.controls.update();
-      }
-    });
-    this.resizeObserver.observe(host);
+    this.resizeObserver = new ResizeObserver(() => this.resizeRenderer());
+    this.resizeObserver.observe(this.canvasHostRef.nativeElement);
     this.resizeObserver.observe(this.attitudeViewportRef.nativeElement);
+  }
+
+  private resizeRenderer(): void {
+    if (!this.camera || !this.renderer) return;
+    const host = this.canvasHostRef.nativeElement;
+    const width = Math.max(1, host.clientWidth || 420);
+    const height = Math.max(220, host.clientHeight || 300);
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    if (this.renderer.getPixelRatio() !== pixelRatio) {
+      this.renderer.setPixelRatio(pixelRatio);
+    }
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height);
+    this.updateAttitudeViewport();
+    this.controls?.update();
   }
 
   private updateAttitudeViewport(): void {
@@ -3282,6 +3284,11 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     const animate = () => {
       if (!this.scene || !this.camera || !this.renderer || !this.droneGroup) {
         return;
+      }
+
+      // Moving between displays can change DPI without changing the CSS size.
+      if (this.renderer.getPixelRatio() !== Math.min(window.devicePixelRatio || 1, 2)) {
+        this.resizeRenderer();
       }
 
       const now = performance.now();

@@ -14,7 +14,7 @@ const end = statements.findIndex(node => ts.isVariableStatement(node)
   && node.declarationList.declarations.some(declaration => declaration.name.getText(source) === 'targetUrl'));
 assert.ok(end > 0, 'window startup must precede navigation');
 const code = statements.slice(0, end).map(node => node.getText(source)).join('\n');
-const geometryCode = ['rectsOverlap', 'ensureWinStateOnVisibleDisplay'].map(name =>
+const geometryCode = ['rectsOverlap', 'fitBoundsToWorkArea', 'ensureWinStateOnVisibleDisplay', 'trackWindowDisplays'].map(name =>
   source.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === name).getText(source)).join('\n');
 
 function openWindow({ isWin32 = true, firstLaunch = false,
@@ -27,12 +27,12 @@ function openWindow({ isWin32 = true, firstLaunch = false,
     fs: { existsSync: () => !firstLaunch },
     __dirname: path.dirname(filename), serve: true, isWin32, isDarwin: !isWin32,
     console, registerWebBluetoothChooser() {},
-    screen: {
+    screen: Object.assign(new EventEmitter(), {
       getAllDisplays: () => displays,
       getPrimaryDisplay: () => displays[0],
       getDisplayMatching: rect => displays.find(({ workArea: area }) => rect.x < area.x + area.width
-        && rect.x + rect.width > area.x && rect.y < area.y + area.height && rect.y + rect.height > area.y),
-    },
+        && rect.x + rect.width > area.x && rect.y < area.y + area.height && rect.y + rect.height > area.y) || displays[0],
+    }),
     WinState: class {
       state = state;
       winOptions = { width: state.width, height: state.height, x: state.x, y: state.y };
@@ -47,8 +47,15 @@ function openWindow({ isWin32 = true, firstLaunch = false,
         this.maximized = false;
         this.fullScreen = false;
         this.visible = false;
+        this.minimum = [options.minWidth, options.minHeight];
       }
-      setBounds(bounds) { this.bounds = { ...bounds }; }
+      setBounds(bounds) {
+        this.bounds = { ...bounds, width: Math.max(bounds.width, this.minimum[0]),
+          height: Math.max(bounds.height, this.minimum[1]) };
+      }
+      getBounds() { return { ...this.bounds }; }
+      getMinimumSize() { return this.minimum; }
+      setMinimumSize(...minimum) { this.minimum = minimum; }
       maximize() { this.maximized = true; }
       setFullScreen(value) { this.fullScreen = value; }
       show() { this.visible = true; }
@@ -59,7 +66,7 @@ function openWindow({ isWin32 = true, firstLaunch = false,
   };
   vm.runInNewContext(`${geometryCode}\n${code}`, context);
   window.emit('ready-to-show');
-  return { window, state, persisted };
+  return { window, state, persisted, screen: context.screen };
 }
 
 test('Windows clears a saved fullscreen state and restores a normal window', () => {
@@ -127,4 +134,54 @@ test('non-Windows startup and close retain the existing fullscreen behavior', ()
   window.emit('close');
   assert.equal(state.isFullScreen, true);
   assert.equal(persisted.at(-1).isFullScreen, true);
+});
+
+test('Windows minimum size never overrides a small logical work area', () => {
+  for (const [width, height] of [[640, 480], [960, 540], [1280, 512]]) {
+    const { window } = openWindow({
+      displays: [{ workArea: { x: 0, y: 0, width, height } }], width: 1920, height: 1080,
+    });
+    assert.deepEqual(window.minimum, [Math.min(800, width), Math.min(600, height)]);
+    assert.equal(window.bounds.width, width);
+    assert.equal(window.bounds.height, height);
+  }
+});
+
+test('Windows follows changed work areas and restores minimum size on a larger display', () => {
+  const displays = [{ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }];
+  const { window, screen } = openWindow({ displays });
+  displays[0].workArea = { x: 0, y: 0, width: 960, height: 540 };
+  screen.emit('display-metrics-changed');
+  assert.deepEqual(window.minimum, [800, 540]);
+  assert.equal(window.bounds.width, 960);
+  assert.equal(window.bounds.height, 540);
+  displays[0].workArea = { x: 0, y: 0, width: 1920, height: 1040 };
+  window.emit('moved');
+  assert.deepEqual(window.minimum, [800, 600]);
+});
+
+test('Windows recovers after display removal without trapping normal cross-screen drags', () => {
+  const displays = [
+    { workArea: { x: 0, y: 0, width: 1536, height: 816 } },
+    { workArea: { x: -1920, y: 0, width: 1920, height: 1040 } },
+  ];
+  const { window, screen } = openWindow({ displays, x: -1800, y: 40 });
+  window.bounds.x = -600;
+  window.emit('moved');
+  assert.equal(window.bounds.x, -600, 'a visible window can straddle monitors');
+  window.bounds.x = -1800;
+  displays.pop();
+  screen.emit('display-removed');
+  assert.equal(window.bounds.x, 168);
+  assert.equal(window.bounds.y, 18);
+  window.bounds.x = -1199;
+  screen.emit('display-removed');
+  assert.equal(window.bounds.x, 0, 'a one-pixel overlap must not strand most controls on the removed monitor');
+  window.bounds.y = 500;
+  screen.emit('display-metrics-changed');
+  assert.equal(window.bounds.y, 36, 'work-area changes also recover clipped positions when the size already fits');
+  window.emit('closed');
+  assert.equal(screen.listenerCount('display-metrics-changed'), 0);
+  assert.equal(screen.listenerCount('display-removed'), 0);
+  assert.equal(window.listenerCount('moved'), 0);
 });

@@ -243,6 +243,7 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   readonly toolboxMinWidth = 160;
   readonly toolboxMaxWidth = 420;
   toolboxWidth = 185;
+  private preferredToolboxWidth = this.toolboxWidth;
   private pendingToolboxWidth = this.toolboxWidth;
   private toolboxResizeAnimationFrame: number | null = null;
   private workspaceResizeAnimationFrame: number | null = null;
@@ -369,8 +370,8 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
 
   get layoutColumns(): string {
     return this.showSimPanel
-      ? `${this.toolboxWidth}px minmax(0, 1fr) minmax(320px, 42%)`
-      : `${this.toolboxWidth}px minmax(0, 1fr)`;
+      ? `${this.toolboxWidth}px minmax(240px, 1fr) minmax(320px, 42%)`
+      : `${this.toolboxWidth}px minmax(240px, 1fr)`;
   }
 
   constructor(
@@ -540,7 +541,8 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
       return;
     }
 
-    this.pendingToolboxWidth = this.clampToolboxWidth(width);
+    this.preferredToolboxWidth = Math.min(this.toolboxMaxWidth, Math.max(this.toolboxMinWidth, Math.round(width)));
+    this.pendingToolboxWidth = this.clampToolboxWidth(this.preferredToolboxWidth);
     if (this.toolboxResizeAnimationFrame !== null) {
       return;
     }
@@ -553,7 +555,8 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
 
   private flushToolboxWidth(width: number | undefined): void {
     if (typeof width === 'number' && Number.isFinite(width)) {
-      this.pendingToolboxWidth = this.clampToolboxWidth(width);
+      this.preferredToolboxWidth = Math.min(this.toolboxMaxWidth, Math.max(this.toolboxMinWidth, Math.round(width)));
+      this.pendingToolboxWidth = this.clampToolboxWidth(this.preferredToolboxWidth);
     }
 
     this.cancelToolboxResizeAnimationFrame();
@@ -569,17 +572,23 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     this.toolboxWidth = nextWidth;
     this.uiService.blocklyToolboxWidth = nextWidth;
     this.applyToolboxWidth(nextWidth);
+    this.cdr.markForCheck();
     this.resizeWorkspace();
   }
 
   private applyToolboxWidth(width: number): void {
     const widthPx = `${width}px`;
-    this.layoutElementRef.nativeElement.style.setProperty('grid-template-columns', `${widthPx} minmax(0, 1fr)`);
+    this.layoutElementRef.nativeElement.style.setProperty('grid-template-columns', this.layoutColumns);
     this.toolboxPaneRef.nativeElement.style.setProperty('width', widthPx);
   }
 
   private clampToolboxWidth(width: number): number {
-    return Math.min(this.toolboxMaxWidth, Math.max(this.toolboxMinWidth, Math.round(width)));
+    const available = this.layoutElementRef?.nativeElement.clientWidth;
+    const simulator = this.showSimPanel && available ? Math.max(320, available * 0.42) : 0;
+    const maximum = available
+      ? Math.max(this.toolboxMinWidth, Math.min(this.toolboxMaxWidth, Math.floor(available - simulator - 240)))
+      : this.toolboxMaxWidth;
+    return Math.min(maximum, Math.max(this.toolboxMinWidth, Math.round(width)));
   }
 
   private scheduleWorkspaceResize(): void {
@@ -834,8 +843,11 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
           return;
         }
 
+        this.pendingToolboxWidth = this.clampToolboxWidth(this.preferredToolboxWidth);
+        this.applyQueuedToolboxWidth();
         this.scheduleWorkspaceResize();
       });
+      this.resizeObserver.observe(this.layoutElementRef.nativeElement);
       this.resizeObserver.observe(this.workspacePaneComponent.blocklyHostElement);
 
       (window as any)['Blockly'] = Blockly;

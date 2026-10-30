@@ -579,7 +579,7 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
   let frame;
   const exports = {};
   const context = {
-    exports, performance: { now: () => now }, queueMicrotask,
+    exports, performance: { now: () => now }, queueMicrotask, window: { devicePixelRatio: 1 },
     requestAnimationFrame: callback => { frame = callback; return 1; }, cancelAnimationFrame() {},
     require: name => {
       if (modules[name]) return modules[name];
@@ -620,7 +620,7 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
   panel.scene = {};
   panel.camera = {};
   let rendered = 0;
-  panel.renderer = { render() { rendered++; } };
+  panel.renderer = { getPixelRatio: () => 1, render() { rendered++; } };
   panel.droneGroup = new Group();
   panel.droneGroup.rotation.y = Math.PI;
   panel.droneGroup.position.copy(panel.targetPosition);

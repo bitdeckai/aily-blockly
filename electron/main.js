@@ -1237,6 +1237,20 @@ function rectsOverlap(a, b) {
   );
 }
 
+function fitBoundsToWorkArea(bounds, workArea, recenter = false) {
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  return {
+    ...bounds,
+    width,
+    height,
+    x: recenter ? Math.round(workArea.x + (workArea.width - width) / 2)
+      : Math.min(Math.max(bounds.x, workArea.x), workArea.x + workArea.width - width),
+    y: recenter ? Math.round(workArea.y + (workArea.height - height) / 2)
+      : Math.min(Math.max(bounds.y, workArea.y), workArea.y + workArea.height - height),
+  };
+}
+
 /** Windows：恢复的窗口需留在显示器工作区内，避开任务栏和已移除的显示器。 */
 function ensureWinStateOnVisibleDisplay(winState) {
   if (!isWin32) {
@@ -1254,24 +1268,48 @@ function ensureWinStateOnVisibleDisplay(winState) {
   const displays = screen.getAllDisplays();
   const visible = displays.some((d) => rectsOverlap(winRect, d.workArea));
   const wa = visible ? screen.getDisplayMatching(winRect).workArea : screen.getPrimaryDisplay().workArea;
-  const nw = Math.min(w, wa.width);
-  const nh = Math.min(h, wa.height);
-  const nx = visible ? Math.min(Math.max(x, wa.x), wa.x + wa.width - nw)
-    : Math.round(wa.x + (wa.width - nw) / 2);
-  const ny = visible ? Math.min(Math.max(y, wa.y), wa.y + wa.height - nh)
-    : Math.round(wa.y + (wa.height - nh) / 2);
-  if (w === nw && h === nh && x === nx && y === ny) {
+  const fitted = fitBoundsToWorkArea(winRect, wa, !visible);
+  if (w === fitted.width && h === fitted.height && x === fitted.x && y === fitted.y) {
     return;
   }
-  s.width = nw;
-  s.height = nh;
-  s.x = nx;
-  s.y = ny;
+  Object.assign(s, fitted);
   try {
     winState.saveState();
   } catch (e) {
     console.warn('修正窗口位置后保存状态失败:', e);
   }
+}
+
+function trackWindowDisplays(window) {
+  if (!isWin32) return;
+  const refresh = (fitPosition) => {
+    if (window.isDestroyed()) return;
+    const bounds = window.getBounds();
+    const workArea = screen.getDisplayMatching(bounds).workArea;
+    const minimum = [Math.min(800, workArea.width), Math.min(600, workArea.height)];
+    const previousMinimum = window.getMinimumSize();
+    if (minimum.some((value, index) => value !== previousMinimum[index])) {
+      window.setMinimumSize(...minimum);
+    }
+    if (window.isMaximized() || window.isFullScreen()) return;
+    const visible = screen.getAllDisplays().some(display => rectsOverlap(bounds, display.workArea));
+    if (fitPosition || !visible || bounds.width > workArea.width || bounds.height > workArea.height) {
+      const fitted = fitBoundsToWorkArea(bounds, workArea, !visible);
+      if (['x', 'y', 'width', 'height'].some(key => fitted[key] !== bounds[key])) {
+        window.setBounds(fitted);
+      }
+    }
+  };
+  const moved = () => refresh(false);
+  const displayChanged = () => refresh(true);
+  window.on('moved', moved);
+  screen.on('display-metrics-changed', displayChanged);
+  screen.on('display-removed', displayChanged);
+  window.once('closed', () => {
+    window.removeListener('moved', moved);
+    screen.removeListener('display-metrics-changed', displayChanged);
+    screen.removeListener('display-removed', displayChanged);
+  });
 }
 
 function createWindow() {
@@ -1296,8 +1334,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     ...winState.winOptions,
     show: false,
-    minWidth: 800,
-    minHeight: 600,
+    minWidth: isWin32 ? Math.min(800, screen.getDisplayMatching(winState.state).workArea.width) : 800,
+    minHeight: isWin32 ? Math.min(600, screen.getDisplayMatching(winState.state).workArea.height) : 600,
     frame: false,
     titleBarStyle: isDarwin ? 'hiddenInset' : 'default',
     alwaysOnTop: false,
@@ -1319,6 +1357,7 @@ function createWindow() {
   registerWebBluetoothChooser(mainWindow);
 
   mainWindow.setBounds(winState.state);
+  trackWindowDisplays(mainWindow);
 
   // Windows 不恢复独占全屏，避免启动时遮住任务栏。
   mainWindow.on('close', () => {
