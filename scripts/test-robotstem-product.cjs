@@ -44,9 +44,14 @@ function loadService(relative, window = desktop()) {
       exports, window, console: quiet, Error,
       setTimeout: () => { throw new Error('Unexpected background timer'); },
       require: name => {
-        if (name === '@angular/core') return { Injectable: () => target => target };
+        if (name === '@angular/core') return {
+          Injectable: () => target => target,
+          Component: () => target => target,
+        };
         if (name === '@angular/common/http') return { HttpErrorResponse: class extends Error {} };
         if (name === 'rxjs') return rxjs;
+        if (name === 'rxjs/operators' || name.startsWith('@orama/')) return require(name);
+        if (name.endsWith('fuzzy-search.utils')) return load(path.join(root, 'src', 'app', 'utils', 'fuzzy-search.utils.ts'));
         if (name.endsWith('robot-device-catalog')) return load(path.join(root, 'src', 'app', 'services', 'robot-device-catalog.ts'));
         if (name.endsWith('package.json')) return require(path.join(root, 'package.json'));
         return {};
@@ -129,6 +134,68 @@ test('both project entry points have valid Angular empty-state control flow', as
   ]) {
     const result = parseTemplate(read(filename), filename);
     assert.equal(result.errors, null, result.errors?.map(error => error.toString()).join('\n'));
+  }
+});
+
+test('both project entry points still select bundled Crazyflie without remote version lookups', async () => {
+  for (const entry of ['pages', 'windows']) {
+    const window = desktop();
+    window.path.getUserDocuments = () => 'documents';
+    const catalog = loadService('src/app/services/robot-device-catalog.ts', window).loadRobotDeviceCatalog();
+    const original = JSON.stringify(catalog);
+    const { ProjectNewComponent } = loadService(`src/app/${entry}/project-new/project-new.component.ts`, window);
+    const config = {
+      init: async () => {},
+      loadBoardList: async () => catalog,
+      sortBoardsByUsage: list => [...list],
+    };
+    const electron = { isElectron: true };
+    const project = { generateUniqueProjectName: () => 'new-robot-project' };
+    let remoteLookups = 0;
+    const npm = { getPackageVersionList() { remoteLookups++; throw new Error('Unexpected registry lookup'); } };
+    const platform = { getPlatformSeparator: () => path.sep, isMac: () => false };
+    const cloud = {
+      getPublicProjects: () => rxjs.of({ status: 200, data: { total: 0 } }),
+      getMyTemplates: () => rxjs.of({ status: 200, data: { list: [] } }),
+    };
+    const cd = { detectChanges() {} };
+    const message = { error(text) { assert.fail(text); } };
+    const component = entry === 'pages'
+      ? new ProjectNewComponent({}, {}, electron, project, config, npm, platform, cloud, cd,
+        { currentLang: 'en', instant: key => key }, message)
+      : new ProjectNewComponent(electron, project, config, npm, {}, platform, cloud, cd, message);
+    try {
+      await component.ngOnInit();
+      assert.equal(component.currentBoard.name, deviceName);
+      assert.equal(component.newProjectData.board.sourcePath, devicePath);
+      assert.equal(component.newProjectData.name, 'new-robot-project');
+      if (entry === 'pages') assert.equal(component.newProjectData.devmode, 'arduino', 'preserve the project pipeline identifier');
+      await component.nextStep();
+      assert.equal(component.currentStep, 1);
+      assert.equal(component.boardVersionList.length, 1);
+      assert.equal(component.boardVersionList[0], catalog[0].version);
+      assert.equal(remoteLookups, 0);
+
+      if (entry === 'pages') {
+        component.doSearch('crazyflie');
+        assert.equal(component.boardList[0].name, deviceName);
+        component.doSearch('unavailable-device-xyz');
+        assert.equal(component.boardList.length, 0);
+        assert.equal(component.currentBoard, null);
+        component.doSearch('');
+        assert.equal(component.currentBoard.name, deviceName);
+      } else {
+        component.search('crazyflie');
+        assert.equal(component.boardList[0].name, deviceName);
+        component.search('unavailable-device-xyz');
+        assert.equal(component.boardList.length, 0);
+        component.search('');
+        assert.equal(component.boardList[0].name, deviceName);
+      }
+      assert.equal(JSON.stringify(catalog), original, 'search and selection must not mutate the shared catalog');
+    } finally {
+      component.ngOnDestroy?.();
+    }
   }
 });
 

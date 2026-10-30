@@ -9,18 +9,15 @@ import { ProjectService } from '../../services/project.service';
 import { ConfigService } from '../../services/config.service';
 import { NzSelectModule } from 'ng-zorro-antd/select';
 import { NpmService } from '../../services/npm.service';
-import { NzTagModule } from 'ng-zorro-antd/tag';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
 import { Router } from '@angular/router';
 import { PlatformService } from '../../services/platform.service';
-import { NzRadioModule } from 'ng-zorro-antd/radio';
 import { CloudService } from '../../tools/cloud-space/services/cloud.service';
 import { isSupportedRobotDevice } from '../../services/robot-device-catalog';
 import { firstValueFrom, Subject } from 'rxjs';
 import { debounceTime, takeUntil } from 'rxjs/operators';
 import { createBoardSearchIndex, searchBoards } from '../../utils/fuzzy-search.utils';
-import type { AnyOrama } from '@orama/orama';
 import { NzMessageService } from 'ng-zorro-antd/message';
 
 @Component({
@@ -33,9 +30,7 @@ import { NzMessageService } from 'ng-zorro-antd/message';
     NzInputModule,
     NzStepsModule,
     NzSelectModule,
-    NzTagModule,
-    TranslateModule,
-    NzRadioModule
+    TranslateModule
   ],
   templateUrl: './project-new.component.html',
   styleUrl: './project-new.component.scss',
@@ -55,8 +50,6 @@ export class ProjectNewComponent implements OnDestroy {
     devmode: ''
   };
 
-  boardVersion = '';
-
   // 搜索开发板关键字
   keyword = '';
 
@@ -65,7 +58,6 @@ export class ProjectNewComponent implements OnDestroy {
 
   private searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
-  private searchIndex: AnyOrama | null = null;
 
   get resourceUrl() {
     return this.configService.getCurrentResourceUrl();
@@ -101,16 +93,12 @@ export class ProjectNewComponent implements OnDestroy {
       this.newProjectData.path = window['path'].getUserDocuments() + `${pt}aily-project${pt}`;
     }
 
-    // 切换标题
-    // this.electronService.setTitle('PROJECT_NEW.TITLE');
-
     await this.configService.init();
 
     const boardListWithLocal = await this.configService.loadBoardList();
-    let processedBoardList = this.process(boardListWithLocal);
 
     // 按使用次数排序
-    this._boardList = this.configService.sortBoardsByUsage(processedBoardList);
+    this._boardList = this.configService.sortBoardsByUsage(boardListWithLocal);
 
     this.boardList = this.applyLocalization(JSON.parse(JSON.stringify(this._boardList)));
 
@@ -120,16 +108,6 @@ export class ProjectNewComponent implements OnDestroy {
     }
     this.newProjectData.name = this.projectService.generateUniqueProjectName(this.newProjectData.path, 'project_');
     this.checkPathInvalidChars();
-  }
-
-  process(array) {
-    let _array = JSON.parse(JSON.stringify(array));
-    for (let index = 0; index < _array.length; index++) {
-      const item = _array[index];
-      // 为全文搜索做准备
-      item['fulltext'] = `${item.nickname}${item.brand}${item.description}${item.keywords}`.replace(/\s/g, '').toLowerCase();
-    }
-    return _array;
   }
 
   search(keyword = this.keyword) {
@@ -150,8 +128,8 @@ export class ProjectNewComponent implements OnDestroy {
 
     // 使用 Orama 进行模糊搜索
     const localizedList = this.applyLocalization(JSON.parse(JSON.stringify(this._boardList)));
-    this.searchIndex = createBoardSearchIndex(localizedList);
-    const matchedNames = searchBoards(this.searchIndex, keyword);
+    const searchIndex = createBoardSearchIndex(localizedList);
+    const matchedNames = searchBoards(searchIndex, keyword);
 
     // 按 Orama 返回的顺序（相关度排序）还原开发板对象
     const nameIndexMap = new Map<string, number>();
@@ -169,7 +147,6 @@ export class ProjectNewComponent implements OnDestroy {
     this.cd.detectChanges();
   }
 
-  devmodes = [];
   hasExamples = false;
   myTemplateList: CloudProjectTemplate[] = [];
   isLoadingTemplates = false;
@@ -194,7 +171,6 @@ export class ProjectNewComponent implements OnDestroy {
     this.newProjectData.board.version = boardInfo.version;
     this.newProjectData.board.sourcePath = boardInfo.sourcePath;
     this.newProjectData.devmode = boardInfo.mode ? this.currentBoard.mode[0] : 'arduino';
-    this.devmodes = boardInfo.mode;
     this.checkHasExamples(boardInfo.name);
     this.loadMyTemplates(boardInfo.name);
   }
@@ -396,7 +372,6 @@ export class ProjectNewComponent implements OnDestroy {
 
   nextStepFromProjectHub() {
     this.router.navigate(['main', 'playground', 'list'], { queryParams: { board: this.currentBoard.name } })
-    // this.router.navigate(['/main/playground']);
   }
 
   private applyLocalization(list: any[]) {

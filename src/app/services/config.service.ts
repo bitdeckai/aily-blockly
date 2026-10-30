@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import { lastValueFrom, Subject } from 'rxjs';
 import { ElectronService } from './electron.service';
-import { API, setServerUrl, setRegistryUrl, setToolWebUrl } from '../configs/api.config';
+import { setServerUrl, setRegistryUrl, setToolWebUrl } from '../configs/api.config';
 import { calculateSimilarity, extractKeywords } from '../utils/fuzzy-search.utils';
 import { loadRobotDeviceCatalog } from './robot-device-catalog';
 
@@ -22,9 +22,6 @@ export class ConfigService {
   
   // 数据加载状态标识
   private _isDataReady = false;
-  
-  // 测试用：模拟慢速加载（毫秒），设为0禁用
-  private readonly SIMULATE_SLOW_LOADING = 0; // 改为2000可以看到loading效果
   
   /**
    * 检查boards和libraries数据是否已加载完成
@@ -194,7 +191,7 @@ export class ConfigService {
     const localPath = `${configFilePath}/boards.json`;
 
     try {
-      this.boardList = await this.fetchBoardListOrThrow();
+      this.boardList = loadRobotDeviceCatalog();
       this.electronService.writeFile(localPath, JSON.stringify(this.boardList));
     } catch (error) {
       this.boardList = [];
@@ -360,10 +357,6 @@ export class ConfigService {
   boardDict = {};
   private errorNoticeState: Record<string, { message: string; at: number }> = {};
 
-  private async fetchBoardListOrThrow(): Promise<any[]> {
-    return loadRobotDeviceCatalog();
-  }
-
   private getErrorMessage(error: unknown): string {
     if (error instanceof HttpErrorResponse) {
       if (typeof error.error === 'string' && error.error.trim()) {
@@ -389,7 +382,7 @@ export class ConfigService {
 
   async loadBoardList(): Promise<any[]> {
     try {
-      this.boardList = await this.fetchBoardListOrThrow();
+      this.boardList = loadRobotDeviceCatalog();
       this.boardDict = Object.fromEntries(this.boardList.map(board => [board.name, board]));
       return this.boardList;
     } catch (error) {
@@ -543,7 +536,7 @@ export class ConfigService {
     const localPath = `${configFilePath}/boards-index.json`;
 
     try {
-      this.boardIndex = await this.fetchBoardIndexOrThrow();
+      this.boardIndex = loadRobotDeviceCatalog();
       this.writeBoardIndexCache(localPath, this.boardIndex);
     } catch (error) {
       this.boardIndex = [];
@@ -614,10 +607,6 @@ export class ConfigService {
     this.electronService.writeFile(localPath, JSON.stringify(cacheData));
   }
 
-  private async fetchBoardIndexOrThrow(): Promise<any[]> {
-    return loadRobotDeviceCatalog();
-  }
-
   private async fetchLibraryIndexOrThrow(): Promise<any[]> {
     return this.fetchRemoteArrayOrThrow('/libraries-index.json', '线上 libraries-index.json 格式无效', 'libraries');
   }
@@ -634,10 +623,6 @@ export class ConfigService {
       console.error('[ConfigService] 从线上恢复 libraries-index.json 失败:', remoteError);
       this.showLibraryIndexLoadError(message);
     }
-  }
-
-  private getBoardIndexReloadFailureMessage(remoteError: unknown, originalError: unknown): string {
-    return this.buildReloadFailureMessage('开发板索引', 'boards-index.json', remoteError, originalError);
   }
 
   private getLibraryIndexReloadFailureMessage(remoteError: unknown, originalError: unknown): string {
@@ -711,7 +696,7 @@ export class ConfigService {
 
   async loadBoardIndex(): Promise<any[]> {
     try {
-      this.boardIndex = await this.fetchBoardIndexOrThrow();
+      this.boardIndex = loadRobotDeviceCatalog();
       return this.boardIndex;
     } catch (error) {
       this.boardIndex = [];

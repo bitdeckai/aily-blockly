@@ -13,6 +13,13 @@
 - 在配置独立更新源前停用原产品更新检查、下载和安装，国内/国际打包脚本也不再指向上游更新源，避免安装包将 RobotSTEM 覆盖为原产品。
 - 第一阶段回归：`node --test scripts\test-robotstem-product.cjs`；Crazyflie 回归命令仍见下文。
 
+### 后续清理与关闭回归
+
+- 清除本地设备目录的多余异步包装、无调用的旧索引错误处理，以及新建工程中已注释的通用开发板界面和配套字段、模块；账户、AI、大模型、云端模板和旧工程兼容不变。
+- Blockly 11 不在核心命名空间导出各语言生成器，移除相关无效清理分支；实际的 `window.Arduino`、`window.MPY` / `window.MicropPython` 库卸载逻辑保留。
+- 蓝牙选择器在注册时保存 WebContents 引用，关闭窗口后不再读取已销毁的 BrowserWindow，避免出现 `TypeError: Object has been destroyed`。
+- 关闭与蓝牙选择回归：`node --test scripts\test-electron-ble.cjs scripts\test-window-startup.cjs`。测试不连接设备，也不执行飞行程序。
+
 ## 快速开始（Windows）
 
 在仓库根目录打开 PowerShell。依赖已经安装好时，只需运行这一条命令：

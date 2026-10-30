@@ -407,6 +407,42 @@ test('removing the legacy library retains built-in Crazyradio definitions and ge
   }
 });
 
+test('library removal still clears the actual Arduino and Python registries without touching other generators', () => {
+  const Blockly = require('blockly');
+  const saved = { Arduino: bridgeWindow.Arduino, MPY: bridgeWindow.MPY, MicropPython: bridgeWindow.MicropPython };
+  const blockType = 'robotstem_cleanup_block';
+  const generatorType = 'robotstem_cleanup_generator';
+  const unrelated = () => 'unchanged';
+  try {
+    for (const pythonName of ['MPY', 'MicropPython']) {
+      const { loader } = toolboxLoader();
+      const forBlock = () => ({ [blockType]: () => '', [generatorType]: () => '', unrelated });
+      bridgeWindow.Arduino = { forBlock: forBlock() };
+      bridgeWindow.MPY = pythonName === 'MPY' ? { forBlock: forBlock() } : undefined;
+      bridgeWindow.MicropPython = pythonName === 'MicropPython' ? { forBlock: forBlock() } : undefined;
+      const python = bridgeWindow[pythonName];
+      Blockly.Blocks[blockType] = { init() {} };
+      loader.blockDefinitionsMap = new Map([[blockType, {}]]);
+      loader.blockTypeToLibMap = new Map([[blockType, 'library']]);
+      loader.loadedGenerators = new Map([['test-generator', new Set([generatorType])]]);
+      loader.removeLibBlocks([{ type: blockType }]);
+      assert.equal(Blockly.Blocks[blockType], undefined);
+      assert.equal(loader.blockDefinitionsMap.has(blockType), false);
+      assert.equal(loader.blockTypeToLibMap.has(blockType), false);
+      loader.removeLibGenerator('test-generator');
+      assert.equal(loader.loadedGenerators.size, 0);
+      for (const generator of [bridgeWindow.Arduino, python]) {
+        assert.equal(generator.forBlock[blockType], undefined);
+        assert.equal(generator.forBlock[generatorType], undefined);
+        assert.equal(generator.forBlock.unrelated, unrelated);
+      }
+    }
+  } finally {
+    Object.assign(bridgeWindow, saved);
+    delete Blockly.Blocks[blockType];
+  }
+});
+
 test('legacy flight blocks use concise bilingual labels and the motion palette without changing deck colours', () => {
   const { loader } = toolboxLoader();
   const definitions = JSON.parse(fs.readFileSync(path.join(root, 'child', 'boards', 'board-crazyflie',

@@ -10,7 +10,6 @@ import { ProjectService } from '../../services/project.service';
 import { ConfigService } from '../../services/config.service';
 import { NzSelectModule } from 'ng-zorro-antd/select';
 import { NpmService } from '../../services/npm.service';
-import { NzTagModule } from 'ng-zorro-antd/tag';
 import { TranslateModule } from '@ngx-translate/core';
 import { UiService } from '../../services/ui.service';
 import { PlatformService } from '../../services/platform.service';
@@ -28,7 +27,6 @@ import { NzMessageService } from 'ng-zorro-antd/message';
     NzInputModule,
     NzStepsModule,
     NzSelectModule,
-    NzTagModule,
     TranslateModule
   ],
   templateUrl: './project-new.component.html',
@@ -51,8 +49,6 @@ export class ProjectNewComponent {
       version: '',
     }
   };
-
-  boardVersion = '';
 
   // 搜索开发板关键字
   keyword = '';

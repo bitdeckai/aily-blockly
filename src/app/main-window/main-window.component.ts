@@ -16,7 +16,7 @@ import { SimplebarAngularModule } from 'simplebar-angular';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import { AppStoreComponent } from '../tools/app-store/app-store.component';
 import { UpdateService } from '../services/update.service';
-import { NzModalModule, NzModalService } from 'ng-zorro-antd/modal';
+import { NzModalModule } from 'ng-zorro-antd/modal';
 import { NpmService } from '../services/npm.service';
 import { SimulatorComponent } from '../tools/simulator/simulator.component';
 import { NavigationEnd, Router, RouterModule } from '@angular/router';
@@ -51,7 +51,6 @@ import { TranslationService } from '../services/translation.service';
     SimulatorComponent,
     RouterModule,
     NzToolTipModule,
-    NzModalModule,
     CloudSpaceComponent,
     UserCenterComponent,
     ModelStoreComponent,
@@ -97,7 +96,6 @@ export class MainWindowComponent {
     private npmService: NpmService,
     private router: Router,
     private configService: ConfigService,
-    private modal: NzModalService,
     private onboardingService: OnboardingService,
     private translationService: TranslationService
   ) { }

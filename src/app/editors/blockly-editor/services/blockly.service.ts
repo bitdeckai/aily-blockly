@@ -1299,9 +1299,6 @@ export class BlocklyService {
         if (mpyGen?.forBlock?.[blockType]) {
           delete mpyGen.forBlock[blockType];
         }
-        if ((Blockly as any).JavaScript?.forBlock?.[blockType]) {
-          delete (Blockly as any).JavaScript.forBlock[blockType];
-        }
       }
       this.blockDefinitionsMap.delete(blockType);
       this.blockTypeToLibMap.delete(blockType);
@@ -1396,9 +1393,6 @@ export class BlocklyService {
           console.log(`- delete Python generator for ${blockType}`);
           delete mpyGen.forBlock[blockType];
         }
-        if ((Blockly as any).JavaScript?.forBlock?.[blockType]) {
-          delete (Blockly as any).JavaScript.forBlock[blockType];
-        }
       });
     }
     this.loadedGenerators.delete(scriptSrc);
@@ -1448,22 +1442,6 @@ export class BlocklyService {
       }
     });
     console.log(`移除了 ${scriptSrcsToRemove.length} 个脚本标签`);
-
-    // 清理生成器函数
-    const generatorTypes = ['Arduino', 'Python', 'JavaScript', 'Dart', 'Lua', 'PHP'];
-    generatorTypes.forEach(type => {
-      if ((Blockly as any)[type]) {
-        const keysToDelete = Object.keys((Blockly as any)[type]).filter(key =>
-          typeof (Blockly as any)[type][key] === 'function' &&
-          !key.startsWith('init') && // 保留init等系统方法
-          !key.startsWith('finish')
-        );
-        keysToDelete.forEach(key => {
-          delete (Blockly as any)[type][key];
-        });
-        console.log(`清理了 ${type} 的 ${keysToDelete.length} 个generator函数`);
-      }
-    });
 
     // 处理工作区
     if (this.workspace) {
