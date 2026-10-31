@@ -163,8 +163,8 @@ npm run package:all -- --flavor cn
 - `package:all` 使用已存在的 `main.yml` 手动触发入口，只执行独立的三平台安装包流程，不运行旧发布、签名或部署任务。Windows x64、Linux x64、Mac ARM64 与 Mac Intel x64 在各自原生 GitHub runner 上构建；脚本等待成功后下载到 `dist/installers/ci-<运行编号>/`。
 - 云端构建前须安装并登录 GitHub CLI（`gh auth login`），提交并推送当前分支；脚本拒绝未提交源码或本地、远端不一致的版本。不会替你提交、推送或发布 Release。可加 `--ref RobotSTEM`，或用 `--dry-run` 查看目标而不运行构建。
 - 原 `build`、`build:cn`、`build:global` 保留 `dist/aily-blockly/` 输出，兼容原发布流程；渠道为 `cn` 或 `global`，非法参数明确报错。不能在 Windows 上假装生成 Mac 安装包，跨平台请用 CI。
-- 首次配置或 CI 环境先执行 `npm ci --include=dev` 和 `npm ci --prefix electron --include=dev`。Unix 本地构建还需要原生 `7zz`、`rg` 和 `ninja`（Ubuntu：`sudo apt install 7zip ripgrep ninja-build`；Mac：`brew install sevenzip ripgrep ninja`），CI 会安装这些工具。
-- Unix 包内准备原生 Node/npm、7-Zip、ripgrep、Ninja、C++ 解析库和 probe-rs，不混入 Windows DLL；Mac 工具的非系统动态库随包复制、重定位并保留许可证，不要求用户安装 Homebrew。下载的 probe-rs 校验官方 SHA256。构建时检查工具可执行；构建后用打包版 Electron 的 Node 模式检查串口/终端模块、设备模板及手势模型/WASM，不启动应用或操作硬件。Python 字节缓存不进入安装包。
+- 首次配置或 CI 环境先执行 `npm ci --include=dev` 和 `npm ci --prefix electron --include=dev`。Unix 本地构建还需要原生 7-Zip、`rg` 和 `ninja`（Ubuntu：`sudo apt install 7zip ripgrep ninja-build`，使用 `/usr/lib/7zip/7za` 独立二进制；Mac：`brew install sevenzip ripgrep ninja`），CI 会安装这些工具。Windows 原生编译需 Visual Studio 2022 C++ 工具，CI 使用带有该工具的 `windows-2022`。原生依赖编译使用 Python 3.11，以兼容现有 node-gyp 的 `distutils`；构建环境的 Python 不进入安装包。
+- Unix 包内准备原生 Node/npm、7-Zip、ripgrep、Ninja、C++ 解析库和 probe-rs，不混入 Windows DLL；Mac 工具的非系统动态库随包复制、重定位并保留许可证，不要求用户安装 Homebrew。Homebrew 未携带的 7-Zip 许可证与对应版本源码从官方源补齐。下载的 probe-rs 校验官方 SHA256。构建时检查工具可执行；构建后用打包版 Electron 的 Node 模式检查串口/终端模块、设备模板及手势模型/WASM，不启动应用或操作硬件。Python 字节缓存不进入安装包。
 - CI 使用 Electron 官方下载源。如果本地镜像报 `EOF`，可运行 `npm --electron_builder_binaries_mirror=https://github.com/electron-userland/electron-builder-binaries/releases/download/ run build:desktop`，用命令行参数覆盖项目 `.npmrc`；不修改系统配置。
 - 新 CI 默认不签名、不公证；Windows/macOS 可能显示安全提示。真机功能仍需用户安装 Python 3、`cflib` 和适合系统的 USB 驱动/权限，个人 Python 环境和凭据不会进入安装包。
 

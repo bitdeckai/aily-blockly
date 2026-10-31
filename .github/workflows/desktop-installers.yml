@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, platform: windows, arch: x64 }
+          - { os: windows-2022, platform: windows, arch: x64 }
           - { os: ubuntu-24.04, platform: linux, arch: x64 }
           - { os: macos-15, platform: macos, arch: arm64 }
           - { os: macos-15-intel, platform: macos, arch: x64 }
@@ -49,6 +49,9 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             electron/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Install application dependencies
         run: |
           npm ci --include=dev --electron_mirror=${{ env.NPM_CONFIG_ELECTRON_MIRROR }}

@@ -99,9 +99,21 @@ function bundleMacLibraries(binaries, directory, copyLicense) {
   for (const [source, destination] of binaries) relocate(source, destination);
 }
 
+async function bundleSevenZipSource(binary, directory) {
+  const version = /[/]Cellar[/]sevenzip[/](\d+\.\d+)(?:_\d+)?[/]/.exec(binary)?.[1];
+  if (!version) throw new Error(`Cannot determine installed Homebrew sevenzip version: ${binary}`);
+  fs.mkdirSync(directory, { recursive: true });
+  const base = `https://raw.githubusercontent.com/ip7z/7zip/${version}/DOC/`;
+  await Promise.all(['License.txt', 'copying.txt', 'unRarLicense.txt'].map(name =>
+    verifiedDownload(base + name, path.join(directory, name))));
+  await verifiedDownload(`https://github.com/ip7z/7zip/archive/refs/tags/${version}.tar.gz`,
+    path.join(directory, `7zip-${version}-source.tar.gz`));
+}
+
 async function prepareUnixRuntime(directory, config, environment) {
   fs.mkdirSync(directory, { recursive: true });
-  const sevenZip = fs.realpathSync(capture('which', ['7zz']));
+  const sevenZip = fs.realpathSync(config.platform === 'linux' && fs.existsSync('/usr/lib/7zip/7za')
+    ? '/usr/lib/7zip/7za' : capture('which', ['7zz']));
   const ripgrep = fs.realpathSync(capture('which', ['rg']));
   const ninja = fs.realpathSync(capture('which', ['ninja']));
   for (const [source, name] of [[sevenZip, '7zz'], [ripgrep, 'rg']]) {
@@ -109,6 +121,7 @@ async function prepareUnixRuntime(directory, config, environment) {
     fs.chmodSync(path.join(directory, name), 0o755);
   }
   const licenseRoot = path.join(directory, 'licenses');
+  if (config.platform === 'macos') await bundleSevenZipSource(sevenZip, path.join(licenseRoot, 'sevenzip'));
   const copyLicenses = (docs, name) => {
     let copied = 0;
     const visit = (folder, depth = 0) => {
@@ -128,6 +141,10 @@ async function prepareUnixRuntime(directory, config, environment) {
   const copyBrewLicense = filename => {
     const cellar = /[/]Cellar[/]([^/]+)[/]([^/]+)[/]/.exec(filename);
     if (!cellar) throw new Error(`Use a Homebrew installation so the license can be bundled: ${filename}`);
+    if (cellar[1] === 'sevenzip') {
+      fs.accessSync(path.join(licenseRoot, 'sevenzip', 'License.txt'));
+      return;
+    }
     copyLicenses(filename.slice(0, cellar.index) + cellar[0].slice(0, -1), cellar[1]);
   };
   for (const [binary, name] of [[sevenZip, '7zip'], [ripgrep, 'ripgrep'], [ninja, 'ninja-build']]) {

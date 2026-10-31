@@ -70,10 +70,45 @@ test('one-command CI uses all four native runners and cannot execute the legacy 
   assert.equal(native.permissions.contents, 'read');
   assert.deepEqual(native.jobs.package.strategy.matrix.include.map(item => `${item.platform}-${item.arch}`),
     ['windows-x64', 'linux-x64', 'macos-arm64', 'macos-x64']);
+  assert.equal(native.jobs.package.strategy.matrix.include[0].os, 'windows-2022');
   assert.equal(native.jobs.package.strategy['fail-fast'], false);
   assert.ok(native.jobs.package.steps.some(step => step.with?.['if-no-files-found'] === 'error'));
   assert.ok(native.jobs.package.steps.some(step => step.run?.includes('build:desktop')));
   assert.ok(native.jobs.package.env.NPM_CONFIG_ELECTRON_BUILDER_BINARIES_MIRROR.startsWith('https://github.com/'));
+  assert.ok(native.jobs.package.steps.some(step => step.uses === 'actions/setup-python@v5' && step.with['python-version'] === '3.11'));
+});
+
+test('Ubuntu packages the standalone 7za executable rather than a missing 7zz or system-dependent wrapper', () => {
+  const source = ts.createSourceFile('build-electron.js', fs.readFileSync(path.join(root, 'scripts', 'build-electron.js'), 'utf8'),
+    ts.ScriptTarget.Latest, true);
+  const prepare = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'prepareUnixRuntime');
+  const declaration = prepare.body.statements.find(node => ts.isVariableStatement(node)
+    && node.declarationList.declarations[0].name.getText(source) === 'sevenZip').declarationList.declarations[0];
+  assert.equal(vm.runInNewContext(declaration.initializer.getText(source), {
+    config: { platform: 'linux' }, fs: { existsSync: filename => filename === '/usr/lib/7zip/7za', realpathSync: filename => filename },
+    capture: () => { throw new Error('Do not use the system wrapper'); },
+  }), '/usr/lib/7zip/7za');
+});
+
+test('Mac downloads complete sevenzip licenses and source for the installed version, including bottle revisions', async () => {
+  const source = ts.createSourceFile('build-electron.js', fs.readFileSync(path.join(root, 'scripts', 'build-electron.js'), 'utf8'),
+    ts.ScriptTarget.Latest, true);
+  const helper = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'bundleSevenZipSource');
+  for (const version of ['26.02', '26.05_1']) {
+    const downloads = [], stable = version.replace(/_\d+$/, '');
+    await vm.runInNewContext(`${helper.getText(source)}; bundleSevenZipSource(binary, '/licenses/sevenzip');`, {
+      binary: `/opt/homebrew/Cellar/sevenzip/${version}/bin/7zz`, path: path.posix, fs: { mkdirSync() {} },
+      verifiedDownload: async (url, target) => { downloads.push([url, target]); },
+    });
+    assert.equal(downloads.length, 4);
+    for (const name of ['License.txt', 'copying.txt', 'unRarLicense.txt']) {
+      assert.ok(downloads.some(([url, target]) => url === `https://raw.githubusercontent.com/ip7z/7zip/${stable}/DOC/${name}`
+        && target === `/licenses/sevenzip/${name}`));
+    }
+    assert.ok(downloads.some(([url]) => url.endsWith(`/refs/tags/${stable}.tar.gz`)));
+  }
+  await assert.rejects(vm.runInNewContext(`${helper.getText(source)}; bundleSevenZipSource('/usr/bin/7zz', '/licenses');`, {}),
+    /Cannot determine installed Homebrew sevenzip version/);
 });
 
 test('Mac runtime relocates and signs shared Homebrew libraries once, including nested Ninja dependencies', () => {
