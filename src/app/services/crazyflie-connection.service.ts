@@ -1,7 +1,8 @@
 import { Injectable, NgZone, OnDestroy } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { CrazyflieTelemetryService, CrazyflieTelemetryState } from './crazyflie-telemetry.service';
 import { AttitudeEvent, AttitudeReception, AttitudeSample, isAttitudeSample } from './crazyflie-attitude';
+import { isMappingSample, MappingEvent } from './crazyflie-mapping';
 
 export type CrazyflieConnectionStatus = 'unknown' | 'checking' | 'ready' | 'error' | 'disconnected';
 export type CrazyflieDeckType = 'flow-v2' | 'multiranger' | 'led-ring' | 'buzzer';
@@ -40,6 +41,8 @@ interface ConnectionApi {
   onConnection(callback: (state: CrazyflieConnectionState) => void): () => void;
   onTelemetry(callback: (state: ConnectionTelemetry) => void): () => void;
   onAttitude(callback: (event: AttitudeEvent) => void): () => void;
+  setMapping?(enabled: boolean): Promise<ConnectionResult>;
+  onMapping?(callback: (event: unknown) => void): () => void;
 }
 function connectionApi(): ConnectionApi | undefined {
   const api: unknown = window['crazyflie'];
@@ -59,6 +62,7 @@ export class CrazyflieConnectionService implements OnDestroy {
   readonly detectedDecks$ = new BehaviorSubject<CrazyflieDeckType[]>([]);
   readonly attitude$ = new BehaviorSubject<AttitudeSample | null>(null);
   readonly attitudeError$ = new BehaviorSubject<string | null>(null);
+  readonly mapping$ = new Subject<MappingEvent>();
   readonly flightReadiness$ = new BehaviorSubject<CrazyflieFlightReadiness>({
     status: 'unknown', label: '未确认', message: '尚未连接真机，无法确认固件是否允许起飞',
   });
@@ -83,6 +87,7 @@ export class CrazyflieConnectionService implements OnDestroy {
       }
     })));
     this.dispose.push(api.onAttitude(event => this.zone.run(() => this.receiveAttitude(event))));
+    if (api.onMapping) this.dispose.push(api.onMapping(event => this.zone.run(() => this.receiveMapping(event))));
     const initial = this.state$.value;
     void api.getConnectionState().then(state => {
       if (this.state$.value === initial) this.zone.run(() => this.receiveState(state));
@@ -92,6 +97,35 @@ export class CrazyflieConnectionService implements OnDestroy {
   ngOnDestroy(): void {
     if (this.readinessTimer !== null) clearTimeout(this.readinessTimer);
     this.dispose.forEach(dispose => dispose());
+    this.mapping$.complete();
+  }
+
+  private receiveMapping(value: unknown): void {
+    if (!['ready', 'checking'].includes(this.state$.value.status)) return;
+    if (isMappingSample(value)) {
+      if (!this.detectedDecks$.value.includes('multiranger')) this.setDeckDetected('multiranger', true);
+      this.mapping$.next(value);
+    }
+    else if (typeof value === 'object' && value !== null && 'type' in value) {
+      if (value.type === 'stopped' || value.type === 'reference') this.mapping$.next({ type: value.type });
+      else if (value.type === 'error' && 'message' in value && typeof value.message === 'string') {
+        this.mapping$.next({ type: 'error', message: value.message });
+      } else {
+        console.warn('Invalid Crazyflie mapping event', value);
+        this.mapping$.next({ type: 'error', message: '建图遥测无效，已暂停入图' });
+      }
+    } else {
+      console.warn('Invalid Crazyflie mapping event', value);
+      this.mapping$.next({ type: 'error', message: '建图遥测无效，已暂停入图' });
+    }
+  }
+
+  async setMapping(enabled: boolean): Promise<void> {
+    const api = connectionApi();
+    if (!api?.setMapping) throw new Error('未找到测距建图接口，请重启应用');
+    if (this.state$.value.status !== 'ready') throw new Error('请先连接真机；建图不会自动连接或控制电机');
+    const result = await api.setMapping(enabled);
+    if (!result.success) throw new Error(result.message || '测距建图采集切换失败');
   }
 
   private clearReadiness(message = '连接未就绪，无法确认固件是否允许起飞'): void {
@@ -186,6 +220,7 @@ export class CrazyflieConnectionService implements OnDestroy {
       return;
     }
     if (state.status !== 'ready') {
+      if (this.state$.value.status === 'ready') this.mapping$.next({ type: 'reference' });
       this.clearAttitude();
       this.clearReadiness();
     }

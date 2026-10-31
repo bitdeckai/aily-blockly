@@ -52,6 +52,43 @@
             "CORAL": "Jardim de coral", "TURTLE": "Tartaruga marinha", "JELLYFISH": "Teatro das medusas", "SHIP": "Naufrágio", "SUBMARINE": "Submarino abissal"
         }
     },
+    "AI_DECK_CAMERA": {
+        "CLOSE_PANEL": "Fechar painel da câmara",
+        "TITLE": "Câmara AI Deck",
+        "ADDRESS": "IP / URL do dispositivo",
+        "CONNECT": "Ligar",
+        "DISCONNECT": "Desligar",
+        "CONNECTING": "A aguardar imagem…",
+        "CONNECTED": "Vídeo aberto",
+        "IDLE": "Sem ligação",
+        "INVALID_ADDRESS": "Introduza um IP HTTP(S) ou URL de vídeo válido, sem credenciais nem fragmentos.",
+        "TIMEOUT": "Sem imagem em 8 segundos. Verifique Wi-Fi, endereço e /stream.",
+        "STREAM_ERROR": "Falha de vídeo. Verifique o dispositivo e a rede e volte a ligar.",
+        "NOTICE": "Vídeo direto, independente de Crazyradio e do voo. Sem envio para a nuvem nem reconhecimento visual automático."
+    },
+    "CRAZYFLIE_MAPPING": {
+        "VIEW_2D": "Grelha 2D",
+        "VIEW_3D": "Nuvem 3D",
+        "CELLS": "células",
+        "OCCUPIED": "Obstáculo / parede",
+        "FREE": "Livre observado",
+        "UNKNOWN": "Desconhecido",
+        "PLANAR_HINT": "2D usa os quatro raios laterais até 10° da horizontal, não o superior. As células claras projetam trechos livres à altura do sensor, sem garantir espaço seguro para voar. Cinzento é desconhecido; leituras inválidas ou fora de alcance não libertam espaço. Obstáculos pretos ficam até limpar o mapa. Arrastar desloca e a roda amplia; medição, trajetória e rotação na vista 3D.",
+        "TITLE": "Mapeamento",
+        "HELP": "Instruções e limites",
+        "DYNAMIC_HINT": "Pode iniciar a captura em voo. Cada leitura usa a posição e atitude atuais. Após repor a referência na descolagem, limpe o mapa.",
+        "SIMULATION": "Captura simulada",
+        "HARDWARE": "Captura real",
+        "PAUSE": "Pausar captura",
+        "CLEAR": "Limpar mapa",
+        "EXPORT": "Exportar JSON",
+        "CAPTURING": "A capturar",
+        "PAUSED": "Inativo / pausado",
+        "POINTS": "vóxeis",
+        "NOTICE": "Pose conhecida e cinco direções; não é SLAM nem desvio automático. Não controla motores. Espaço não mapeado não garante segurança.",
+        "SIM_HINT": "Contornos cinzentos são obstáculos simulados. Inicie a captura e use blocos de movimento/rotação apenas na simulação. Sem proteção contra colisões. Pontos verdes simulados.",
+        "HARDWARE_HINT": "Requer sensores de distância e localização válida. A deriva afeta o mapa; limpe após reiniciar a referência. Pontos laranja medidos."
+    },
     "CRAZYFLIE_EXAMPLES": {
         "LED_COLORS": "Anel LED: três cores",
         "LED_COLORS_DESCRIPTION": "Requer anel LED. Vermelho, verde e azul durante 1 segundo cada, depois apagar. Sem voo; a simulação apenas regista mensagens.",

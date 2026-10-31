@@ -13,6 +13,7 @@ from queue import Empty, Queue
 from threading import Event, Thread
 from pathlib import Path
 from contextlib import contextmanager, ExitStack, nullcontext
+from urllib.parse import urlsplit
 
 
 MOVE_DISTANCE = {
@@ -176,8 +177,48 @@ def _append_cflib_path(explicit_path: str | None):
     return None
 
 
+def parse_ai_deck_call(line):
+    if not line.startswith("cf_ai_deck_"):
+        return None
+    expression = ast.parse(line.rstrip(";"), mode="eval").body
+    if (not isinstance(expression, ast.Call) or not isinstance(expression.func, ast.Name)
+            or expression.keywords):
+        raise ValueError("AI Deck: invalid camera command")
+    name = expression.func.id
+    if name in {"cf_ai_deck_open", "cf_ai_deck_close"} and not expression.args:
+        return ("ai_deck", {"type": "open" if name.endswith("_open") else "close"})
+    if name == "cf_ai_deck_config" and len(expression.args) == 1:
+        address = ast.literal_eval(expression.args[0])
+        if not isinstance(address, str) or not address.strip() or re.search(r"\s", address.strip()):
+            raise ValueError("AI Deck: invalid device address")
+        address = address.strip()
+        url = urlsplit(address if re.match(r"^[a-z][a-z\d+.-]*://", address, re.I) else f"http://{address}")
+        if (url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password
+                or url.fragment or url.port is not None and not 0 <= url.port <= 65535):
+            raise ValueError("AI Deck: invalid HTTP(S) device address")
+        return ("ai_deck", {"type": "configure", "address": address})
+    raise ValueError("AI Deck: invalid camera command")
+
+
+def validate_ai_deck_sequence(commands, configured=False):
+    for cmd, arg in commands:
+        if cmd == "ai_deck":
+            if arg["type"] == "configure":
+                configured = True
+            elif arg["type"] == "open" and not configured:
+                raise ValueError("AI Deck: configure the device address before opening video")
+        elif cmd == "if_mr_obstacle":
+            then_configured = validate_ai_deck_sequence(arg.get("then", []), configured)
+            else_configured = validate_ai_deck_sequence(arg.get("else", []), configured)
+            configured = then_configured and else_configured
+    return configured
+
+
 def parse_commands(code: str):
     def parse_statement(line: str):
+        camera = parse_ai_deck_call(line)
+        if camera is not None:
+            return camera
         motion = parse_motion_call(line)
         if motion is not None:
             return ("motion", motion)
@@ -430,6 +471,8 @@ def _normalize_print_value(raw):
 
 
 def _step_label(cmd, arg):
+    if cmd == "ai_deck":
+        return f"ai_deck:{arg['type']}"
     if cmd == "set_link":
         uri = str((arg or {}).get("uri", ""))
         address = str((arg or {}).get("address", ""))
@@ -621,6 +664,7 @@ def wait_for_propeller_test(scf, log_config_class, ensure_running, timeout_sec=2
 def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow_position=False,
              stop_requested=None, connection=None):
     validate_motion_sequence(commands)
+    validate_ai_deck_sequence(commands)
     radio_prefix_length = 0
     for cmd, _ in commands:
         if cmd not in {"set_link", "test_link", "scan_links"}:
@@ -939,6 +983,18 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     active_address = normalized_address
     link_gate_open = connection is not None
 
+    def runtime_commands(items):
+        nonlocal step_index
+        for cmd, arg in items:
+            ensure_running()
+            if cmd == "ai_deck":
+                step_index += 1
+                _emit_step(step_index, total_steps, _step_label(cmd, arg))
+                print(f"__AIDECK__:{json.dumps(arg, ensure_ascii=False)}", flush=True)
+                executed.append(f"ai_deck:{arg['type']}")
+            else:
+                yield cmd, arg
+
     def set_active_link(link_args):
         nonlocal active_uri, active_address
         # Keep URI normalization simple: empty means keep current.
@@ -1119,7 +1175,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     if not has_motion_cmd and not has_flow_detect_cmd and not has_mr_cmd and not has_led_cmd and not has_buzzer_cmd and not has_motor_cmd:
         with ExitStack() as connections:
             shared_scf = None
-            for cmd, arg in commands:
+            for cmd, arg in runtime_commands(commands):
                 ensure_running()
                 if cmd == "set_link":
                     step_index += 1
@@ -1163,8 +1219,8 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
 
         ok = len(links) > 0
         return {
-            "success": ((ok and radio_present(radio_status)) if has_test_cf_link_cmd else ((radio_present(radio_status)) if has_test_link_cmd else (ok or any(cmd in ("print", "delay") for cmd, _ in commands)))),
-            "message": "Flow executed" if (not has_test_link_cmd and any(cmd in ("print", "delay") for cmd, _ in commands)) else ("Link OK" if ok else "No Crazyflie link discovered"),
+            "success": ((ok and radio_present(radio_status)) if has_test_cf_link_cmd else ((radio_present(radio_status)) if has_test_link_cmd else (ok or any(cmd in ("print", "delay", "ai_deck") for cmd, _ in commands)))),
+            "message": "Flow executed" if (not has_test_link_cmd and any(cmd in ("print", "delay", "ai_deck") for cmd, _ in commands)) else ("Link OK" if ok else "No Crazyflie link discovered"),
             "radioStatus": radio_status,
             "uri": uri,
             "addressHex": normalized_address,
@@ -1176,7 +1232,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     if not has_motion_cmd and has_motor_cmd and not has_flow_detect_cmd and not has_mr_cmd and not has_led_cmd and not has_buzzer_cmd:
         overall_success = True
         with open_connection(active_uri) as scf:
-            for cmd, arg in commands:
+            for cmd, arg in runtime_commands(commands):
                 if cmd == "set_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1243,7 +1299,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     if not has_motion_cmd and (has_flow_detect_cmd or has_mr_cmd or has_led_cmd or has_buzzer_cmd):
         overall_success = True
         with open_connection(active_uri) as scf:
-            for cmd, arg in commands:
+            for cmd, arg in runtime_commands(commands):
                 if cmd == "set_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1394,7 +1450,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
                     executed.append(f"if_mr_obstacle:{direction}:{distance:.3f}:{threshold:.3f}:{'1' if hit else '0'}")
                     print(f"if_mr_obstacle dir={direction} dist={distance:.3f} threshold={threshold:.3f} result={hit}", flush=True)
                     branch = (arg or {}).get("then", []) if hit else (arg or {}).get("else", [])
-                    for child_cmd, child_arg in branch:
+                    for child_cmd, child_arg in runtime_commands(branch):
                         if child_cmd == "delay":
                             step_index += 1
                             _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
@@ -1462,7 +1518,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     if not has_motion_cmd and has_mr_cmd:
         detected_all = True
         with open_connection(active_uri) as scf:
-            for cmd, arg in commands:
+            for cmd, arg in runtime_commands(commands):
                 if cmd == "set_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1556,7 +1612,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
                     executed.append(f"if_mr_obstacle:{direction}:{distance:.3f}:{threshold:.3f}:{'1' if hit else '0'}")
                     print(f"if_mr_obstacle dir={direction} dist={distance:.3f} threshold={threshold:.3f} result={hit}", flush=True)
                     branch = (arg or {}).get("then", []) if hit else (arg or {}).get("else", [])
-                    for child_cmd, child_arg in branch:
+                    for child_cmd, child_arg in runtime_commands(branch):
                         if child_cmd == "mr_log_distance":
                             child_direction = (child_arg or {}).get("dir", "front")
                             step_index += 1
@@ -1617,7 +1673,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     if not has_motion_cmd and has_flow_detect_cmd:
         detected_all = True
         with open_connection(active_uri) as scf:
-            for cmd, arg in commands:
+            for cmd, arg in runtime_commands(commands):
                 if cmd == "set_link":
                     step_index += 1
                     _emit_step(step_index, total_steps, _step_label(cmd, arg))
@@ -1698,7 +1754,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             interruptible_sleep(1.0, ensure_link_ok)
 
             with explicit_motion_session(scf, MotionCommander) as mc:
-                for cmd, arg in commands:
+                for cmd, arg in runtime_commands(commands):
                     ensure_link_ok()
                     if cmd == "set_link":
                         step_index += 1
@@ -1808,7 +1864,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
                         executed.append(f"if_mr_obstacle:{direction}:{distance:.3f}:{threshold:.3f}:{'1' if hit else '0'}")
                         print(f"if_mr_obstacle dir={direction} dist={distance:.3f} threshold={threshold:.3f} result={hit}", flush=True)
                         branch = (arg or {}).get("then", []) if hit else (arg or {}).get("else", [])
-                        for child_cmd, child_arg in branch:
+                        for child_cmd, child_arg in runtime_commands(branch):
                             if child_cmd == "move":
                                 require_link_gate("move")
                                 step_index += 1

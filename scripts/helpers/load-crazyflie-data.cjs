@@ -10,7 +10,7 @@ function load(filename) {
   const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   });
-  vm.runInNewContext(outputText, { exports, require: name => {
+  vm.runInNewContext(outputText, { exports, URL, require: name => {
     if (!name.startsWith('.')) return require(name);
     const target = path.resolve(path.dirname(filename), name);
     return name.endsWith('.json') ? require(target) : load(`${target}.ts`);

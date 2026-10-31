@@ -1,28 +1,21 @@
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
-const WinState = require('electron-win-state').default;
 const { app, BrowserWindow, ipcMain, dialog, screen, shell, Menu } = require("electron");
+const { configureDesktopIdentity, configureWindowIdentity, getWindowIcon } = require("./desktop-identity");
 
+// Apply identity before importing app services, allocating profiles or creating windows.
+configureDesktopIdentity(app);
+
+const WinState = require('electron-win-state').default;
 const { isWin32, isDarwin, isLinux } = require("./platform");
 const projectLock = require("./project-lock");
 
-// 设置应用名称，用于 Windows 系统通知显示
-app.setName("aily blockly");
-// Preserve existing accounts, model settings and instance storage during rebranding.
-const legacyUserDataPath = app.getPath('userData');
-app.setName("RobotSTEM");
-app.setPath('userData', legacyUserDataPath);
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096');
 // 禁用 GPU 着色器磁盘缓存，避免 GPUCache 累积导致启动变慢
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 // 限制 HTTP 磁盘缓存为 100MB，防止无限增长
 app.commandLine.appendSwitch('disk-cache-size', '104857600');
-// Windows 系统中设置 AppUserModelID，用于通知分组和显示
-if (isWin32) {
-  app.setAppUserModelId("pro.aily.blockly");
-}
-
 const PROTOCOL = "abis";
 
 // OAuth实例管理
@@ -30,6 +23,12 @@ const OAUTH_STATE_FILE = 'oauth-instances.json';
 
 // 获取OAuth状态文件路径
 function getOAuthStateFilePath() {
+  // Both apps keep their existing protocols: either registered handler must be
+  // able to forward a callback to the originating app's isolated profile.
+  if (isWin32) {
+    return path.join(app.getPath('appData'), 'aily blockly', OAUTH_STATE_FILE);
+  }
+
   // 获取原始用户数据路径（在设置实例隔离之前的路径）
   let originalUserDataPath;
 
@@ -1340,7 +1339,7 @@ function createWindow() {
     titleBarStyle: isDarwin ? 'hiddenInset' : 'default',
     alwaysOnTop: false,
     autoHideMenuBar: true,
-    icon: serve ? path.join(__dirname, "../public/robotstem.ico") : path.join(process.resourcesPath, "icon.ico"),
+    icon: getWindowIcon(app),
     webPreferences: {
       nodeIntegration: true,
       webSecurity: false,
@@ -1353,6 +1352,7 @@ function createWindow() {
       pageVisibility: true,
     },
   });
+  configureWindowIdentity(mainWindow);
 
   registerWebBluetoothChooser(mainWindow);
 

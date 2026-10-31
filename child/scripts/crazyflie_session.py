@@ -5,7 +5,7 @@ import math
 import queue
 import sys
 import time
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from threading import Event, Lock, Thread, get_ident
 
 from crazyflie_run_flow import _append_cflib_path, parse_commands, run_flow
@@ -111,11 +111,12 @@ def connection_telemetry(scf, log_config_class, emit, failed):
                 callback.remove_callback(handler)
 
 
-def serve(uri, address, emit, requests, stop, shutdown):
+def serve(uri, address, emit, requests, stop, shutdown, mapping_requests=None):
     import cflib.crtp
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
     from cflib.crazyflie.log import LogConfig
     from crazyflie_attitude import attitude_logging
+    from crazyflie_mapping import mapping_control
 
     errors = []
 
@@ -136,7 +137,10 @@ def serve(uri, address, emit, requests, stop, shutdown):
     with SyncCrazyflie(uri) as scf:
         if shutdown.is_set():
             return
-        with connection_telemetry(scf, LogConfig, emit, failed) as telemetry_healthy:
+        with connection_telemetry(scf, LogConfig, emit, failed) as telemetry_healthy, (
+            mapping_control(scf, LogConfig, emit, mapping_requests, shutdown)
+            if mapping_requests is not None else nullcontext()
+        ):
             healthy()
             if shutdown.is_set():
                 return
@@ -242,7 +246,7 @@ def main():
         def flush(self):
             output.flush()
 
-    requests = queue.Queue()
+    requests, mapping_requests = queue.Queue(), queue.Queue()
     stop, shutdown = Event(), Event()
 
     def read_control():
@@ -257,6 +261,10 @@ def main():
                     shutdown.set()
                     stop.set()
                     return
+                elif type(request.get("id")) is int and request.get("action") == "mapping":
+                    if type(request.get("enabled")) is not bool:
+                        raise ValueError("Invalid mapping request")
+                    mapping_requests.put(request)
                 elif type(request.get("id")) is int and request.get("action") in ("run", "observe"):
                     requests.put(request)
                 else:
@@ -283,7 +291,7 @@ def main():
         import cflib.crtp
         Thread(target=read_control, daemon=True).start()
         with redirect_stdout(Logs()):
-            serve(args.uri, args.address_hex, emit, requests, stop, shutdown)
+            serve(args.uri, args.address_hex, emit, requests, stop, shutdown, mapping_requests)
         emit({"type": "state", "state": "disconnected", "message": "Connection closed"})
         return 0
     except Exception as error:

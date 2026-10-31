@@ -32,7 +32,7 @@ const switchCaseMutator = {
    * @this {Blockly.Block}
    */
   mutationToDom: function () {
-    if (!this.caseCount_ && !this.hasDefault_) {
+    if (!this.caseCount_ && this.hasDefault_) {
       return null;
     }
     const container = Blockly.utils.xml.createElement('mutation');
@@ -60,6 +60,7 @@ const switchCaseMutator = {
         .appendField(Blockly.Msg['CONTROLS_SWITCH_DEFAULT'] || 'default');
     }
     this.updateShape_(targetCaseCount);
+    if (!this.hasDefault_ && this.getInput('DEFAULT')) this.removeInput('DEFAULT');
   },
 
   /**
@@ -89,6 +90,7 @@ const switchCaseMutator = {
         .appendField(Blockly.Msg['CONTROLS_SWITCH_DEFAULT'] || 'default');
     }
     this.updateShape_(targetCount);
+    if (!this.hasDefault_ && this.getInput('DEFAULT')) this.removeInput('DEFAULT');
   },
 
   /**
@@ -241,6 +243,7 @@ const switchCaseMutator = {
  * @this {Blockly.Block}
  */
 const switchCaseHelper = function () {
+  this.hasDefault_ = !!this.getInput('DEFAULT');
   // Add plus button for adding case to the first CASE input (CASE0)
   this.getInput('CASE0').insertFieldAt(0, createPlusField(), 'PLUS');
 };

@@ -9,6 +9,7 @@ import { BlockCodeMapping, CodeLineRange } from '../components/blockly/generator
 import { convertBlockTreeToAbs, convertAbiToAbsWithLineMap } from '../../../tools/aily-chat/public-api';
 import { BlockSearcher } from '../components/blockly/plugins/toolbox-search/src/block_searcher';
 import { createCrazyflieBasicToolbox, registerCrazyflieBasicBlocks, crazyflieGenerator } from '../components/blockly/generators/crazyflie/basic-blocks';
+import { createAiDeckCameraToolbox, registerAiDeckCameraBlocks } from '../components/blockly/generators/crazyflie/ai-deck-blocks';
 import { CRAZYFLIE_BASIC_FLIGHT_TYPES, CRAZYFLIE_FLIGHT_COLOUR, createCrazyflieMotionToolbox, registerCrazyflieMotionBlocks, isCrazyflieFlightToolbox, mergeCrazyflieFlightToolbox } from '../components/blockly/generators/crazyflie/motion-blocks';
 import { createCrazyradioToolbox, crazyradioBlockTypes, registerCrazyradioBlocks } from '../components/blockly/generators/crazyflie/radio-blocks';
 
@@ -1058,8 +1059,10 @@ export class BlocklyService {
     const chinese = this.crazyflieBlockLanguage === 'zh';
     registerCrazyflieMotionBlocks(crazyflieGenerator, chinese);
     registerCrazyradioBlocks(crazyflieGenerator, chinese);
+    registerAiDeckCameraBlocks(crazyflieGenerator, chinese);
     categories.forEach(category => this.loadLibToolbox(category));
     this.loadLibToolbox(createCrazyflieMotionToolbox(chinese));
+    this.loadLibToolbox(createAiDeckCameraToolbox());
   }
 
   loadLibBlocksJS(filePath) {

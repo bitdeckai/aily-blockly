@@ -63,6 +63,43 @@
             "BARN": "红色谷仓", "TRACTOR": "拖拉机", "ORCHARD": "果树采摘区", "VEGETABLES": "蔬菜园", "DUCKPOND": "鸭子池塘"
         }
     },
+    "AI_DECK_CAMERA": {
+        "CLOSE_PANEL": "关闭摄像头面板",
+        "TITLE": "AI Deck 摄像头",
+        "ADDRESS": "设备 IP / 地址",
+        "CONNECT": "连接",
+        "DISCONNECT": "断开",
+        "CONNECTING": "正在等待视频帧…",
+        "CONNECTED": "画面已打开",
+        "IDLE": "未连接",
+        "INVALID_ADDRESS": "请输入有效的 HTTP(S) 设备 IP 或视频流地址，不支持账号密码或片段。",
+        "TIMEOUT": "8 秒内未收到画面，请检查 Wi-Fi、设备地址和 /stream 接口。",
+        "STREAM_ERROR": "视频连接失败，请检查设备和网络后重新连接。",
+        "NOTICE": "直接连接设备视频，独立于 Crazyradio 和飞行控制；不上传云端，不代表已具备视觉识别。"
+    },
+    "CRAZYFLIE_MAPPING": {
+        "VIEW_2D": "二维栅格",
+        "VIEW_3D": "三维点云",
+        "CELLS": "栅格",
+        "OCCUPIED": "障碍 / 墙体",
+        "FREE": "已观测空闲",
+        "UNKNOWN": "未知",
+        "PLANAR_HINT": "二维只使用倾角不超过 10° 的前后左右测距，不使用上方。浅色是传感器高度沿有效射线观测到的空闲投影，不是安全可飞范围；灰色未知，无效或超量程读数不会清空区域。黑色障碍保留到清空地图。拖动平移、滚轮缩放；测距工具、轨迹及旋转在三维视图使用。",
+        "TITLE": "建图",
+        "HELP": "使用说明与限制",
+        "DYNAMIC_HINT": "可在飞行中开始采集，移动和转向时按每帧位置与姿态更新测距点。若起飞重置了定位参考，请先清空地图再采集。",
+        "SIMULATION": "模拟采集",
+        "HARDWARE": "真机采集",
+        "PAUSE": "暂停采集",
+        "CLEAR": "清空地图",
+        "EXPORT": "导出 JSON",
+        "CAPTURING": "正在采集",
+        "PAUSED": "未采集 / 已暂停",
+        "POINTS": "体素",
+        "NOTICE": "已知位姿＋五向测距建图，不是 SLAM 或自动避障；采集不会控制电机。空白区域不代表安全。",
+        "SIM_HINT": "灰色线框是模拟障碍，不是实测。先采集，再用仅模拟模式的移动/转向积木扫描；不提供碰撞保护。绿色为模拟点。",
+        "HARDWARE_HINT": "需测距模块及有效定位。定位漂移会影响地图；参考点重置后需清空。橙色为真机测距点。"
+    },
     "CRAZYFLIE_EXAMPLES": {
         "LED_COLORS": "LED 灯环：三色切换",
         "LED_COLORS_DESCRIPTION": "需要 LED 灯环；红、绿、蓝各显示 1 秒，最后关灯，不起飞。仅模拟输出日志。",

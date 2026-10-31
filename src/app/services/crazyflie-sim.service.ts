@@ -1,5 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
+import { AiDeckCameraCommand, isAiDeckCameraOnlyFlow, parseAiDeckCameraCall, validateAiDeckCameraSequence } from './ai-deck-camera';
+import { AiDeckCameraService } from './ai-deck-camera.service';
 import { CrazyflieConnectionService } from './crazyflie-connection.service';
 import { getClassroomDeskLayout } from './crazyflie-classroom';
 import { AttitudeReception, AttitudeSample, FlightPoseSample, isFlightPoseSample, relativeFlightPose } from './crazyflie-attitude';
@@ -15,10 +17,10 @@ export interface CrazyfliePose {
   yaw: number;
 }
 
-interface CrazyflieSimCommand {
+type CrazyflieSimCommand = {
   type: 'motion' | 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'set_link' | 'test_link' | 'scan_links' | 'crazyflie_link' | 'test_crazyflie_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
   value?: any;
-}
+} | { type: 'ai_deck'; value: AiDeckCameraCommand };
 
 export interface CrazyflieStepEvent {
   current: number;
@@ -33,7 +35,10 @@ export class CrazyflieSimService {
   private readonly originPose: CrazyfliePose = { x: 0, y: 0.06, z: 0, yaw: 0 };
   private readonly baseMoveSpeedMps = 0.2;
 
-  constructor(private readonly connectionService: CrazyflieConnectionService) {}
+  constructor(
+    private readonly connectionService: CrazyflieConnectionService,
+    private readonly aiDeckCamera: AiDeckCameraService,
+  ) {}
 
   panelVisible$ = new BehaviorSubject<boolean>(false);
   running$ = new BehaviorSubject<boolean>(false);
@@ -265,6 +270,8 @@ export class CrazyflieSimService {
     const commands = this.parseCommands(code);
     validateRadioScanSequence(commands);
     validateMotionSequence(commands);
+    validateAiDeckCameraSequence(code);
+    const cameraOnly = isAiDeckCameraOnlyFlow(code);
     if (commands.length === 0) {
       return { success: false, message: '未检测到可模拟的 Crazyflie 指令', executed: [] };
     }
@@ -278,7 +285,7 @@ export class CrazyflieSimService {
     this.step$.next(null);
     this.logs$.next([]);
     this.paused$.next(false);
-    this.resetPose();
+    if (!cameraOnly) this.resetPose();
     this.running$.next(true);
 
     const pose: CrazyfliePose = this.getResetPoseForPreset(this.roomPreset$.value);
@@ -300,6 +307,11 @@ export class CrazyflieSimService {
         this.step$.next({ current, total, label });
 
         switch (command.type) {
+          case 'ai_deck':
+            this.aiDeckCamera.execute(command.value);
+            this.appendLog(`AI Deck: ${command.value.type}`);
+            executed.push(`ai_deck:${command.value.type}`);
+            break;
           case 'motion': {
             const motion: MotionCommand = command.value;
             this.appendLog(`sim: ${motion.kind} ${motion.values.join(', ')}`);
@@ -469,11 +481,11 @@ export class CrazyflieSimService {
 
       if (cancelled) {
         this.appendLog('sim: cancelled');
-        return { success: false, message: '模拟已取消', executed };
+        return { success: false, message: cameraOnly ? 'AI Deck 摄像头流程已取消' : '模拟已取消', executed };
       }
 
       this.appendLog('sim: finished');
-      return { success: true, message: '模拟执行完成', executed };
+      return { success: true, message: cameraOnly ? 'AI Deck 摄像头流程执行完成' : '模拟执行完成', executed };
     } catch (error: any) {
       this.running$.next(false);
       this.advanceExploration(0);
@@ -631,6 +643,8 @@ export class CrazyflieSimService {
 
   private commandLabel(command: CrazyflieSimCommand): string {
     switch (command.type) {
+      case 'ai_deck':
+        return `ai_deck:${command.value.type}`;
       case 'motion':
         return `motion:${command.value.kind}:${command.value.values.join(':')}`;
       case 'takeoff':
@@ -686,6 +700,11 @@ export class CrazyflieSimService {
         continue;
       }
       const motion = parseMotionCall(line);
+      const camera = parseAiDeckCameraCall(line);
+      if (camera) {
+        commands.push({ type: 'ai_deck', value: camera });
+        continue;
+      }
       if (motion) {
         commands.push({ type: 'motion', value: motion });
         continue;

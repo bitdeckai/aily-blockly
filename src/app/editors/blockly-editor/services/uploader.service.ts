@@ -24,6 +24,8 @@ import { compileCrazyflieFlow } from '../components/blockly/generators/crazyflie
 import type { Block } from 'blockly';
 import { motionBlocks, motionFlowTimeoutMs } from '../components/blockly/generators/crazyflie/motion-blocks';
 import { getAttitudeApi } from '../../../services/crazyflie-attitude';
+import { isAiDeckCameraOnlyFlow, parseAiDeckCameraEvent, validateAiDeckCameraSequence } from '../../../services/ai-deck-camera';
+import { AiDeckCameraService } from '../../../services/ai-deck-camera.service';
 
 @Injectable()
 export class _UploaderService {
@@ -51,7 +53,8 @@ export class _UploaderService {
     private appDataResourceLock: AppDataResourceLockService,
     private crazyflieSimService: CrazyflieSimService,
     private crazyflieTelemetryService: CrazyflieTelemetryService,
-    private crazyflieConnectionService: CrazyflieConnectionService
+    private crazyflieConnectionService: CrazyflieConnectionService,
+    private aiDeckCamera: AiDeckCameraService,
   ) { }
 
   uploadInProgress = false;
@@ -202,15 +205,37 @@ export class _UploaderService {
   }
 
   private async uploadCrazyflieFlow(crazyflieCode: string, plannedBlocks?: Block[], followPosition = false): Promise<ActionState> {
-    const title = followPosition ? 'Crazyflie 模拟+真机' : 'Crazyflie 真机流程';
-    const poseApi = followPosition ? getAttitudeApi() : undefined;
+    validateAiDeckCameraSequence(crazyflieCode);
+    const cameraOnly = isAiDeckCameraOnlyFlow(crazyflieCode);
+    const title = cameraOnly ? 'AI Deck 摄像头' : followPosition ? 'Crazyflie 模拟+真机' : 'Crazyflie 真机流程';
+    const poseApi = followPosition && !cameraOnly ? getAttitudeApi() : undefined;
     const validationError = this.crazyflieFlowActive || this.crazyflieSimService.running$.value
       ? '已有运行中的流程，请先结束当前流程'
-      : followPosition && !poseApi ? '未找到真机同步接口，请重启应用'
+      : followPosition && !cameraOnly && !poseApi ? '未找到真机同步接口，请重启应用'
       : null;
     if (validationError) {
       this.noticeService.update({ title, text: validationError, state: 'error' });
       return { state: 'error', text: validationError };
+    }
+    if (cameraOnly) {
+      const subscription = this.crazyflieSimService.step$.subscribe(step => {
+        if (step) this.highlightCrazyflieBlock(plannedBlocks?.[step.current - 1]);
+      });
+      this.noticeService.update({ title, text: '正在执行摄像头流程（不连接 Crazyradio）', state: 'doing',
+        setTimeout: 0, stop: () => { this.cancel(); } });
+      try {
+        const result = await this.crazyflieSimService.runCode(crazyflieCode);
+        const state = result.success ? 'done' : 'error';
+        this.noticeService.update({ title, text: result.message, state });
+        return { state, text: result.message };
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        this.noticeService.update({ title, text, state: 'error' });
+        return { state: 'error', text };
+      } finally {
+        subscription.unsubscribe();
+        this.clearBlocklySelection();
+      }
     }
     const timeoutMs = motionFlowTimeoutMs(crazyflieCode);
     this.noticeService.update({
@@ -233,7 +258,12 @@ export class _UploaderService {
       return { state: 'error', text: '未找到 Crazyflie 测试接口' };
     }
 
-    const hasRunFlowCmd = /cf_set_link\s*\(|cf_test_link\s*\(|cf_scan_links\s*\(|cf_motion\s*\(|cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
+    if (/cf_ai_deck_/.test(crazyflieCode) && typeof api.onFlowLog !== 'function') {
+      const text = '未找到 AI Deck 程序事件接口，请重启应用';
+      this.noticeService.update({ title, text, state: 'error' });
+      return { state: 'error', text };
+    }
+    const hasRunFlowCmd = /cf_ai_deck_/.test(crazyflieCode) || /cf_set_link\s*\(|cf_test_link\s*\(|cf_scan_links\s*\(|cf_motion\s*\(|cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
     const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
     const executionBlocks = hasRunFlowCmd ? (plannedBlocks || this.getCrazyflieExecutionBlocksInOrder()) : [];
     let currentTelemetry: any = null;
@@ -244,6 +274,21 @@ export class _UploaderService {
       disposeFlowLog = api.onFlowLog((payload: any) => {
         const line = String(payload?.line || '').trim();
         if (!line) {
+          return;
+        }
+        if (line.startsWith('__AIDECK__:')) {
+          try {
+            const command = parseAiDeckCameraEvent(line);
+            if (!command) throw new Error('AI Deck: missing camera runtime event');
+            this.zone.run(() => this.aiDeckCamera.execute(command));
+          } catch (error) {
+            const text = error instanceof Error ? error.message : String(error);
+            this.crazyflieCancelError = text;
+            this.logService.update({ detail: text, state: 'error' });
+            this.noticeService.update({ title, text, state: 'error' });
+            this.cancel();
+          }
+          receivedRealtimeLog = true;
           return;
         }
 
@@ -686,7 +731,7 @@ export class _UploaderService {
     if (!('code' in preparedFlow)) return preparedFlow;
     const crazyflieCode = preparedFlow.code;
 
-    this.crazyflieSimService.setPanelVisible(true);
+    if (!isAiDeckCameraOnlyFlow(crazyflieCode)) this.crazyflieSimService.setPanelVisible(true);
     return await this.uploadCrazyflieFlow(crazyflieCode, preparedFlow.executionBlocks, true);
   }
 

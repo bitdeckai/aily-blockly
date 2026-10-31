@@ -675,6 +675,8 @@ function registerCrazyflieHandlers() {
           send(current.sender, "crazyflie-telemetry", payload.payload);
         } else if (payload.type === "attitude") {
           send(current.sender, "crazyflie-attitude", { ...payload.payload, source: "idle" });
+        } else if (payload.type === "mapping") {
+          send(current.sender, "crazyflie-mapping", payload.payload);
         } else if (payload.type === "log") {
           if (payload.line.startsWith("__ATTITUDE__:")) {
             const attitude = parseJsonOutput(payload.line.slice(13));
@@ -762,6 +764,14 @@ function registerCrazyflieHandlers() {
     const result = await owner.worker.request("observe", { enabled: false });
     if (result.success && owner) owner.observing = false;
     return result;
+  });
+  ipcMain.handle("crazyflie-mapping-control", async (event, options = {}) => {
+    if (typeof options.enabled !== "boolean") return failure(new Error("Invalid mapping control"));
+    if (!owner || owner.sender.id !== event.sender.id || owner.status !== "ready") {
+      return failure(new Error("Connect this window to the aircraft before starting read-only mapping"));
+    }
+    try { return await owner.worker.request("mapping", { enabled: options.enabled }); }
+    catch (error) { return failure(error); }
   });
   ipcMain.handle("crazyflie-test-link", (event, options = {}) => exclusive(event, "test", async () => {
     if (owner) return { success: true, message: "Crazyflie is connected", links: [owner.connection.uri] };

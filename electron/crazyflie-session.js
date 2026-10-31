@@ -114,6 +114,11 @@ function startCrazyflieSession({ pythonCmd, scriptPath, libPathHint, connectionA
             catch (error) { fail(error.message); void stop(); }
             onEvent({ type: "log", line: "Flow timeout: waiting for current action and landing." });
           }, Math.max(1000, Number(options.timeoutMs || 60000)));
+        } else if (action === "mapping") {
+          entry.timer = setTimeout(() => {
+            pending.delete(id);
+            resolve({ success: false, message: "Mapping control timed out; flight was not cancelled", executed: [] });
+          }, 8000);
         }
         pending.set(id, entry);
         try { send({ ...options, id, action }); }

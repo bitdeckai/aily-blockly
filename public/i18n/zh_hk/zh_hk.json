@@ -52,6 +52,43 @@
             "CORAL": "珊瑚花園", "TURTLE": "海龜驛站", "JELLYFISH": "水母劇場", "SHIP": "沉船遺跡", "SUBMARINE": "深海潛水器"
         }
     },
+    "AI_DECK_CAMERA": {
+        "CLOSE_PANEL": "關閉攝影機面板",
+        "TITLE": "AI Deck 攝影機",
+        "ADDRESS": "裝置 IP / 網址",
+        "CONNECT": "連線",
+        "DISCONNECT": "中斷",
+        "CONNECTING": "正在等待影像…",
+        "CONNECTED": "畫面已開啟",
+        "IDLE": "未連線",
+        "INVALID_ADDRESS": "請輸入有效的 HTTP(S) 裝置 IP 或串流網址，不支援帳號密碼或片段。",
+        "TIMEOUT": "8 秒內未收到畫面，請檢查 Wi-Fi、裝置網址及 /stream 介面。",
+        "STREAM_ERROR": "影像連線失敗，請檢查裝置及網絡後重新連線。",
+        "NOTICE": "直接連接裝置影像，獨立於 Crazyradio 及飛行控制；不上傳雲端，不代表已有視覺辨識。"
+    },
+    "CRAZYFLIE_MAPPING": {
+        "VIEW_2D": "二維柵格",
+        "VIEW_3D": "三維點雲",
+        "CELLS": "柵格",
+        "OCCUPIED": "障礙 / 牆體",
+        "FREE": "已觀測空閒",
+        "UNKNOWN": "未知",
+        "PLANAR_HINT": "二維只使用傾角不超過 10° 的前後左右測距，不使用上方。淺色是感測器高度沿有效射線觀測到的空閒投影，不代表安全飛行範圍；灰色未知，無效或超量程讀數不會清空區域。黑色障礙保留至清空地圖。拖動平移、滾輪縮放；測距工具、軌跡及旋轉請在三維視圖使用。",
+        "TITLE": "建圖",
+        "HELP": "使用說明與限制",
+        "DYNAMIC_HINT": "可在飛行中開始採集，移動和轉向時按每幀位置與姿態更新測距點。若起飛重設定位參考，請先清空地圖再採集。",
+        "SIMULATION": "模擬採集",
+        "HARDWARE": "真機採集",
+        "PAUSE": "暫停採集",
+        "CLEAR": "清空地圖",
+        "EXPORT": "匯出 JSON",
+        "CAPTURING": "正在採集",
+        "PAUSED": "未採集 / 已暫停",
+        "POINTS": "體素",
+        "NOTICE": "已知位姿＋五向測距建圖，並非 SLAM 或自動避障；採集不控制馬達。空白區域不代表安全。",
+        "SIM_HINT": "灰色線框為模擬障礙，並非實測。先採集，再以僅模擬模式的移動/轉向積木掃描；不提供碰撞保護。綠色為模擬點。",
+        "HARDWARE_HINT": "需測距模組及有效定位。定位漂移會影響地圖；參考點重置後需清空。橙色為真機測距點。"
+    },
     "CRAZYFLIE_EXAMPLES": {
         "LED_COLORS": "LED 燈環：三色切換",
         "LED_COLORS_DESCRIPTION": "需要 LED 燈環；紅、綠、藍各顯示 1 秒，最後關燈，不起飛。僅模擬輸出日誌。",

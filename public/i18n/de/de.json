@@ -52,6 +52,43 @@
             "CORAL": "Korallengarten", "TURTLE": "Meeresschildkröte", "JELLYFISH": "Quallentheater", "SHIP": "Schiffswrack", "SUBMARINE": "Tiefsee-U-Boot"
         }
     },
+    "AI_DECK_CAMERA": {
+        "CLOSE_PANEL": "Kamerafenster schließen",
+        "TITLE": "AI Deck Kamera",
+        "ADDRESS": "Geräte-IP / URL",
+        "CONNECT": "Verbinden",
+        "DISCONNECT": "Trennen",
+        "CONNECTING": "Warte auf ein Videobild…",
+        "CONNECTED": "Video geöffnet",
+        "IDLE": "Nicht verbunden",
+        "INVALID_ADDRESS": "Gültige HTTP(S)-IP oder Stream-URL ohne Zugangsdaten und Fragment eingeben.",
+        "TIMEOUT": "8 Sekunden ohne Bild. WLAN, Geräteadresse und /stream prüfen.",
+        "STREAM_ERROR": "Videoverbindung fehlgeschlagen. Gerät und Netzwerk prüfen und erneut verbinden.",
+        "NOTICE": "Direktes Gerätevideo, unabhängig von Crazyradio und Flugsteuerung. Kein Cloud-Upload und keine automatische Bilderkennung."
+    },
+    "CRAZYFLIE_MAPPING": {
+        "VIEW_2D": "2D-Raster",
+        "VIEW_3D": "3D-Punktwolke",
+        "CELLS": "Zellen",
+        "OCCUPIED": "Hindernis / Wand",
+        "FREE": "Frei beobachtet",
+        "UNKNOWN": "Unbekannt",
+        "PLANAR_HINT": "2D nutzt nur die vier seitlichen Strahlen bis 10° zur Horizontalen, nicht den oberen. Helle Zellen zeigen freie Strahlabschnitte auf Sensorhöhe, keine sichere Flugfreigabe. Grau ist unbekannt; ungültige oder zu große Messwerte löschen nichts. Schwarze Hindernisse bleiben bis zum Leeren. Ziehen verschiebt, das Mausrad zoomt; Messwerkzeug, Flugspur und Drehung stehen in 3D zur Verfügung.",
+        "TITLE": "Kartierung",
+        "HELP": "Anleitung und Grenzen",
+        "DYNAMIC_HINT": "Erfassung im Flug möglich. Bewegung und Drehung werden pro Bild berücksichtigt. Nach einem Referenzreset beim Start zuerst die Karte leeren.",
+        "SIMULATION": "Simuliert erfassen",
+        "HARDWARE": "Mit Hardware erfassen",
+        "PAUSE": "Erfassung pausieren",
+        "CLEAR": "Karte leeren",
+        "EXPORT": "JSON exportieren",
+        "CAPTURING": "Erfassung läuft",
+        "PAUSED": "Inaktiv / pausiert",
+        "POINTS": "Voxel",
+        "NOTICE": "Bekannte Pose und fünf Messrichtungen; kein SLAM oder automatisches Ausweichen. Keine Motorsteuerung. Unkartierter Raum ist nicht zwangsläufig sicher.",
+        "SIM_HINT": "Graue Linien zeigen simulierte Hindernisse. Erfassen, dann Bewegungs-/Drehblöcke nur im Simulationsmodus ausführen. Kein Kollisionsschutz. Grüne Punkte sind simuliert.",
+        "HARDWARE_HINT": "Abstandssensoren und gültige Ortung erforderlich. Drift beeinflusst die Karte; nach Referenzwechsel leeren. Orange Punkte sind echte Messungen."
+    },
     "CRAZYFLIE_EXAMPLES": {
         "LED_COLORS": "LED-Ring: drei Farben",
         "LED_COLORS_DESCRIPTION": "LED-Ring erforderlich. Rot, Grün und Blau je 1 Sekunde anzeigen, dann ausschalten. Kein Flug; Simulation nur als Protokoll.",

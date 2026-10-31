@@ -63,6 +63,43 @@
             "BARN": "Red barn", "TRACTOR": "Tractor", "ORCHARD": "Fruit orchard", "VEGETABLES": "Vegetable garden", "DUCKPOND": "Duck pond"
         }
     },
+    "AI_DECK_CAMERA": {
+        "CLOSE_PANEL": "Close camera panel",
+        "TITLE": "AI Deck camera",
+        "ADDRESS": "Device IP / URL",
+        "CONNECT": "Connect",
+        "DISCONNECT": "Disconnect",
+        "CONNECTING": "Waiting for a video frame…",
+        "CONNECTED": "Video opened",
+        "IDLE": "Not connected",
+        "INVALID_ADDRESS": "Enter a valid HTTP(S) device IP or stream URL without credentials or fragments.",
+        "TIMEOUT": "No video frame within 8 seconds. Check Wi-Fi, device address and /stream.",
+        "STREAM_ERROR": "Video connection failed. Check the device and network, then reconnect.",
+        "NOTICE": "Direct device video, independent of Crazyradio and flight controls. No cloud upload or automatic visual recognition."
+    },
+    "CRAZYFLIE_MAPPING": {
+        "VIEW_2D": "2D grid",
+        "VIEW_3D": "3D cloud",
+        "CELLS": "cells",
+        "OCCUPIED": "Obstacle / wall",
+        "FREE": "Observed free",
+        "UNKNOWN": "Unknown",
+        "PLANAR_HINT": "2D uses front/back/left/right beams within 10° of horizontal, not the upward beam. Light cells project observed free ray segments at sensor height, not safe flight clearance. Grey is unknown; invalid/out-of-range readings never clear space. Black obstacles persist until clearing the map. Drag to pan and scroll to zoom; measurement tools, trails and rotation use the 3D view.",
+        "TITLE": "Mapping",
+        "HELP": "Instructions and limitations",
+        "DYNAMIC_HINT": "Capture can start in flight. Points use each frame's position and attitude as the aircraft moves or turns. After a takeoff reference reset, clear the map before capturing.",
+        "SIMULATION": "Simulate mapping",
+        "HARDWARE": "Hardware mapping",
+        "PAUSE": "Pause capture",
+        "CLEAR": "Clear map",
+        "EXPORT": "Export JSON",
+        "CAPTURING": "Capturing",
+        "PAUSED": "Idle / paused",
+        "POINTS": "voxels",
+        "NOTICE": "Known-pose, five-beam mapping, not SLAM or automatic avoidance. Capture does not control motors. Unmapped space is not necessarily safe.",
+        "SIM_HINT": "Grey outlines are simulated obstacles, not measurements. Start capture, then use movement/turn blocks in simulation-only mode. No collision protection. Green points are simulated.",
+        "HARDWARE_HINT": "Requires ranging and valid positioning. Drift affects the map; clear after reference resets. Orange points are hardware measurements."
+    },
     "CRAZYFLIE_EXAMPLES": {
         "LED_COLORS": "LED ring: three colors",
         "LED_COLORS_DESCRIPTION": "Requires an LED ring. Show red, green and blue for 1 second each, then turn off. No flight; simulation logs only.",

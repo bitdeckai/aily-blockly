@@ -2,6 +2,8 @@ import * as Blockly from 'blockly';
 import { crazyflieBasicBlockTypes } from './basic-blocks';
 import { emitMotionCommand, motionBlockCommand, motionBlocks, parseMotionCall, validateMotionSequence } from './motion-blocks';
 import { validateRadioScanCode } from './radio-blocks';
+import { emitAiDeckCameraConfig } from './ai-deck-blocks';
+import { validateAiDeckCameraSequence } from '../../../../../../services/ai-deck-camera';
 
 type Value = number | string | boolean | null;
 type Flow = 'break' | 'continue' | undefined;
@@ -15,9 +17,11 @@ export function compileCrazyflieFlow(
 ): string {
   if (!workspace.getAllBlocks(false).some(block =>
     crazyflieBasicBlockTypes.includes(block.type) || block.type === 'cf_core_delay'
+      || block.type.startsWith('cf_ai_deck_')
       || motionBlocks.some(spec => spec.type === block.type))) {
     const code = generator.workspaceToCode(workspace);
     validateRadioScanCode(code);
+    validateAiDeckCameraSequence(code);
     return code;
   }
 
@@ -156,6 +160,13 @@ export function compileCrazyflieFlow(
         continue;
       }
       switch (block.type) {
+        case 'cf_ai_deck_config': {
+          const address = input(block, 'ADDRESS', '');
+          if (typeof address !== 'string') return fail(block);
+          output.push(emitAiDeckCameraConfig(address));
+          onCommand?.(block);
+          break;
+        }
         case 'variables_set':
           variables.set(variableId(block), input(block, 'VALUE'));
           break;
@@ -249,6 +260,7 @@ export function compileCrazyflieFlow(
     }
     const code = output.join('\n');
     validateRadioScanCode(code);
+    validateAiDeckCameraSequence(code);
     validateMotionSequence(code.split(/\r?\n/).map(line => {
       const motion = parseMotionCall(line);
       if (motion) return { type: 'motion', value: motion };

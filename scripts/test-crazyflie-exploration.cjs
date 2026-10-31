@@ -656,7 +656,8 @@ test('mission layout constrains grid width and lets the footer scroll rather tha
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');
   const css = require('sass').compile(stylesheet).css;
   assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-rows: auto auto minmax\(min-content, 1fr\) minmax\(0, auto\)/);
+  assert.match(css, /\.sim-panel\s*\{[^}]*grid-template-rows: auto auto auto minmax\(min-content, 1fr\) minmax\(0, auto\)/);
+  assert.match(css, /\.sim-mapping\s*\{[^}]*max-height: 180px;[^}]*overflow: auto/);
   assert.match(css, /\.sim-panel__canvas-wrap\s*\{[^}]*grid-template-rows: minmax\(220px, 1fr\) auto/);
   assert.match(css, /\.sim-panel__canvas\s*\{[^}]*min-height: 220px/);
   assert.match(css, /\.sim-panel__footer\s*\{[^}]*min-height: 48px;[^}]*overflow-y: auto/);

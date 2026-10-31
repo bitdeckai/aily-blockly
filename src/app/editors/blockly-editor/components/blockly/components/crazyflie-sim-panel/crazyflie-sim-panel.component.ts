@@ -75,6 +75,9 @@ import {
 } from '../../../../../../services/crazyflie-exploration-scene';
 import { createHomeScene } from '../../../../../../services/crazyflie-home-scene';
 import { createCoordinateScene, updateCoordinateGrid } from '../../../../../../services/crazyflie-coordinate-scene';
+import { MappingEvent, MappingSource, RangeVoxelMap } from '../../../../../../services/crazyflie-mapping';
+import { createMappingDemo, MappingCloud, simulateMappingSample } from '../../../../../../services/crazyflie-mapping-scene';
+import { CrazyflieOccupancyMapComponent } from '../crazyflie-occupancy-map/crazyflie-occupancy-map.component';
 import { geographyRegionName } from '../../../../../../services/crazyflie-geography';
 import { getClassroomDeskLayout } from '../../../../../../services/crazyflie-classroom';
 import { CrazyflieConnectionService, CrazyflieDeckType } from '../../../../../../services/crazyflie-connection.service';
@@ -94,13 +97,14 @@ type ClassroomWoodFinish = 'honey' | 'lectern' | keyof typeof CLASSROOM_WOOD_FIN
 @Component({
   selector: 'app-crazyflie-sim-panel',
   standalone: true,
-  imports: [CommonModule, TranslateModule, NzDropDownModule, NzMenuModule],
+  imports: [CommonModule, TranslateModule, NzDropDownModule, NzMenuModule, CrazyflieOccupancyMapComponent],
   templateUrl: './crazyflie-sim-panel.component.html',
   styleUrl: './crazyflie-sim-panel.component.scss',
 })
 export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('canvasHost', { static: true }) private canvasHostRef!: ElementRef<HTMLDivElement>;
   @ViewChild('attitudeViewport', { static: true }) private attitudeViewportRef!: ElementRef<HTMLDivElement>;
+  @ViewChild(CrazyflieOccupancyMapComponent) private occupancyMap?: CrazyflieOccupancyMapComponent;
 
   running = false;
   paused = false;
@@ -119,6 +123,17 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   readonly flightExamples = CRAZYFLIE_EXAMPLES;
   readonly sceneOptions = CRAZYFLIE_SCENE_OPTIONS;
   coordinateGridSpacing: 0.1 | 1 = 1;
+  readonly rangeMap = new RangeVoxelMap();
+  mappingExpanded = false;
+  mappingView: '2d' | '3d' = '2d';
+  mappingBusy = false;
+  mappingError = '';
+  private mappingHardwareActive = false;
+  private mappingStop: Promise<void> | null = null;
+  private mappingTimer: ReturnType<typeof setInterval> | null = null;
+  private mappingStaleTimer: ReturnType<typeof setTimeout> | null = null;
+  private mappingCloud: MappingCloud | null = null;
+  private mappingDemo: Group | null = null;
   selectedCheckpointId: number | null = null;
   checkpointSearch = '';
   attitudeMetrics: ReturnType<AttitudeReception['metrics']>;
@@ -223,6 +238,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    void this.pauseMapping();
+    this.mappingCloud?.dispose();
+    if (this.mappingDemo) disposeExplorationScene(this.mappingDemo);
     if (this.presetInteriorRoot?.userData.exploration || this.presetInteriorRoot?.userData.home
       || this.presetInteriorRoot?.userData.coordinates) this.disposePresetInterior();
     this.attitudePreview?.dispose();
@@ -349,12 +367,29 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   get displayedAttitude() {
+    if (this.mappingPoseShown && !this.realPoseShown) return this.rangeMap.attitude;
+    if (this.rangeMap.active && this.rangeMap.source === 'simulation') {
+      return { type: 'sample' as const, timestampMs: 0, roll: 0, pitch: 0, yaw: MathUtils.radToDeg(this.simService.pose$.value.yaw) };
+    }
     return this.realPoseShown ? this.simService.realAttitude$.value
       : this.attitudeActive ? this.liveAttitude : null;
   }
 
   get attitudeActive(): boolean {
     return this.connectionService.state$.value.status === 'ready' && !this.running;
+  }
+
+  get mappingPoseShown(): boolean {
+    return this.simService.roomPreset$.value === 'coordinates'
+      && this.rangeMap.source === 'hardware' && this.rangeMap.pose !== null;
+  }
+
+  get mapping2dShown(): boolean {
+    return this.mappingExpanded && this.mappingView === '2d' && this.simService.roomPreset$.value === 'coordinates';
+  }
+
+  get occupancyPose() {
+    return this.rangeMap.source === 'hardware' ? this.rangeMap.pose : this.simService.pose$.value;
   }
 
   get liveAttitude() { return this.connectionService.attitude$.value; }
@@ -388,6 +423,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   resetDronePose(): void {
+    if (this.mappingPoseShown) {
+      this.message.error('请先清空真机地图再复位模型；复位不会控制真机');
+      return;
+    }
     this.simService.resetPose();
     this.clearFlightPath();
     if (this.droneGroup) this.droneGroup.position.copy(this.targetPosition);
@@ -402,6 +441,134 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     if (grids) grids.visible = this.gridVisible;
   }
 
+  async startMapping(source: MappingSource): Promise<void> {
+    if (this.mappingBusy || this.destroyed) return;
+    this.mappingBusy = true;
+    try {
+      if (this.mappingStop) await this.mappingStop;
+      if (this.destroyed) return;
+      if (this.simService.roomPreset$.value !== 'coordinates') throw new Error('测距建图仅在坐标系场景中提供');
+      if (source === 'hardware' && this.connectionService.state$.value.status !== 'ready') {
+        throw new Error('请先连接真机并安装测距模块及有效定位；建图不会自动连接或控制电机');
+      }
+      this.rangeMap.start(source, this.simService.pose$.value);
+      this.mappingError = '';
+      this.refreshMappingScene();
+      if (source === 'simulation') {
+        if (this.mappingTimer !== null) clearInterval(this.mappingTimer);
+        const sample = () => this.zone.run(() => {
+          if (!this.rangeMap.active) return;
+          try {
+            this.rangeMap.receive(simulateMappingSample(this.simService.pose$.value, Date.now() & 0xffffff));
+            this.refreshMappingScene();
+          } catch (error) { this.failMapping(error); }
+        });
+        sample();
+        if (this.rangeMap.active) this.mappingTimer = setInterval(sample, 200);
+      } else {
+        this.mappingHardwareActive = true;
+        await this.connectionService.setMapping(true);
+        if (this.destroyed || this.simService.roomPreset$.value !== 'coordinates' || !this.rangeMap.active) {
+          await this.pauseMapping();
+        }
+      }
+    } catch (error) { this.failMapping(error); }
+    finally { this.mappingBusy = false; }
+  }
+
+  async pauseMapping(): Promise<void> {
+    this.rangeMap.pause();
+    if (this.mappingTimer !== null) clearInterval(this.mappingTimer);
+    this.mappingTimer = null;
+    if (this.mappingStaleTimer !== null) clearTimeout(this.mappingStaleTimer);
+    this.mappingStaleTimer = null;
+    if (this.mappingStop) return this.mappingStop;
+    if (this.mappingHardwareActive) {
+      this.mappingHardwareActive = false;
+      this.mappingStop = this.connectionService.setMapping(false).catch(error => {
+        console.error('Mapping stream cleanup failed:', error);
+        if (!this.mappingError) this.mappingError = error instanceof Error ? error.message : String(error);
+        if (!this.destroyed) this.message.error(this.mappingError);
+      }).finally(() => { this.mappingStop = null; });
+      return this.mappingStop;
+    }
+  }
+
+  async clearMapping(): Promise<void> {
+    if (this.mappingBusy) return;
+    await this.pauseMapping();
+    this.rangeMap.clear();
+    this.mappingError = '';
+    this.refreshMappingScene();
+    const pose = this.simService.pose$.value;
+    this.targetPosition.set(pose.x, pose.y, pose.z);
+  }
+
+  exportMapping(): void {
+    if (!this.rangeMap.voxels.size && !this.rangeMap.cells.size) {
+      this.message.error('还没有有效测距点，无法导出地图');
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([JSON.stringify(this.rangeMap.exportData(), null, 2)], { type: 'application/json' }));
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `robotstem-${this.rangeMap.source}-map-${Date.now()}.json`;
+      link.click();
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  }
+
+  private failMapping(error: unknown): void {
+    this.rangeMap.pause();
+    this.mappingError = error instanceof Error ? error.message : String(error);
+    console.error('Range mapping paused:', error);
+    if (!this.destroyed) this.message.error(this.mappingError);
+    void this.pauseMapping();
+    this.refreshMappingScene();
+  }
+
+  private receiveMapping(event: MappingEvent): void {
+    if (this.rangeMap.source !== 'hardware') return;
+    if (event.type === 'reference') {
+      if (this.rangeMap.invalidated) return;
+      this.rangeMap.invalidate();
+      this.failMapping(new Error('定位参考点或连接已重置，请先导出或清空旧地图再继续'));
+    } else if (event.type === 'error') {
+      this.failMapping(new Error(event.message));
+    } else if (event.type === 'stopped') {
+      this.rangeMap.pause();
+    } else if (this.rangeMap.active && this.mappingHardwareActive) {
+      try {
+        if (!this.rangeMap.receive(event)) return;
+        if (this.mappingStaleTimer !== null) clearTimeout(this.mappingStaleTimer);
+        this.mappingStaleTimer = setTimeout(() => this.zone.run(() =>
+          this.failMapping(new Error('超过 1.5 秒未收到有效建图遥测，已暂停入图'))), 1500);
+        if (!this.realPoseShown && this.rangeMap.pose) {
+          const pose = this.rangeMap.pose;
+          this.targetPosition.set(pose.x, pose.y, pose.z);
+          this.telemetry = {
+            xCm: Math.round(-pose.x * 100), yCm: Math.round(pose.z * 100),
+            altitudeCm: Math.round(pose.y * 100), yawDeg: Math.round(MathUtils.radToDeg(pose.yaw))
+          };
+        }
+        this.refreshMappingScene();
+      } catch (error) { this.failMapping(error); }
+    }
+  }
+
+  private refreshMappingScene(): void {
+    if (!this.scene) return;
+    this.mappingCloud ??= new MappingCloud(this.rangeMap.maximumVoxels);
+    if (!this.mappingCloud.root.parent) this.scene.add(this.mappingCloud.root);
+    this.mappingCloud.update(this.rangeMap);
+    const coordinates = this.simService.roomPreset$.value === 'coordinates';
+    this.mappingCloud.root.visible = coordinates;
+    if (coordinates && this.rangeMap.source === 'simulation' && !this.mappingDemo) {
+      this.mappingDemo = createMappingDemo();
+      this.scene.add(this.mappingDemo);
+    }
+    if (this.mappingDemo) this.mappingDemo.visible = coordinates && this.rangeMap.source === 'simulation';
+  }
   toggleFlightPath(): void {
     this.flightPathVisible = !this.flightPathVisible;
     if (this.trailHistoryLine) {
@@ -512,6 +679,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   resetCameraView(): void {
+    if (this.mapping2dShown && this.occupancyMap) {
+      this.occupancyMap.fit();
+      return;
+    }
     if (!this.camera) {
       return;
     }
@@ -540,6 +711,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   zoomCamera(factor: number): void {
+    if (this.mapping2dShown) {
+      this.occupancyMap?.zoom(factor);
+      return;
+    }
     if (!this.camera || !this.controls) {
       return;
     }
@@ -551,10 +726,15 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   fitCameraToScene(): void {
+    if (this.mapping2dShown) {
+      this.occupancyMap?.fit();
+      return;
+    }
     if ((this.explorationScene || this.simService.roomPreset$.value === 'home'
       || this.simService.roomPreset$.value === 'coordinates') && this.presetInteriorRoot) {
       const bounds = new Box3().setFromObject(this.presetInteriorRoot);
       if (this.droneGroup) bounds.expandByObject(this.droneGroup);
+      if (this.mappingCloud?.root.visible && this.rangeMap.voxels.size) bounds.expandByObject(this.mappingCloud.root);
       this.frameCameraBounds(bounds, 0, true);
       return;
     }
@@ -570,6 +750,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   focusAircraft(): void {
+    if (this.mapping2dShown) {
+      this.occupancyMap?.focusPose();
+      return;
+    }
     if (this.droneGroup) {
       this.frameCameraBounds(new Box3().setFromObject(this.droneGroup), 0.2);
     }
@@ -658,6 +842,17 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
   }
 
   captureScene(): void {
+    if (this.mapping2dShown) {
+      if (!this.occupancyMap) {
+        this.message.error('二维地图尚未就绪');
+        return;
+      }
+      const link = document.createElement('a');
+      link.download = `robotstem-occupancy-${Date.now()}.png`;
+      link.href = this.occupancyMap.capture();
+      link.click();
+      return;
+    }
     if (!this.renderer || !this.scene || !this.camera) {
       return;
     }
@@ -1161,12 +1356,14 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
 
     this.subscriptions.push(
       this.simService.pose$.subscribe((pose) => {
-        if (this.realPoseShown || !this.attitudeActive) this.aircraftYaw = pose.yaw;
+        const mappingPose = this.mappingPoseShown && !this.realPoseShown ? this.rangeMap.pose : null;
+        if (mappingPose) pose = mappingPose;
+        if (this.realPoseShown || !this.attitudeActive || mappingPose) this.aircraftYaw = pose.yaw;
         this.targetPosition.set(pose.x, pose.y, pose.z);
         this.telemetry = {
           xCm: Math.round(-pose.x * 100),
           yCm: Math.round(pose.z * 100),
-          altitudeCm: this.simService.relativeAltitudeCm,
+          altitudeCm: mappingPose ? Math.round(mappingPose.y * 100) : this.simService.relativeAltitudeCm,
           yawDeg: Math.round(MathUtils.radToDeg(pose.yaw)),
         };
         this.updateCheckpointGuide();
@@ -1184,11 +1381,15 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     this.subscriptions.push(
       this.simService.roomPreset$.subscribe((preset) => {
         if (preset === 'coordinates') this.gridVisible = true;
+        else if (this.rangeMap.active || this.mappingHardwareActive) void this.pauseMapping();
+        this.refreshMappingScene();
         this.selectedCheckpointId = this.simService.mapTargetId$.value;
         this.checkpointSearch = '';
         this.rebuildPresetInterior(preset, this.currentRoomSize);
       }),
     );
+
+    this.subscriptions.push(this.connectionService.mapping$.subscribe(event => this.receiveMapping(event)));
 
     this.subscriptions.push(
       this.simService.mapTargetId$.subscribe(id => {
@@ -3368,9 +3569,11 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
         this.flightAxes.quaternion.copy(this.droneGroup.quaternion)
           .multiply(attitudeQuaternion(0, 0, 0, -this.defaultDroneYawOffset));
       }
-      this.renderer.render(this.scene, this.camera);
-      this.attitudePreview?.update(this.liveAttitude, deltaSec);
-      this.attitudePreview?.render(this.renderer, this.attitudeViewport);
+      if (!this.mapping2dShown) {
+        this.renderer.render(this.scene, this.camera);
+        this.attitudePreview?.update(this.liveAttitude, deltaSec);
+        this.attitudePreview?.render(this.renderer, this.attitudeViewport);
+      }
       this.animationFrameId = requestAnimationFrame(animate);
     };
 

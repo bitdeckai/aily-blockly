@@ -3,32 +3,6 @@
   !define MUI_FINISHPAGE_RUN_TEXT "启动 ${PRODUCT_NAME}"
 !macroend
 
-!macro customInit
-  ; 多种方式尝试关闭可能运行的实例
-  nsExec::Exec 'taskkill /F /IM aily-blockly.exe /T'
-  nsExec::Exec 'taskkill /F /IM ${PRODUCT_NAME}.exe /T'
-  nsExec::Exec 'taskkill /F /IM "Aily Blockly.exe" /T'
-  
-  ; 等待确保进程完全终止
-  Sleep 2000
-  
-  ; 强制释放可能被锁定的文件
-  ${if} ${FileExists} "$INSTDIR"
-    ClearErrors
-    RMDir /r "$INSTDIR\app"
-    RMDir /r "$INSTDIR\locales"
-    RMDir /r "$INSTDIR\resources"
-    Delete "$INSTDIR\*.dll"
-    Delete "$INSTDIR\*.exe"
-    Delete "$INSTDIR\*.pak"
-    Delete "$INSTDIR\*.bin"
-    Delete "$INSTDIR\*.dat"
-  ${endif}
-  
-  ; 最后再等待一下确保文件系统操作完成
-  Sleep 1000
-!macroend
-
 !macro customInstall
   
   ; 使用7za.exe解压node-v22.19.0-win-x64到node目录
@@ -69,13 +43,8 @@
   ; 手动创建桌面快捷方式，确保指向独立的 ico 文件以解决缓存问题
   ; 强制覆盖可能存在的旧快捷方式
   CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_FILENAME}.exe" "" "$INSTDIR\resources\icon.ico" 0
-    
-  ; 刷新 Shell 图标缓存
-  System::Call 'shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
-
-  ; 手动创建桌面快捷方式，确保指向独立的 ico 文件以解决缓存问题
-  ; 强制覆盖可能存在的旧快捷方式
-  CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_FILENAME}.exe" "" "$INSTDIR\resources\icon.ico" 0
+  ; Match the process and electron-builder's Start menu shortcut identity.
+  WinShell::SetLnkAUMI "$DESKTOP\${PRODUCT_NAME}.lnk" "${APP_ID}"
     
   ; 刷新 Shell 图标缓存
   System::Call 'shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'

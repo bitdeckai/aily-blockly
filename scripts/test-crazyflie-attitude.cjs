@@ -579,7 +579,8 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
   let frame;
   const exports = {};
   const context = {
-    exports, performance: { now: () => now }, queueMicrotask, window: { devicePixelRatio: 1 },
+    exports, performance: { now: () => now }, queueMicrotask, setTimeout, clearTimeout, setInterval, clearInterval,
+    window: { devicePixelRatio: 1 },
     requestAnimationFrame: callback => { frame = callback; return 1; }, cancelAnimationFrame() {},
     require: name => {
       if (modules[name]) return modules[name];
@@ -590,6 +591,9 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
       if (name.endsWith('/crazyflie/examples')) return examples;
       if (name === 'rxjs') return require(name);
       if (name.endsWith('/crazyflie-attitude')) return helper.exports;
+      if (name.endsWith('/crazyflie-mapping') || name.endsWith('/crazyflie-mapping-scene')) {
+        return require('./helpers/load-crazyflie-data.cjs')(path.join(root, 'src', 'app', 'services', `${name.split('/').at(-1)}.ts`));
+      }
       if (name.endsWith('/crazyflie-classroom')) return classroom.exports;
       if (name.endsWith('/crazyflie-exploration') || name.endsWith('/crazyflie-geography')) {
         return require('./helpers/load-crazyflie-data.cjs')(path.join(root, 'src', 'app', 'services', `${name.split('/').at(-1)}.ts`));
@@ -610,11 +614,11 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
     poseSource$: { value: 'simulation' }, realAttitude$: { value: null },
     roomPreset$: { value: 'classroom' },
   };
-  const { BehaviorSubject } = require('rxjs');
+  const { BehaviorSubject, Subject } = require('rxjs');
   const connection = { state$: new BehaviorSubject({ status: 'disconnected' }),
     attitude$: new BehaviorSubject(null), attitudeError$: new BehaviorSubject(null),
     flightReadiness$: new BehaviorSubject({ status: 'unknown', label: '未确认', message: 'not connected' }),
-    attitudeReception: new AttitudeReception() };
+    attitudeReception: new AttitudeReception(), mapping$: new Subject() };
   const panel = new exports.CrazyflieSimPanelComponent(sim, connection, {},
     { error: text => messages.push(text), warning: text => messages.push(text) },
     { run: fn => fn() }, { instant: key => key });
@@ -635,6 +639,71 @@ function panelHarness({ globals = {}, three = require('three'), modules = {} } =
     get rendered() { return rendered; },
   };
 }
+
+test('coordinate mapping starts only by user action, simulates explicit obstacles and pauses without running a program or changing mode', async t => {
+  const { panel, sim, connection } = panelHarness();
+  panel.scene = new (require('three').Scene)();
+  sim.roomPreset$.value = 'coordinates';
+  sim.runCode = () => assert.fail('starting mapping must not run a program');
+  connection.connect = () => assert.fail('simulation mapping must not connect');
+  connection.setMapping = () => assert.fail('simulation mapping must not access the hardware bridge');
+  t.after(() => panel.pauseMapping());
+  assert.equal(panel.rangeMap.active, false);
+  assert.equal(panel.mappingExpanded, false);
+  await panel.startMapping('simulation');
+  assert.equal(panel.rangeMap.source, 'simulation');
+  assert.equal(panel.rangeMap.voxels.size, 5);
+  assert.equal(panel.mappingDemo.visible, true);
+  assert.equal(panel.mappingCloud.root.visible, true);
+  assert.equal(sim.poseSource$.value, 'simulation');
+  await panel.pauseMapping();
+  assert.equal(panel.mappingTimer, null);
+  assert.equal(panel.rangeMap.active, false);
+  assert.equal(panel.rangeMap.voxels.size, 5);
+  await panel.clearMapping();
+  assert.equal(panel.rangeMap.voxels.size, 0);
+  assert.equal(panel.mappingDemo.visible, false);
+  panel.mappingCloud.dispose();
+});
+
+test('hardware mapping remains read-only during a running flow, preserves a reset map for export and requires clear before resuming', async t => {
+  const { panel, sim, connection, messages } = panelHarness();
+  panel.scene = new (require('three').Scene)();
+  sim.roomPreset$.value = 'coordinates';
+  panel.running = true;
+  const controls = [];
+  connection.state$.next({ status: 'ready' });
+  connection.setMapping = async enabled => { controls.push(enabled); };
+  t.after(() => panel.pauseMapping());
+  await panel.startMapping('hardware');
+  assert.equal(panel.running, true, 'mapping does not stop or reset a flight');
+  panel.receiveMapping({ type: 'sample', timestampMs: 100, poseTimestampMs: 100, epoch: 0,
+    x: 5, y: 6, z: 1, roll: 0, pitch: 0, yaw: 90,
+    ranges: { front: 1, back: null, left: null, right: null, up: null } });
+  assert.equal(panel.rangeMap.voxels.size, 1);
+  assert.equal(panel.mappingPoseShown, true);
+  assert.equal(panel.displayedAttitude.roll, 0, 'mapping orientation must not depend on the independent attitude observer');
+  assert.equal(panel.mappingCloud.root.children[0].material.color.getHexString(), 'ffb454');
+  panel.receiveMapping({ type: 'reference' });
+  await panel.pauseMapping();
+  assert.equal(panel.rangeMap.active, false);
+  assert.equal(panel.rangeMap.invalidated, true);
+  assert.equal(panel.mappingPoseShown, true, 'paused maps retain their own last known reference');
+  sim.roomPreset$.value = 'home';
+  assert.equal(panel.mappingPoseShown, false, 'a retained coordinate map cannot override another scene');
+  sim.roomPreset$.value = 'coordinates';
+  assert.equal(panel.rangeMap.voxels.size, 1);
+  assert.match(messages.at(-1), /参考点/);
+  await panel.startMapping('hardware');
+  assert.equal(panel.rangeMap.active, false);
+  assert.deepEqual(controls, [true, false]);
+  await panel.clearMapping();
+  await panel.startMapping('hardware');
+  assert.equal(panel.rangeMap.active, true);
+  assert.deepEqual(controls, [true, false, true]);
+  await panel.pauseMapping();
+  panel.mappingCloud.dispose();
+});
 
 test('model reset beside view reset clears the trail and restores the model without moving the camera or controlling hardware', () => {
   const { panel, sim } = panelHarness();
@@ -657,6 +726,62 @@ test('model reset beside view reset clears the trail and restores the model with
   const html = fs.readFileSync(path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components',
     'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.html'), 'utf8');
   assert.match(html, /重置视角<\/button>\s*<button[^>]*\[disabled\]="running"[^>]*\(click\)="resetDronePose\(\)">复位<\/button>/);
+});
+
+test('2D tools use the occupancy view without moving the retained 3D camera or interrupting mapping', () => {
+  const links = [], calls = [];
+  const h = panelHarness({ globals: {
+    document: { createElement: tag => {
+      assert.equal(tag, 'a');
+      const link = { click() { links.push({ download: this.download, href: this.href }); } };
+      return link;
+    } },
+  } });
+  const { panel, sim } = h;
+  const THREE = require('three');
+  panel.camera = new THREE.PerspectiveCamera();
+  panel.camera.position.set(2, 3, 4);
+  panel.controls = { target: new Vector3(), minDistance: 0.1, maxDistance: 100, update() {} };
+  sim.roomPreset$.value = 'coordinates';
+  panel.mappingExpanded = true;
+  panel.occupancyMap = {
+    zoom: factor => calls.push(['zoom', factor]),
+    fit: () => calls.push(['fit']),
+    focusPose: () => calls.push(['focus']),
+    capture: () => { calls.push(['capture']); return 'data:image/png;base64,occupancy'; },
+  };
+  panel.rangeMap.start('simulation', sim.pose$.value);
+  panel.rangeMap.receive({ type: 'sample', timestampMs: 100, poseTimestampMs: 100, epoch: 0,
+    x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0,
+    ranges: { front: 1, back: null, left: null, right: null, up: null } });
+  const camera = panel.camera.position.clone(), cells = panel.rangeMap.cells, voxels = panel.rangeMap.voxels;
+  assert.equal(panel.mappingView, '2d');
+  assert.equal(panel.mapping2dShown, true);
+  panel.zoomCamera(0.7);
+  panel.fitCameraToScene();
+  panel.focusAircraft();
+  panel.resetCameraView();
+  panel.captureScene();
+  assert.deepEqual(calls, [['zoom', 0.7], ['fit'], ['focus'], ['fit'], ['capture']]);
+  assert.deepEqual(panel.camera.position.toArray(), camera.toArray());
+  assert.match(links[0].download, /^robotstem-occupancy-\d+\.png$/);
+  assert.equal(links[0].href, 'data:image/png;base64,occupancy');
+  assert.equal(h.rendered, 0, 'a 2D capture must not render WebGL');
+  panel.mappingView = '3d';
+  assert.equal(panel.mapping2dShown, false);
+  panel.zoomCamera(0.7);
+  near(panel.camera.position.length(), camera.length() * 0.7);
+  panel.renderer.domElement = { toDataURL: () => 'data:image/png;base64,three' };
+  panel.captureScene();
+  assert.equal(links[1].href, 'data:image/png;base64,three');
+  assert.equal(h.rendered, 1);
+  panel.mappingView = '2d';
+  assert.equal(panel.rangeMap.active, true);
+  assert.equal(panel.rangeMap.samples, 1);
+  assert.equal(panel.rangeMap.cells, cells);
+  assert.equal(panel.rangeMap.voxels, voxels);
+  assert.equal(cells.size, 11);
+  panel.rangeMap.pause();
 });
 
 test('geography initializes and resets to a north-up top view while other scenes keep their isometric view', () => {

@@ -737,6 +737,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     cancelFlow: () => ipcRenderer.invoke("crazyflie-cancel-flow"),
     startAttitude: (options) => ipcRenderer.invoke("crazyflie-start-attitude", options || {}),
     stopAttitude: () => ipcRenderer.invoke("crazyflie-stop-attitude"),
+    setMapping: (enabled) => ipcRenderer.invoke("crazyflie-mapping-control", { enabled }),
+    onMapping: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("crazyflie-mapping", listener);
+      return () => ipcRenderer.removeListener("crazyflie-mapping", listener);
+    },
     onAttitude: (callback) => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on("crazyflie-attitude", listener);

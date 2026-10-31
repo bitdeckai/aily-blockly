@@ -52,6 +52,43 @@
             "CORAL": "Jardin de corail", "TURTLE": "Tortue marine", "JELLYFISH": "Théâtre des méduses", "SHIP": "Épave", "SUBMARINE": "Sous-marin des abysses"
         }
     },
+    "AI_DECK_CAMERA": {
+        "CLOSE_PANEL": "Fermer le panneau caméra",
+        "TITLE": "Caméra AI Deck",
+        "ADDRESS": "IP / URL de l’appareil",
+        "CONNECT": "Connecter",
+        "DISCONNECT": "Déconnecter",
+        "CONNECTING": "En attente d’une image…",
+        "CONNECTED": "Vidéo ouverte",
+        "IDLE": "Non connecté",
+        "INVALID_ADDRESS": "Saisissez une IP HTTP(S) ou une URL de flux valide, sans identifiants ni fragment.",
+        "TIMEOUT": "Aucune image en 8 secondes. Vérifiez le Wi-Fi, l’adresse et /stream.",
+        "STREAM_ERROR": "Échec vidéo. Vérifiez l’appareil et le réseau puis reconnectez.",
+        "NOTICE": "Vidéo directe, indépendante de Crazyradio et des commandes de vol. Aucun envoi cloud ni reconnaissance visuelle automatique."
+    },
+    "CRAZYFLIE_MAPPING": {
+        "VIEW_2D": "Grille 2D",
+        "VIEW_3D": "Nuage 3D",
+        "CELLS": "cellules",
+        "OCCUPIED": "Obstacle / mur",
+        "FREE": "Libre observé",
+        "UNKNOWN": "Inconnu",
+        "PLANAR_HINT": "La 2D utilise les quatre rayons latéraux à moins de 10° de l’horizontale, pas celui du haut. Le clair projette les segments libres à hauteur du capteur, sans garantir le passage en vol. Le gris est inconnu ; une mesure invalide ou hors portée ne libère rien. Les obstacles noirs restent jusqu’à l’effacement. Glisser pour déplacer, molette pour zoomer ; mesure, trace et rotation en vue 3D.",
+        "TITLE": "Cartographie",
+        "HELP": "Instructions et limites",
+        "DYNAMIC_HINT": "La capture peut démarrer en vol. Position et attitude sont prises en compte à chaque mesure. Après une réinitialisation de référence au décollage, effacez la carte.",
+        "SIMULATION": "Acquisition simulée",
+        "HARDWARE": "Acquisition réelle",
+        "PAUSE": "Suspendre",
+        "CLEAR": "Effacer la carte",
+        "EXPORT": "Exporter JSON",
+        "CAPTURING": "Acquisition en cours",
+        "PAUSED": "Inactif / suspendu",
+        "POINTS": "voxels",
+        "NOTICE": "Pose connue et cinq directions de mesure ; ni SLAM ni évitement automatique. Aucun contrôle moteur. Une zone inconnue n'est pas forcément sûre.",
+        "SIM_HINT": "Les contours gris sont des obstacles simulés. Lancer l'acquisition, puis les blocs de déplacement/rotation en simulation seule. Sans protection anticollision. Points verts simulés.",
+        "HARDWARE_HINT": "Capteurs de distance et localisation valide requis. La dérive affecte la carte ; effacer après réinitialisation du repère. Points orange mesurés."
+    },
     "CRAZYFLIE_EXAMPLES": {
         "LED_COLORS": "Anneau LED : trois couleurs",
         "LED_COLORS_DESCRIPTION": "Anneau LED requis. Rouge, vert et bleu pendant 1 seconde chacun, puis extinction. Aucun vol ; simulation par journal uniquement.",

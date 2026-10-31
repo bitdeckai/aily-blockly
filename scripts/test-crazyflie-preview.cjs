@@ -182,6 +182,7 @@ test('one upper-right attitude widget replaces the old compass while retaining t
   assert.equal((html.match(/\(change\)="setCameraView\(/g) || []).length, 1);
   assert.match(style, /\.sim-attitude-inset\s*\{[^}]*top: 8px/);
   assert.match(style, /\.sim-attitude-inset\s*\{[^}]*position: absolute;[^}]*right: 8px/);
-  assert.match(style, /\.sim-attitude-inset__viewport\s*\{[^}]*height: clamp\(96px, 14vh, 124px\)/);
+  assert.match(style, /\.sim-attitude-inset\s*\{[^}]*width: var\(--sim-attitude-inset-width\)/);
+  assert.match(style, /\.sim-attitude-inset__viewport\s*\{[^}]*aspect-ratio: 1\.3/);
   assert.doesNotMatch(style, /\.sim-attitude-inset\s*\{[^}]*bottom:/);
 });

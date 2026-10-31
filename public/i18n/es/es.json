@@ -52,6 +52,43 @@
             "CORAL": "Jardín de coral", "TURTLE": "Tortuga marina", "JELLYFISH": "Teatro de medusas", "SHIP": "Naufragio", "SUBMARINE": "Submarino abisal"
         }
     },
+    "AI_DECK_CAMERA": {
+        "CLOSE_PANEL": "Cerrar panel de cámara",
+        "TITLE": "Cámara AI Deck",
+        "ADDRESS": "IP / URL del dispositivo",
+        "CONNECT": "Conectar",
+        "DISCONNECT": "Desconectar",
+        "CONNECTING": "Esperando una imagen…",
+        "CONNECTED": "Vídeo abierto",
+        "IDLE": "Sin conexión",
+        "INVALID_ADDRESS": "Introduzca una IP HTTP(S) o URL de vídeo válida sin credenciales ni fragmentos.",
+        "TIMEOUT": "Sin imagen durante 8 segundos. Compruebe Wi-Fi, dirección y /stream.",
+        "STREAM_ERROR": "Error de vídeo. Compruebe el dispositivo y la red y vuelva a conectar.",
+        "NOTICE": "Vídeo directo, independiente de Crazyradio y del control de vuelo. Sin nube ni reconocimiento visual automático."
+    },
+    "CRAZYFLIE_MAPPING": {
+        "VIEW_2D": "Cuadrícula 2D",
+        "VIEW_3D": "Nube 3D",
+        "CELLS": "celdas",
+        "OCCUPIED": "Obstáculo / pared",
+        "FREE": "Libre observado",
+        "UNKNOWN": "Desconocido",
+        "PLANAR_HINT": "2D usa los cuatro rayos laterales a un máximo de 10° de la horizontal, no el superior. Las celdas claras proyectan tramos libres a la altura del sensor, sin garantizar un vuelo seguro. Gris significa desconocido; las lecturas inválidas o fuera de alcance no liberan espacio. Los obstáculos negros permanecen hasta borrar. Arrastrar desplaza y la rueda amplía; medición, trayectoria y rotación en 3D.",
+        "TITLE": "Mapeo",
+        "HELP": "Instrucciones y límites",
+        "DYNAMIC_HINT": "Puede iniciar la captura en vuelo. Cada medida utiliza la posición y actitud actuales. Tras reiniciar la referencia al despegar, borre el mapa.",
+        "SIMULATION": "Captura simulada",
+        "HARDWARE": "Captura real",
+        "PAUSE": "Pausar captura",
+        "CLEAR": "Borrar mapa",
+        "EXPORT": "Exportar JSON",
+        "CAPTURING": "Capturando",
+        "PAUSED": "Inactivo / pausado",
+        "POINTS": "vóxeles",
+        "NOTICE": "Pose conocida y cinco direcciones; no es SLAM ni evasión automática. No controla motores. El espacio sin mapear no garantiza seguridad.",
+        "SIM_HINT": "Los contornos grises son obstáculos simulados. Inicia la captura y usa bloques de movimiento/giro solo en simulación. Sin protección anticolisión. Puntos verdes simulados.",
+        "HARDWARE_HINT": "Requiere sensores de distancia y posición válida. La deriva afecta al mapa; bórralo tras reiniciar la referencia. Puntos naranjas medidos."
+    },
     "CRAZYFLIE_EXAMPLES": {
         "LED_COLORS": "Anillo LED: tres colores",
         "LED_COLORS_DESCRIPTION": "Requiere anillo LED. Rojo, verde y azul durante 1 segundo cada uno, luego apagar. Sin vuelo; la simulación solo registra mensajes.",

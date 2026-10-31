@@ -69,7 +69,8 @@ function frontend(api) {
       exports, window: { crazyflie: api }, Date, console, performance, setTimeout, clearTimeout,
       require: name => name === '@angular/core' ? { Injectable: () => type => type }
         : name === './crazyflie-telemetry.service' ? load('crazyflie-telemetry.service')
-        : name === './crazyflie-attitude' ? load('crazyflie-attitude') : require(name),
+        : name === './crazyflie-attitude' ? load('crazyflie-attitude')
+        : name === './crazyflie-mapping' ? load('crazyflie-mapping') : require(name),
     });
     cache.set(name, exports);
     return exports;
@@ -78,6 +79,41 @@ function frontend(api) {
   const connection = new (load('crazyflie-connection.service').CrazyflieConnectionService)(telemetry, { run: fn => fn() });
   return { connection, telemetry };
 }
+
+test('mapping bridge requires an existing connection, validates samples, reports bad data and invalidates on disconnect', async () => {
+  const callbacks = {};
+  const controls = [];
+  const api = {
+    connect: async () => assert.fail('mapping must not connect'),
+    disconnect: async () => assert.fail('mapping must not disconnect'),
+    listInterfaces: async () => assert.fail('mapping must not enumerate or open another radio'),
+    getConnectionState: async () => ({ status: 'disconnected' }),
+    onConnection: cb => { callbacks.state = cb; return () => {}; },
+    onTelemetry: cb => () => {},
+    onAttitude: cb => () => {},
+    onMapping: cb => { callbacks.mapping = cb; return () => {}; },
+    setMapping: async enabled => { controls.push(enabled); return { success: true }; },
+  };
+  const { connection } = frontend(api);
+  const events = [];
+  connection.mapping$.subscribe(event => events.push(event));
+  await tick();
+  await assert.rejects(connection.setMapping(true), /先连接/);
+  callbacks.state({ status: 'ready' });
+  await connection.setMapping(true);
+  const sample = { type: 'sample', timestampMs: 100, poseTimestampMs: 100, epoch: 0,
+    x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0,
+    ranges: { front: 1, back: null, left: null, right: null, up: null } };
+  callbacks.mapping(sample);
+  assert.equal(events.at(-1), sample);
+  assert.ok(connection.detectedDecks$.value.includes('multiranger'));
+  callbacks.mapping({ ...sample, poseTimestampMs: 0 });
+  assert.equal(events.at(-1).type, 'error');
+  callbacks.state({ status: 'disconnected' });
+  assert.equal(events.at(-1).type, 'reference');
+  assert.deepEqual(controls, [true]);
+  connection.ngOnDestroy();
+});
 
 test('connection telemetry selects supported firmware permission logs without adding a connection or motor command', () => {
   const python = process.platform === 'win32' ? 'py' : 'python3';
@@ -351,6 +387,54 @@ function workerAdapter() {
     close: code => child.emit('close', code), input: () => child.stdin.read()?.toString() || '',
     get launches() { return launches; }, get kills() { return kills; } };
 }
+
+test('mapping control and samples share the worker during flight without cancelling or claiming the flight has finished', async () => {
+  const h = workerAdapter();
+  h.emit({ type: 'state', state: 'ready' });
+  await h.worker.ready;
+  const run = h.worker.request('run', { code: 'cf_takeoff()', timeoutMs: 20000 });
+  await tick();
+  const flight = JSON.parse(h.input().trim());
+  const mapping = h.worker.request('mapping', { enabled: true });
+  await tick();
+  const request = JSON.parse(h.input().trim());
+  assert.equal(request.action, 'mapping');
+  assert.equal(h.worker.running, true);
+  h.emit({ type: 'mapping', payload: { type: 'sample', timestampMs: 100 } });
+  h.emit({ type: 'result', id: request.id, result: { success: true } });
+  assert.equal((await mapping).success, true);
+  assert.equal(h.worker.running, true);
+  assert.ok(h.events.some(event => event.type === 'mapping'));
+  assert.equal(h.input(), '', 'mapping must not write a cancel, arming or motion request');
+  h.emit({ type: 'result', id: flight.id, result: { success: true } });
+  await run;
+  h.close(0);
+  assert.equal(h.launches, 1);
+  assert.equal(h.kills, 0);
+});
+
+test('a mapping timeout reports failure without cancelling, disconnecting or finishing an active flight', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = workerAdapter();
+  h.emit({ type: 'state', state: 'ready' });
+  await h.worker.ready;
+  const run = h.worker.request('run', { code: 'cf_takeoff()', timeoutMs: 20000 });
+  await tick();
+  const flight = JSON.parse(h.input().trim());
+  const mapping = h.worker.request('mapping', { enabled: true });
+  await tick();
+  assert.match(h.input(), /mapping/);
+  t.mock.timers.tick(8000);
+  const result = await mapping;
+  assert.equal(result.success, false);
+  assert.match(result.message, /not cancelled/);
+  assert.equal(h.worker.running, true);
+  assert.equal(h.input(), '', 'mapping timeouts cannot send cancel or shutdown');
+  h.emit({ type: 'result', id: flight.id, result: { success: true } });
+  await run;
+  h.close(0);
+  assert.equal(h.kills, 0);
+});
 
 test('worker transport never reports a failed active flight as finished before landing cleanup', async () => {
   const h = workerAdapter();

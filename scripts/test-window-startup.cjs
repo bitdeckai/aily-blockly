@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const ts = require('typescript');
+const { configureWindowIdentity, getWindowIcon } = require('../electron/desktop-identity');
 
 const filename = path.join(__dirname, '..', 'electron', 'main.js');
 const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
@@ -26,7 +27,7 @@ function openWindow({ isWin32 = true, firstLaunch = false,
     path, process: { env: { AILY_APPDATA_PATH: 'appdata' }, resourcesPath: 'resources' },
     fs: { existsSync: () => !firstLaunch },
     __dirname: path.dirname(filename), serve: true, isWin32, isDarwin: !isWin32,
-    console, registerWebBluetoothChooser() {},
+    console, registerWebBluetoothChooser() {}, configureWindowIdentity, getWindowIcon, app: { isPackaged: false },
     screen: Object.assign(new EventEmitter(), {
       getAllDisplays: () => displays,
       getPrimaryDisplay: () => displays[0],
@@ -53,6 +54,7 @@ function openWindow({ isWin32 = true, firstLaunch = false,
         this.bounds = { ...bounds, width: Math.max(bounds.width, this.minimum[0]),
           height: Math.max(bounds.height, this.minimum[1]) };
       }
+      setAppDetails(details) { this.appDetails = details; }
       getBounds() { return { ...this.bounds }; }
       getMinimumSize() { return this.minimum; }
       setMinimumSize(...minimum) { this.minimum = minimum; }

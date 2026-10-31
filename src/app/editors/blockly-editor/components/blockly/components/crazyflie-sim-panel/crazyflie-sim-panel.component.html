@@ -26,31 +26,68 @@
         </li>
       </ul>
     </nz-dropdown-menu>
-    <button class="sim-btn" [disabled]="running" title="仅复位三维模型，不控制真机" (click)="resetDronePose()">复位模型</button>
     <div class="sim-view-tools" role="toolbar" aria-label="三维视角控制">
       <button class="sim-icon-btn" title="放大 (+)" aria-label="放大" (click)="zoomCamera(0.7)"><i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i></button>
       <button class="sim-icon-btn" title="缩小 (-)" aria-label="缩小" (click)="zoomCamera(1.4)"><i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i></button>
       <button class="sim-icon-btn" title="适配整个场景 (Home)" aria-label="适配整个场景" (click)="fitCameraToScene()"><i class="fa-solid fa-expand" aria-hidden="true"></i></button>
       <button class="sim-icon-btn" title="聚焦飞行器 (F)" aria-label="聚焦飞行器" (click)="focusAircraft()"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></button>
-      <button class="sim-icon-btn" title="向左旋转 15 度" aria-label="向左旋转" (click)="orbitCamera(-15)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button>
-      <button class="sim-icon-btn" title="向右旋转 15 度" aria-label="向右旋转" (click)="orbitCamera(15)"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
-      <button class="sim-icon-btn" title="抬高视角 15 度" aria-label="抬高视角" (click)="orbitCamera(0, -15)"><i class="fa-solid fa-angle-up" aria-hidden="true"></i></button>
-      <button class="sim-icon-btn" title="降低视角 15 度" aria-label="降低视角" (click)="orbitCamera(0, 15)"><i class="fa-solid fa-angle-down" aria-hidden="true"></i></button>
-      <button class="sim-icon-btn" [class.active]="axesVisible" [attr.aria-pressed]="axesVisible" title="飞行器坐标：X 前、Y 左、Z 上" aria-label="显示飞行器坐标系" (click)="toggleFlightAxes()"><i class="fa-solid fa-arrows-up-down-left-right" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" [disabled]="mapping2dShown" title="向左旋转 15 度" aria-label="向左旋转" (click)="orbitCamera(-15)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" [disabled]="mapping2dShown" title="向右旋转 15 度" aria-label="向右旋转" (click)="orbitCamera(15)"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" [disabled]="mapping2dShown" title="抬高视角 15 度" aria-label="抬高视角" (click)="orbitCamera(0, -15)"><i class="fa-solid fa-angle-up" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" [disabled]="mapping2dShown" title="降低视角 15 度" aria-label="降低视角" (click)="orbitCamera(0, 15)"><i class="fa-solid fa-angle-down" aria-hidden="true"></i></button>
+      <button class="sim-icon-btn" [disabled]="mapping2dShown" [class.active]="axesVisible" [attr.aria-pressed]="axesVisible" title="飞行器坐标：X 前、Y 左、Z 上" aria-label="显示飞行器坐标系" (click)="toggleFlightAxes()"><i class="fa-solid fa-arrows-up-down-left-right" aria-hidden="true"></i></button>
       <button class="sim-icon-btn" title="保存场景截图" aria-label="保存场景截图" (click)="captureScene()"><i class="fa-solid fa-camera" aria-hidden="true"></i></button>
     </div>
   </div>
 
+  <div class="sim-panel__auxiliary">
+    <section class="sim-mapping" *ngIf="simService.roomPreset$.value === 'coordinates' && mappingExpanded"
+      [attr.aria-label]="'CRAZYFLIE_MAPPING.TITLE' | translate">
+      <div class="sim-mapping__actions">
+        <button type="button" class="sim-btn sim-tool-trigger" [class.active]="mappingView === '2d'"
+          [attr.aria-pressed]="mappingView === '2d'" (click)="mappingView = '2d'">{{ 'CRAZYFLIE_MAPPING.VIEW_2D' | translate }}</button>
+        <button type="button" class="sim-btn sim-tool-trigger" [class.active]="mappingView === '3d'"
+          [attr.aria-pressed]="mappingView === '3d'" (click)="mappingView = '3d'">{{ 'CRAZYFLIE_MAPPING.VIEW_3D' | translate }}</button>
+      </div>
+      <div class="sim-mapping__legend" *ngIf="mappingView === '2d'">
+        <span><i class="sim-mapping__swatch sim-mapping__swatch--occupied"></i>{{ 'CRAZYFLIE_MAPPING.OCCUPIED' | translate }}</span>
+        <span><i class="sim-mapping__swatch sim-mapping__swatch--free"></i>{{ 'CRAZYFLIE_MAPPING.FREE' | translate }}</span>
+        <span><i class="sim-mapping__swatch sim-mapping__swatch--unknown"></i>{{ 'CRAZYFLIE_MAPPING.UNKNOWN' | translate }}</span>
+      </div>
+      <div class="sim-mapping__actions">
+        <button class="sim-btn" [disabled]="mappingBusy || rangeMap.active" (click)="startMapping('simulation')">{{ 'CRAZYFLIE_MAPPING.SIMULATION' | translate }}</button>
+        <button class="sim-btn" [disabled]="mappingBusy || rangeMap.active" (click)="startMapping('hardware')">{{ 'CRAZYFLIE_MAPPING.HARDWARE' | translate }}</button>
+        <button class="sim-btn" [disabled]="mappingBusy || !rangeMap.active" (click)="pauseMapping()">{{ 'CRAZYFLIE_MAPPING.PAUSE' | translate }}</button>
+        <button class="sim-btn" [disabled]="mappingBusy" (click)="clearMapping()">{{ 'CRAZYFLIE_MAPPING.CLEAR' | translate }}</button>
+        <button class="sim-btn" [disabled]="!rangeMap.voxels.size && !rangeMap.cells.size" (click)="exportMapping()">{{ 'CRAZYFLIE_MAPPING.EXPORT' | translate }}</button>
+      </div>
+      <div class="sim-mapping__status" role="status">
+        {{ (rangeMap.active ? 'CRAZYFLIE_MAPPING.CAPTURING' : 'CRAZYFLIE_MAPPING.PAUSED') | translate }}
+        · {{ mappingView === '2d' ? rangeMap.cells.size : rangeMap.voxels.size }}
+        {{ (mappingView === '2d' ? 'CRAZYFLIE_MAPPING.CELLS' : 'CRAZYFLIE_MAPPING.POINTS') | translate }} · 10 cm
+        <strong *ngIf="rangeMap.source">{{ (rangeMap.source === 'hardware' ? 'CRAZYFLIE_MAPPING.HARDWARE' : 'CRAZYFLIE_MAPPING.SIMULATION') | translate }}</strong>
+      </div>
+      <details>
+        <summary>{{ 'CRAZYFLIE_MAPPING.HELP' | translate }}</summary>
+        <p>{{ 'CRAZYFLIE_MAPPING.PLANAR_HINT' | translate }}</p>
+        <p>{{ 'CRAZYFLIE_MAPPING.DYNAMIC_HINT' | translate }}</p>
+        <p>{{ 'CRAZYFLIE_MAPPING.NOTICE' | translate }}</p>
+        <p>{{ (rangeMap.source === 'hardware' ? 'CRAZYFLIE_MAPPING.HARDWARE_HINT' : 'CRAZYFLIE_MAPPING.SIM_HINT') | translate }}</p>
+      </details>
+      <p class="sim-mapping__error" *ngIf="mappingError" role="alert">{{ mappingError }}</p>
+    </section>
+  </div>
+
   <div class="sim-panel__canvas-wrap">
-    <div class="sim-hud">
-      <span>{{ realPoseShown ? '真机估计 X' : (attitudeActive ? '模拟位置 X' : 'X') }} {{ telemetry.xCm }} cm</span>
+    <div class="sim-hud" [class.sim-view-hidden]="mapping2dShown">
+      <span>{{ realPoseShown ? '真机估计 X' : (mappingPoseShown ? '建图估计 X' : (attitudeActive ? '模拟位置 X' : 'X')) }} {{ telemetry.xCm }} cm</span>
       <span>Y {{ telemetry.yCm }} cm</span>
       <span>Z {{ telemetry.altitudeCm }} cm</span>
       @if (simService.roomPreset$.value === 'coordinates') {
         <span>{{ (coordinateGridSpacing === 0.1 ? 'CRAZYFLIE_EXPLORATION.GRID_FINE' : 'CRAZYFLIE_EXPLORATION.GRID_COARSE') | translate }}</span>
       }
       @if (displayedAttitude; as sample) {
-        <span>{{ realPoseShown ? '相对航向' : '真机航向' }} {{ sample.yaw | number:'1.0-0' }}°</span>
+        <span>{{ rangeMap.active && rangeMap.source === 'simulation' ? '模拟航向' : ((realPoseShown || mappingPoseShown) ? '相对航向' : '真机航向') }} {{ sample.yaw | number:'1.0-0' }}°</span>
       } @else {
         <span>模拟航向 {{ telemetry.yawDeg }}°</span>
       }
@@ -63,7 +100,7 @@
       <span *ngFor="let deckLabel of detectedDeckLabels" class="sim-hud__deck">{{ deckLabel | translate }}</span>
       <span *ngIf="measureStatus" class="sim-hud__measure">{{ measureStatus }}</span>
     </div>
-    <div #canvasHost class="sim-panel__canvas" tabindex="0" aria-label="三维场景" title="左键拖动旋转，右键拖动平移，滚轮缩放；点击场景后可用方向键旋转、Home 全景、F 聚焦" (keydown)="onViewportKeydown($event)" (click)="onCanvasClick($event)">
+    <div #canvasHost class="sim-panel__canvas" [class.sim-view-hidden]="mapping2dShown" tabindex="0" aria-label="三维场景" title="左键拖动旋转，右键拖动平移，滚轮缩放；点击场景后可用方向键旋转、Home 全景、F 聚焦" (keydown)="onViewportKeydown($event)" (click)="onCanvasClick($event)">
       <div class="sim-attitude-inset" role="group" aria-label="真机姿态预览"
         [attr.data-state]="attitudePreviewState" [title]="attitudePreviewMessage"
         (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
@@ -86,15 +123,21 @@
         </select>
       </div>
     </div>
+    <app-crazyflie-occupancy-map *ngIf="mapping2dShown" [map]="rangeMap" [revision]="rangeMap.samples"
+      [pose]="occupancyPose" [gridVisible]="gridVisible"></app-crazyflie-occupancy-map>
     <div class="sim-quick-actions">
-      <button class="sim-quick-btn" [class.active]="measureMode" (click)="toggleMeasureMode()">{{ measureMode ? '取消测距' : '测距' }}</button>
+      <button class="sim-quick-btn" [disabled]="mapping2dShown" [class.active]="measureMode" (click)="toggleMeasureMode()">{{ measureMode ? '取消测距' : '测距' }}</button>
       <button class="sim-quick-btn" [class.active]="gridVisible" (click)="toggleGrid()">网格</button>
-      <button class="sim-quick-btn" [class.active]="flightPathVisible" (click)="toggleFlightPath()">轨迹</button>
-      <button class="sim-quick-btn" (click)="cycleTrailTheme()">轨迹颜色：{{ trailThemeLabel }}</button>
+      <button class="sim-quick-btn" [disabled]="mapping2dShown" [class.active]="flightPathVisible" (click)="toggleFlightPath()">轨迹</button>
+      <button class="sim-quick-btn" [disabled]="mapping2dShown" (click)="cycleTrailTheme()">轨迹颜色：{{ trailThemeLabel }}</button>
       <span class="sim-quick-reset-actions">
         <button class="sim-quick-btn" (click)="resetCameraView()">重置视角</button>
         <button type="button" class="sim-quick-btn" [disabled]="running"
           title="仅复位三维模型和轨迹，不控制真机，也不会解除固件锁定" (click)="resetDronePose()">复位</button>
+        <button type="button" class="sim-quick-btn" *ngIf="simService.roomPreset$.value === 'coordinates'"
+          [class.active]="mappingExpanded" [attr.aria-expanded]="mappingExpanded" (click)="mappingExpanded = !mappingExpanded">
+          {{ 'CRAZYFLIE_MAPPING.TITLE' | translate }}{{ rangeMap.active ? ' ●' : '' }}
+        </button>
       </span>
     </div>
   </div>

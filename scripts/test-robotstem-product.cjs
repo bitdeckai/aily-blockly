@@ -307,23 +307,23 @@ test('switching uses the local Crazyflie package and preserves non-board depende
   assert.equal(effects.filter(([name]) => name === 'reload').length, 1);
 });
 
-test('RobotSTEM branding preserves the legacy user-data path and OAuth identifiers', () => {
+test('RobotSTEM branding has an independent desktop identity and preserves OAuth identifiers', () => {
   const metadata = require(path.join(root, 'package.json'));
   assert.equal(metadata.productName, 'RobotSTEM');
-  assert.equal(metadata.build.appId, 'blockly.aily.pro');
+  const { APP_ID, configureDesktopIdentity } = require('../electron/desktop-identity');
+  assert.equal(metadata.build.appId, APP_ID);
   assert.equal(metadata.build.publish, null);
   assert.ok(metadata.build.protocols.some(protocol => protocol.schemes.includes('ailyblockly')));
   const paths = {};
   let name;
-  vm.runInNewContext(read('electron/main.js').match(/app\.setName\("aily blockly"\);[\s\S]*?app\.setPath\('userData', legacyUserDataPath\);/)[0], {
-    app: {
-      setName: value => { name = value; },
-      getPath: key => { assert.equal(key, 'userData'); return 'existing-user-data'; },
-      setPath: (key, value) => { paths[key] = value; },
-    },
-  });
+  configureDesktopIdentity({
+    setName: value => { name = value; },
+    getPath: key => { assert.equal(key, 'appData'); return 'app-data'; },
+    setPath: (key, value) => { paths[key] = value; },
+    setAppUserModelId: value => { assert.equal(value, APP_ID); },
+  }, 'win32');
   assert.equal(name, 'RobotSTEM');
-  assert.equal(paths.userData, 'existing-user-data');
+  assert.equal(paths.userData, path.join('app-data', 'RobotSTEM'));
   assert.match(read('src/index.html'), /<title>RobotSTEM<\/title>/);
   assert.match(read('src/app/app.component.ts'), /title = 'RobotSTEM'/);
   for (const filename of ['public/robotstem.png', 'public/robotstem.ico', 'public/robotstem.svg']) {

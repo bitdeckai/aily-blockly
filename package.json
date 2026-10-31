@@ -7,7 +7,7 @@
   "main": "electron/main.js",
   "build": {
     "publish": null,
-    "appId": "blockly.aily.pro",
+    "appId": "org.robotstem.desktop",
     "forceCodeSigning": false,
     "asar": true,
     "asarUnpack": [
@@ -67,6 +67,7 @@
       }
     ],
     "win": {
+      "executableName": "RobotSTEM",
       "target": "nsis",
       "sign": false,
       "signAndEditExecutable": true,
@@ -123,7 +124,7 @@
       "createDesktopShortcut": false,
       "perMachine": true,
       "allowElevation": true,
-      "deleteAppDataOnUninstall": true,
+      "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh",
       "runAfterFinish": true,
       "differentialPackage": false,

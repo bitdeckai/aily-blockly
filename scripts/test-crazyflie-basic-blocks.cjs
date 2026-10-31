@@ -13,6 +13,7 @@ require.extensions['.ts'] = (module, filename) => {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: filename,
   });
+
   module._compile(outputText, filename);
 };
 const root = path.resolve(__dirname, '..');
@@ -38,6 +39,8 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'child', 'boards', 'board-cra
   window: { MPY: crazyflieGenerator },
 });
 radio.registerCrazyradioBlocks(crazyflieGenerator, true);
+const cameraBlocks = require(path.join(source, 'ai-deck-blocks.ts'));
+cameraBlocks.registerAiDeckCameraBlocks(crazyflieGenerator, true);
 
 const workspaces = [];
 function workspace(blocks, variables = []) {
@@ -54,6 +57,65 @@ const flight = type => ({ type });
 const chain = (...blocks) => blocks.reduceRight((next, block) =>
   next ? { ...block, next: { block: next } } : block, null);
 const compile = ws => compileCrazyflieFlow(ws, crazyflieGenerator);
+
+test('AI Deck generator uses Python precedence without requiring legacy constants on CodeGenerator', () => {
+  const { Order } = require('blockly/python');
+  const generator = new Blockly.CodeGenerator('camera');
+  cameraBlocks.registerAiDeckCameraBlocks(generator, true);
+  assert.equal(generator.ORDER_NONE, undefined);
+  const ws = workspace([{ type: 'cf_ai_deck_config' }]);
+  const block = ws.getTopBlocks(false)[0];
+  generator.valueToCode = (inputBlock, name, order) => {
+    assert.equal(inputBlock, block);
+    assert.equal(name, 'ADDRESS');
+    assert.equal(order, Order.NONE);
+    return '"192.168.4.1"';
+  };
+  assert.equal(generator.forBlock['cf_ai_deck_config'](block, generator),
+    'cf_ai_deck_config("192.168.4.1")\n');
+  generator.valueToCode = () => '';
+  assert.equal(generator.forBlock['cf_ai_deck_config'](block, generator), 'cf_ai_deck_config("")\n');
+});
+
+test('AI Deck blocks resolve variable addresses and bounded loops, persist and reject invalid programs before execution', () => {
+  const config = input => ({ type: 'cf_ai_deck_config', inputs: { ADDRESS: input } });
+  const ws = workspace([chain(
+    { type: 'variables_set', fields: { VAR: { id: 'n' } }, inputs: { VALUE: string('192.168.4.1') } },
+    config(variable()),
+    { type: 'controls_repeat_ext', inputs: { TIMES: value(2),
+      DO: { block: chain(flight('cf_ai_deck_open'), flight('cf_ai_deck_close')) } } },
+  )], [{ name: 'camera address', id: 'n' }]);
+  const code = compile(ws);
+  assert.deepEqual(code.split(/\r?\n/).filter(Boolean),
+    ['cf_ai_deck_config("192.168.4.1")', 'cf_ai_deck_open()', 'cf_ai_deck_close()',
+      'cf_ai_deck_open()', 'cf_ai_deck_close()']);
+  const restored = workspace([]);
+  Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
+  assert.equal(compile(restored), code);
+  assert.deepEqual(cameraBlocks.createAiDeckCameraToolbox().contents.map(block => block.type),
+    ['cf_ai_deck_config', 'cf_ai_deck_open', 'cf_ai_deck_close']);
+  assert.throws(() => compile(workspace([flight('cf_ai_deck_open')])), /configure/);
+  assert.throws(() => compile(workspace([config(string('ftp://camera/stream'))])), /INVALID_ADDRESS/);
+});
+
+test('camera-only simulation runs configuration, opening, waiting and closing in order without moving the model or touching radio', async () => {
+  const sim = simulator(), events = [];
+  sim.aiDeckCamera = { execute: command => events.push(command.type) };
+  sim.waitWithControl = async ms => { events.push(`wait:${ms}`); return true; };
+  const pose = { x: -0.5, y: 1.2, z: 0.3, yaw: 1 };
+  sim.pose$.next(pose);
+  const result = await sim.runCode('cf_ai_deck_config("192.168.4.1")\ncf_ai_deck_open()\ncf_delay(2)\ncf_ai_deck_close()');
+  assert.equal(result.success, true, result.message);
+  assert.deepEqual(events, ['configure', 'open', 'wait:2000', 'close']);
+  assert.equal(sim.pose$.value, pose);
+  assert.deepEqual(Array.from(result.executed), ['ai_deck:configure', 'ai_deck:open', 'delay:2', 'ai_deck:close']);
+  await assert.rejects(sim.runCode('cf_ai_deck_open()'), /configure/);
+  assert.deepEqual(events, ['configure', 'open', 'wait:2000', 'close']);
+  sim.waitWithControl = async () => { sim.cancelRun(); return false; };
+  const cancelled = await sim.runCode('cf_ai_deck_config("192.168.4.1")\ncf_ai_deck_open()\ncf_delay(2)\ncf_ai_deck_close()');
+  assert.equal(cancelled.success, false);
+  assert.equal(events.at(-1), 'open', 'cancellation must skip remaining commands');
+});
 
 afterEach(() => {
   workspaces.splice(0).forEach(ws => ws.dispose());
@@ -189,7 +251,7 @@ test('example menu emphasizes its trigger and separates titles, descriptions and
   assert.match(html, /class="sim-example-menu__item"[^>]*\[nzDisabled\]="running"[^>]*\(click\)="insertExample\(example.id\)"/);
   assert.match(html, /class="sim-example-menu__title">{{ example.titleKey \| translate }}/);
   assert.match(html, /class="sim-example-menu__description">{{ example.descriptionKey \| translate }}/);
-  assert.match(css, /\.sim-btn\.sim-example-trigger\s*\{[^}]*color: var\(--aily-text-primary\);[^}]*font-weight: 600/);
+  assert.match(css, /\.sim-btn\.sim-example-trigger(?:,\s*\.sim-btn\.sim-tool-trigger)?\s*\{[^}]*color: var\(--aily-text-primary\);[^}]*font-weight: 600/);
   assert.match(css, /\.sim-example-menu\s*\{[^}]*width: min\(360px, 100vw - 24px\);[^}]*overflow-y: auto/);
   assert.match(css, /\.sim-example-menu__item \+ \.sim-example-menu__item\s*\{[^}]*margin-top: 4px;[^}]*border-top: 1px solid var\(--aily-border-primary\)/);
   assert.match(css, /\.sim-example-menu__title\s*\{[^}]*margin-bottom: 4px;[^}]*font-weight: 600/);
@@ -576,7 +638,9 @@ function simulator() {
       : name.endsWith('/crazyflie-exploration') ? require('./helpers/load-crazyflie-data.cjs')(path.join(root, 'src', 'app', 'services', 'crazyflie-exploration.ts'))
       : name.endsWith('/crazyflie-attitude') ? require(path.join(root, 'src', 'app', 'services', 'crazyflie-attitude.ts'))
       : name.endsWith('/motion-blocks') ? require(path.join(source, 'motion-blocks.ts'))
-      : name.endsWith('/radio-blocks') ? radio : require(name),
+      : name.endsWith('/radio-blocks') ? radio
+      : name.endsWith('/ai-deck-camera') ? require(path.join(root, 'src', 'app', 'services', 'ai-deck-camera.ts'))
+      : require(name),
     setTimeout, clearTimeout, console,
   });
   return new exports.CrazyflieSimService({ setDeckDetected() {} });
@@ -884,6 +948,28 @@ assert calls == [
     ('stop', (), {}), ('land', (), {'velocity': 0.2}), ('land', (), {})
 ], calls
 assert len(result['executed']) == 4, result
+import io, json
+from contextlib import redirect_stdout
+camera = ns['parse_commands']('cf_ai_deck_config("192.168.4.1")\\ncf_ai_deck_open()\\ncf_ai_deck_close()')
+mixed = valid[:1] + camera[:2] + valid[1:] + camera[2:]
+calls.clear()
+with redirect_stdout(io.StringIO()) as output:
+    result = ns['run_flow']('radio://mock', mixed, 'E7E7E7E7E7')
+assert result['success'], result
+assert len(result['executed']) == 7, result
+events = [json.loads(line[len('__AIDECK__:'):])['type'] for line in output.getvalue().splitlines() if line.startswith('__AIDECK__:')]
+assert events == ['configure', 'open', 'close'], output.getvalue()
+assert [item[0] for item in calls] == ['created', 'take_off', 'stop', 'land', 'land'], calls
+deck_connection = types.SimpleNamespace(cf=types.SimpleNamespace(
+    param=types.SimpleNamespace(set_value=lambda *args: calls.append(('param', *args)))))
+deck_commands = camera[:2] + [('led_ring_off', None)] + camera[2:]
+calls.clear()
+with redirect_stdout(io.StringIO()) as output:
+    result = ns['run_flow']('radio://mock', deck_commands, 'E7E7E7E7E7', connection=deck_connection)
+assert result['success'], result
+assert calls == [('param', 'ring.effect', '0')], calls
+events = [json.loads(line[len('__AIDECK__:'):])['type'] for line in output.getvalue().splitlines() if line.startswith('__AIDECK__:')]
+assert events == ['configure', 'open', 'close'], output.getvalue()
 legacy = ns['parse_commands']('cf_crazyflie_link()\\ncf_takeoff()\\ncf_motion("hover", [0])\\ncf_land()')
 calls.clear()
 result = ns['run_flow']('radio://mock', legacy, 'E7E7E7E7E7')

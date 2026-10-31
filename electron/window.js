@@ -2,6 +2,7 @@
 const { ipcMain, BrowserWindow, app, screen } = require("electron");
 const { exec, execSync } = require('child_process');
 const path = require('path');
+const { configureWindowIdentity, getWindowIcon } = require('./desktop-identity');
 
 const CODE_VIEWER_STATE_CHANNEL = 'blockly-code-viewer-state';
 const CODE_VIEWER_STATE_UPDATE_CHANNEL = 'blockly-code-viewer-state-update';
@@ -63,6 +64,7 @@ function pushPooledSubWindow(loadBasePage) {
     }
     try {
         const win = new BrowserWindow({
+            icon: getWindowIcon(app),
             frame: false,
             show: false,
             transparent: true,
@@ -77,6 +79,7 @@ function pushPooledSubWindow(loadBasePage) {
             height: 600,
             webPreferences: getSubWindowWebPreferences(),
         });
+        configureWindowIdentity(win);
 
         const onClosedWhilePooled = () => {
             const idx = subWindowPool.indexOf(win);
@@ -343,6 +346,7 @@ function registerWindowHandlers(mainWindow) {
 
         if (!subWindow) {
             subWindow = new BrowserWindow({
+                icon: getWindowIcon(app),
                 frame: false,
                 autoHideMenuBar: true,
                 thickFrame: true,
@@ -352,6 +356,7 @@ function registerWindowHandlers(mainWindow) {
                 height,
                 webPreferences: getSubWindowWebPreferences(),
             });
+            configureWindowIdentity(subWindow);
         } else {
             try {
                 subWindow.setAlwaysOnTop(!!alwaysOnTop);

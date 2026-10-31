@@ -16,6 +16,7 @@ import { CmdService } from '../../../../../../services/cmd.service';
 import { WorkflowService } from '../../../../../../services/workflow.service';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import Sortable, { SortableEvent } from 'sortablejs';
+import { AiDeckCameraService } from '../../../../../../services/ai-deck-camera.service';
 
 interface ToolboxContextMenuAction {
   name: string;
@@ -69,6 +70,11 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
       key: 'buzzer',
       name: 'CRAZYFLIE_TOOLBOX.BUZZER.NAME',
       iconClass: 'fa-light fa-volume',
+    },
+    {
+      key: 'ai-deck',
+      name: 'AI_DECK_CAMERA.TITLE',
+      iconClass: 'fa-light fa-camera',
     },
   ];
   contextMenuPosition = { x: 0, y: 0 };
@@ -128,6 +134,7 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     private message: NzMessageService,
     private translate: TranslateService,
     private elementRef: ElementRef<HTMLElement>,
+    private aiDeckCamera: AiDeckCameraService,
   ) { }
 
   ngOnInit(): void {
@@ -259,7 +266,7 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
       return this.items;
     }
 
-    return this.items.filter((item) => !['crazyflie', 'crazyradio'].includes(String(item.name || '').toLowerCase().trim()));
+    return this.items.filter((item) => !['crazyflie', 'crazyradio', 'ai deck'].includes(String(item.name || '').toLowerCase().trim()));
   }
 
   get crazyradioRootItem(): BlocklyToolboxFacadeItem | null {
@@ -275,17 +282,19 @@ export class BlocklyToolboxPaneComponent implements OnInit, AfterViewInit, OnDes
     }
 
     this.blocklyService.selectToolboxFacadeItem(deck.allTargetKey);
+    if (deck.key === 'ai-deck') this.aiDeckCamera.showPanel();
   }
 
   private refreshDeckBindings(items: BlocklyToolboxFacadeItem[]): void {
     const candidates = this.flattenToolboxItems(items)
-      .filter((item) => item.selectable && item.level > 0)
+      .filter((item) => item.selectable && (item.level > 0 || item.name === 'AI Deck'))
       .filter((item) => {
         const name = String(item.name || '').toLowerCase().trim();
         return !!name && name !== 'crazyflie';
       });
 
     const deckMatchers: Array<{ key: string; pattern: RegExp }> = [
+      { key: 'ai-deck', pattern: /ai[ -]deck/i },
       { key: 'multiranger', pattern: /(multiranger|ranger|distance|obstacle|range|tof|距离|避障|前方|后方|左侧|右侧|上方)/i },
       { key: 'led-ring', pattern: /(led|ring|light|color|blink|breathe|rainbow|灯|颜色|闪烁|呼吸)/i },
       { key: 'buzzer', pattern: /(buzzer|beep|tone|sound|melody|note|蜂鸣|声音|旋律|音符)/i },

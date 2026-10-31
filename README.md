@@ -111,6 +111,24 @@ node --test $tests.FullName
 
 These regressions do not perform real flights. Build-channel and platform details are in the [Crazyflie development guide](./README_crazyflie.MD) and [general development notes](./develop.md).
 
+### Windows desktop identity
+
+RobotSTEM uses `org.robotstem.desktop` for the running Electron process, each window's explicit taskbar identity, installer identity and newly installed shortcuts, with the RobotSTEM icon. Development runs (including direct Electron launches without `--serve`) use the same identity. Non-Windows profile locations are unchanged.
+
+**Windows profile change: existing data is preserved, not automatically migrated.** Both earlier RobotSTEM builds and Aily Project used `%APPDATA%\aily blockly`, normally with Chromium data in `%APPDATA%\aily blockly\instances\instance-N`. New RobotSTEM builds use `%APPDATA%\RobotSTEM` and `%APPDATA%\RobotSTEM\instances\instance-N` (`N` is the reusable instance slot). Protocol-only launches use the base directory. On a standard Windows installation, `%APPDATA%` is `%USERPROFILE%\AppData\Roaming`.
+
+The first launch starts a clean RobotSTEM **Chromium** profile. Cookies, local/session storage, browser-only preferences and cached login/user information are not imported, so some preferences may need reconfiguration and login may be required again. The old profile remains intact at the paths above; no automatic copy, move or deletion occurs.
+
+This does **not** create an empty project library or replace the existing application configuration. The resource/settings directory stays at `%USERPROFILE%\AppData\Local\aily-project`; its `config.json` (including recent-project entries), `.aily` account file, tools and resources continue to be used. Saved projects remain at their existing paths (the default root is `%USERPROFILE%\Documents\aily-project`); open the existing project folder if necessary. Do not delete the old profile or shared settings directory to resolve taskbar grouping. Copying an entire legacy Chromium profile into the new one is not an implemented migration workflow.
+
+The existing `aily-project` resource/settings directory, project formats, file associations and OAuth protocols remain compatible and shared where they were previously shared. Windows also retains the shared `%APPDATA%\aily blockly\oauth-instances.json` registry so either app's registered protocol handler can forward login callbacks to the originating profile. This is not a full data/service fork: shared settings/resources and the default handler for existing protocols or `.abi` files are still subject to the last registration. Update feeds are unchanged. Uninstall preserves application data.
+
+After installing a rebuilt RobotSTEM installer into its own directory, unpin old RobotSTEM shortcuts and pin the new RobotSTEM shortcut if Windows retains an old icon/group. Previously shipped installers used Aily's identity; they are not automatically uninstalled or migrated. Packaged installation, existing pinned shortcuts and visual taskbar separation still require Windows desktop verification.
+
+```powershell
+node --test scripts\test-desktop-identity.cjs
+```
+
 ## Displays and Interface Scaling
 
 - The interface follows system DPI without forcing page zoom based on resolution. Use `Ctrl/Cmd +`, `Ctrl/Cmd -`, and `Ctrl/Cmd 0` to adjust or reset interface zoom.

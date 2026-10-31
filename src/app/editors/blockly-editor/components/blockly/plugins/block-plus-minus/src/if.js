@@ -30,14 +30,14 @@ const controlsIfMutator = {
    * @this {Blockly.Block}
    */
   mutationToDom: function () {
-    if (!this.elseIfCount_ && !this.hasElse_) {
+    if (!this.elseIfCount_ && !this.hasElse_ && !this.defaultHasElse_) {
       return null;
     }
     const container = Blockly.utils.xml.createElement('mutation');
     container.setAttribute('elseif', this.elseIfCount_);
-    if (this.hasElse_) {
+    if (this.hasElse_ || this.defaultHasElse_) {
       // Has to be stored as an int for backwards compat.
-      container.setAttribute('else', 1);
+      container.setAttribute('else', this.hasElse_ ? 1 : 0);
     }
     return container;
   },
@@ -49,12 +49,13 @@ const controlsIfMutator = {
    */
   domToMutation: function (xmlElement) {
     const targetCount = parseInt(xmlElement.getAttribute('elseif'), 10) || 0;
-    this.hasElse_ = !!parseInt(xmlElement.getAttribute('else'), 10) || 0;
+    this.hasElse_ = !!parseInt(xmlElement.getAttribute('else'), 10);
     if (this.hasElse_ && !this.getInput('ELSE')) {
       this.appendStatementInput('ELSE').appendField(
         Blockly.Msg['CONTROLS_IF_MSG_ELSE'],
       );
     }
+    if (!this.hasElse_ && this.getInput('ELSE')) this.removeInput('ELSE');
     this.updateShape_(targetCount);
   },
 
@@ -65,15 +66,15 @@ const controlsIfMutator = {
    *     if count and else state.
    */
   saveExtraState: function () {
-    if (!this.elseIfCount_ && !this.hasElse_) {
+    if (!this.elseIfCount_ && !this.hasElse_ && !this.defaultHasElse_) {
       return null;
     }
     const state = Object.create(null);
     if (this.elseIfCount_) {
       state['elseIfCount'] = this.elseIfCount_;
     }
-    if (this.hasElse_) {
-      state['hasElse'] = true;
+    if (this.hasElse_ || this.defaultHasElse_) {
+      state['hasElse'] = this.hasElse_;
     }
     return state;
   },
@@ -91,6 +92,7 @@ const controlsIfMutator = {
         Blockly.Msg['CONTROLS_IF_MSG_ELSE'],
       );
     }
+    if (!this.hasElse_ && this.getInput('ELSE')) this.removeInput('ELSE');
     this.updateShape_(targetCount);
   },
 
@@ -209,6 +211,8 @@ const controlsIfMutator = {
  * @this {Blockly.Block}
  */
 const controlsIfHelper = function () {
+  this.hasElse_ = !!this.getInput('ELSE');
+  this.defaultHasElse_ = this.hasElse_;
   this.getInput('IF0').insertFieldAt(0, createPlusField(), 'PLUS');
 };
 

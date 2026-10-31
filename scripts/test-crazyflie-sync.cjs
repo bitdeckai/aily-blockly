@@ -36,6 +36,8 @@ function load(filename) {
       if (name.endsWith('/crazyflie-geography')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'crazyflie-geography.ts'));
       if (name.endsWith('/motion-blocks')) return load(path.join(generators, 'motion-blocks.ts'));
       if (name.endsWith('/radio-blocks')) return load(path.join(generators, 'radio-blocks.ts'));
+      if (name.endsWith('/ai-deck-camera')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'ai-deck-camera.ts'));
+      if (name.endsWith('/ai-deck-blocks')) return load(path.join(generators, 'ai-deck-blocks.ts'));
       if (name.endsWith('/basic-blocks')) return load(path.join(generators, 'basic-blocks.ts'));
       return {};
     },
@@ -45,6 +47,7 @@ function load(filename) {
 }
 const attitude = load(path.join(services, 'crazyflie-attitude.ts'));
 const { CrazyflieSimService } = load(path.join(services, 'crazyflie-sim.service.ts'));
+const { AiDeckCameraService } = load(path.join(services, 'ai-deck-camera.service.ts'));
 const { CrazyflieRuntimeService } = load(path.join(services, 'crazyflie-runtime.service.ts'));
 const { _UploaderService } = load(path.join(root, 'src', 'app', 'editors', 'blockly-editor',
   'services', 'uploader.service.ts'));
@@ -54,7 +57,7 @@ const sample = (timestampMs, extra = {}) => ({
 });
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
 const plain = value => JSON.parse(JSON.stringify(value));
-const simulator = () => new CrazyflieSimService({ setDeckDetected() {} });
+const simulator = () => new CrazyflieSimService({ setDeckDetected() {} }, new AiDeckCameraService());
 
 test('exactly three modes cycle without a sequential simulation gate', () => {
   const runtime = new CrazyflieRuntimeService();
@@ -221,9 +224,9 @@ test('refreshing basic categories registers existing motion entries before any w
   loader.translateService = { currentLang: 'zh-CN' };
   loader.toolbox.contents.push(motion.createCrazyflieMotionToolbox(true));
   loader.loadCrazyflieBasicBlocks();
-  assert.equal(updates(), 7);
-  assert.deepEqual(plain(loader.toolbox.contents.slice(-2).map(item => item.name)), ['Crazyflie', 'Crazyradio']);
-  const radioCategory = loader.toolbox.contents.at(-1);
+  assert.equal(updates(), 8);
+  assert.deepEqual(plain(loader.toolbox.contents.slice(-3).map(item => item.name)), ['Crazyflie', 'Crazyradio', 'AI Deck']);
+  const radioCategory = loader.toolbox.contents.find(item => item.name === 'Crazyradio');
   assert.deepEqual(plain(radioCategory.contents.map(item => item.type)),
     ['cf_test_link', 'cf_scan_links', 'cf_radio_config']);
 });
@@ -364,14 +367,16 @@ test('flat aircraft and module rows select normal flyouts without expanding desc
   const { BlocklyToolboxPaneComponent } = load(path.join(root, 'src', 'app', 'editors',
     'blockly-editor', 'components', 'blockly', 'components', 'blockly-toolbox-pane',
     'blockly-toolbox-pane.component.ts'));
-  const selected = [], errors = [];
+  const selected = [], errors = [], cameraPanels = [];
   const pane = new BlocklyToolboxPaneComponent({ selectToolboxFacadeItem: key => selected.push(key) },
-    {}, {}, {}, {}, {}, {}, { error: text => errors.push(text) }, { instant: key => key }, {});
+    {}, {}, {}, {}, {}, {}, { error: text => errors.push(text) }, { instant: key => key }, {},
+    { showPanel: () => cameraPanels.push(true) });
   const child = (key, name) => ({ key, name, level: 1, selectable: true, children: [] });
   const aircraft = { key: 'cf', name: 'Crazyflie', level: 0, selectable: true, isCollapsible: true,
     children: [child('flow', 'Flow deck v2'), child('mr', 'Multiranger deck'),
       child('led', 'LED-ring deck'), child('sound', 'Buzzer deck')] };
-  pane.items = [child('variables', 'Variables'), aircraft];
+  pane.items = [child('variables', 'Variables'), aircraft,
+    { ...child('camera', 'AI Deck'), level: 0 }];
   pane.refreshDeckBindings(pane.items);
   pane.onFlightCategoryClick(aircraft);
   for (const deck of pane.deckGroups) {
@@ -380,11 +385,14 @@ test('flat aircraft and module rows select normal flyouts without expanding desc
     assert.equal('expanded' in deck, false);
     assert.equal('description' in deck, false);
   }
-  assert.deepEqual(selected, ['cf', 'flow', 'flow', 'mr', 'mr', 'led', 'led', 'sound', 'sound']);
+  assert.deepEqual(selected, ['cf', 'flow', 'flow', 'mr', 'mr', 'led', 'led', 'sound', 'sound', 'camera', 'camera']);
+  assert.equal(pane.deckGroups.at(-1).key, 'ai-deck');
+  assert.deepEqual(cameraPanels, [true, true]);
+  assert.ok(!pane.toolboxVisibleItems.some(item => item.name === 'AI Deck'));
   pane.dragSorting = true;
   pane.onFlightCategoryClick(aircraft);
   pane.onDeckRowClick('flow-v2');
-  assert.equal(selected.length, 9, 'a completed drag must not open a category');
+  assert.equal(selected.length, 11, 'a completed drag must not open a category');
   pane.dragSorting = false;
   pane.deckGroups[0].allTargetKey = null;
   pane.onDeckRowClick('flow-v2');
@@ -751,6 +759,7 @@ function uploaderHarness(run) {
     zone: { run: fn => fn() }, crazyflieFlowActive: false, crazyflieCancelRequested: false,
     projectService: { getBoardModule: async () => '@aily-project/board-crazyflie' },
     serialService: { currentPortInfo: null }, crazyflieSimService: sim,
+    aiDeckCamera: sim.aiDeckCamera,
     crazyflieTelemetryService: { clear() {}, setTelemetry() {} },
     crazyflieConnectionService: {
       state$: new (require('rxjs').BehaviorSubject)({ status: 'unknown' }),
@@ -788,6 +797,42 @@ test('combined mode compiles once, executes once, follows telemetry during fligh
   assert.equal(h.sim.running$.value, false);
   assert.equal(h.sim.poseSource$.value, 'real');
   assert.equal(h.listeners.size, 0);
+  assert.equal(h.flowLog, null);
+});
+
+test('real and combined camera-only programs bypass absent radio APIs and keep a hidden 3D panel hidden', async () => {
+  for (const combined of [false, true]) {
+    const h = uploaderHarness(() => { throw new Error('must not start real flight'); });
+    const cameraCommands = [];
+    h.sim.aiDeckCamera.command$.subscribe(command => { if (command) cameraCommands.push(command.type); });
+    h.sim.runCode = CrazyflieSimService.prototype.runCode.bind(h.sim);
+    h.sim.waitWithControl = async () => true;
+    const code = 'cf_ai_deck_config("192.168.4.1")\ncf_ai_deck_open()\ncf_delay(1)\ncf_ai_deck_close()';
+    h.uploader.prepareCrazyflieFlow = () => ({ code, executionBlocks: [] });
+    delete bridgeWindow.crazyflie;
+    delete bridgeWindow.electronAPI;
+    const result = combined ? await h.uploader.runCrazyflieSimAndReal() : await h.uploader.uploadCrazyflieFlow(code);
+    assert.equal(result.state, 'done', result.text);
+    assert.deepEqual(cameraCommands, ['configure', 'open', 'close']);
+    assert.equal(h.sim.panelVisible$.value, false);
+  }
+});
+
+test('mixed real programs dispatch typed camera events through the zone without splitting the flight run', async () => {
+  const commands = [];
+  let runs = 0;
+  const h = uploaderHarness(async ({ log }) => {
+    runs++;
+    for (const command of [{ type: 'configure', address: '192.168.4.1' }, { type: 'open' }, { type: 'close' }]) {
+      log(`__AIDECK__:${JSON.stringify(command)}`);
+    }
+    return { success: true, executed: [] };
+  });
+  h.uploader.aiDeckCamera.command$.subscribe(command => { if (command) commands.push(command.type); });
+  const code = 'cf_crazyflie_link()\ncf_ai_deck_config("192.168.4.1")\ncf_ai_deck_open()\ncf_ai_deck_close()';
+  assert.equal((await h.uploader.uploadCrazyflieFlow(code, [])).state, 'done');
+  assert.deepEqual(commands, ['configure', 'open', 'close']);
+  assert.equal(runs, 1);
   assert.equal(h.flowLog, null);
 });
 
