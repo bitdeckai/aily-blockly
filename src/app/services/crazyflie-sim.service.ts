@@ -20,7 +20,8 @@ export interface CrazyfliePose {
 type CrazyflieSimCommand = {
   type: 'motion' | 'takeoff' | 'land' | 'spin_motors' | 'delay' | 'move' | 'print' | 'set_link' | 'test_link' | 'scan_links' | 'crazyflie_link' | 'test_crazyflie_link' | 'detect_flow_v2' | 'detect_multiranger' | 'mr_log_distance' | 'mr_log_all_distances' | 'detect_led_ring' | 'led_ring_set_color' | 'led_ring_set_effect' | 'led_ring_off' | 'detect_buzzer' | 'buzzer_beep';
   value?: any;
-} | { type: 'ai_deck'; value: AiDeckCameraCommand };
+} | { type: 'ai_deck'; value: AiDeckCameraCommand }
+  | { type: 'buzzer_play_sound'; value: { effect: number; duration: number } };
 
 export interface CrazyflieStepEvent {
   current: number;
@@ -262,14 +263,14 @@ export class CrazyflieSimService {
     this.running$.next(false);
   }
 
-  async runCode(code: string): Promise<{ success: boolean; message: string; executed: string[] }> {
+  async runCode(code: string, preservePose = false): Promise<{ success: boolean; message: string; executed: string[] }> {
     if (this.running$.value) {
       return { success: false, message: '模拟正在运行中', executed: [] };
     }
 
     const commands = this.parseCommands(code);
     validateRadioScanSequence(commands);
-    validateMotionSequence(commands);
+    validateMotionSequence(commands, preservePose && this.relativeAltitudeCm > 1);
     validateAiDeckCameraSequence(code);
     const cameraOnly = isAiDeckCameraOnlyFlow(code);
     if (commands.length === 0) {
@@ -285,10 +286,10 @@ export class CrazyflieSimService {
     this.step$.next(null);
     this.logs$.next([]);
     this.paused$.next(false);
-    if (!cameraOnly) this.resetPose();
+    if (!cameraOnly && !preservePose) this.resetPose();
     this.running$.next(true);
 
-    const pose: CrazyfliePose = this.getResetPoseForPreset(this.roomPreset$.value);
+    const pose: CrazyfliePose = preservePose ? { ...this.pose$.value } : this.getResetPoseForPreset(this.roomPreset$.value);
     let current = 0;
 
     try {
@@ -309,7 +310,7 @@ export class CrazyflieSimService {
         switch (command.type) {
           case 'ai_deck':
             this.aiDeckCamera.execute(command.value);
-            this.appendLog(`AI Deck: ${command.value.type}`);
+            this.appendLog(`camera: ${command.value.type}`);
             executed.push(`ai_deck:${command.value.type}`);
             break;
           case 'motion': {
@@ -416,6 +417,11 @@ export class CrazyflieSimService {
             await this.waitWithControl(120, true);
             break;
           }
+          case 'buzzer_play_sound':
+            this.appendLog(`sim: buzzer_play_sound effect=${command.value.effect} duration=${command.value.duration}ms`);
+            executed.push(`buzzer_play_sound:${command.value.effect}:${command.value.duration}:1`);
+            await this.waitWithControl(command.value.duration, true);
+            break;
           case 'takeoff':
             this.appendLog('sim: takeoff');
             executed.push('takeoff');
@@ -481,11 +487,11 @@ export class CrazyflieSimService {
 
       if (cancelled) {
         this.appendLog('sim: cancelled');
-        return { success: false, message: cameraOnly ? 'AI Deck 摄像头流程已取消' : '模拟已取消', executed };
+        return { success: false, message: cameraOnly ? '摄像头流程已取消' : '模拟已取消', executed };
       }
 
       this.appendLog('sim: finished');
-      return { success: true, message: cameraOnly ? 'AI Deck 摄像头流程执行完成' : '模拟执行完成', executed };
+      return { success: true, message: cameraOnly ? '摄像头流程执行完成' : '模拟执行完成', executed };
     } catch (error: any) {
       this.running$.next(false);
       this.advanceExploration(0);
@@ -677,6 +683,8 @@ export class CrazyflieSimService {
         return 'detect_buzzer';
       case 'buzzer_beep':
         return `buzzer_beep:${Number(command.value?.duration ?? 120)}:${Number(command.value?.times ?? 1)}`;
+      case 'buzzer_play_sound':
+        return `buzzer_play_sound:${command.value.effect}:${command.value.duration}`;
       case 'set_link':
         return `set_link:${String(command.value?.uri || '')}:${String(command.value?.address || '')}`;
       case 'test_link':
@@ -787,6 +795,15 @@ export class CrazyflieSimService {
       const buzzerMatch = /^cf_buzzer_beep\s*\(\s*([0-9]+)\s*,\s*([0-9]+)\s*\)\s*;?$/.exec(line);
       if (buzzerMatch) {
         commands.push({ type: 'buzzer_beep', value: { duration: Number(buzzerMatch[1]), times: Number(buzzerMatch[2]) } });
+        continue;
+      }
+      const soundMatch = /^cf_buzzer_play_sound\s*\(\s*([0-9]+)\s*,\s*([0-9]+)\s*\)\s*;?$/.exec(line);
+      if (soundMatch) {
+        const effect = Number(soundMatch[1]), duration = Number(soundMatch[2]);
+        if (![2, 3, 4, 6, 7].includes(effect) || !Number.isInteger(duration) || duration < 100 || duration > 5000) {
+          throw new Error('Invalid buzzer sound or duration');
+        }
+        commands.push({ type: 'buzzer_play_sound', value: { effect, duration } });
         continue;
       }
       if (/^cf_takeoff\s*\(\s*\)\s*;?$/.test(line)) {

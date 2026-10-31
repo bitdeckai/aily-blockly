@@ -92,14 +92,14 @@ test('toolbox resizing retains all grid columns and keeps the header aligned', (
   }
 });
 
-test('camera-only right pane retains the same columns and width budget when the 3D panel is hidden', () => {
+test('camera previews never allocate a right pane or reduce the workspace width budget', () => {
   const { layout, grid } = layoutHarness(1280);
   layout.showSimPanel = false;
   layout.showCameraPanel = true;
   layout.flushToolboxWidth(420);
-  assert.ok(layout.layoutColumns.includes('minmax(320px, 42%)'));
+  assert.ok(!layout.layoutColumns.includes('minmax(320px, 42%)'));
   assert.equal(grid.get('grid-template-columns'), layout.layoutColumns);
-  assert.ok(layout.toolboxWidth <= 1280 - 1280 * .42 - 240);
+  assert.equal(layout.toolboxWidth, 420);
 });
 
 test('toolbox yields space on narrow viewports without losing the preferred width', () => {

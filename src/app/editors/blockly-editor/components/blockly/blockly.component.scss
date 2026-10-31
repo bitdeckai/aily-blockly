@@ -31,13 +31,6 @@
     overflow: auto;
     background: color-mix(in srgb, var(--aily-bg-primary) 94%, #11161d);
 
-    app-ai-deck-camera {
-         flex: 0 0 auto;
-         max-height: 45%;
-         overflow: auto;
-         padding: 8px;
-    }
-
     app-crazyflie-sim-panel {
          flex: 1 0 360px;
          height: auto;

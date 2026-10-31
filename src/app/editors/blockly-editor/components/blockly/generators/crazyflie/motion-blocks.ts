@@ -121,12 +121,14 @@ export function motionFlowTimeoutMs(code: string): number {
     } else {
       const delay = /^cf_delay\(\s*([0-9.e+-]+)\s*\)/i.exec(line);
       if (delay) duration += Number(delay[1]);
+      const sound = /^cf_buzzer_play_sound\(\s*\d+\s*,\s*(\d+)\s*\)\s*;?$/i.exec(line);
+      if (sound) duration += Number(sound[1]) / 1000;
       const vertical = /^cf_move\(\s*['"](up|down)['"]\s*,\s*([0-9.e+-]+)/i.exec(line);
       if (vertical) height += Number(vertical[2]) * (vertical[1] === 'up' ? 1 : -1);
     }
   }
   // Keep the existing minute for connection/legacy operations, and allow the
-  // new blocking maneuvers plus landing cleanup to complete before IPC timeout.
+  // blocking maneuvers, firmware sounds and landing cleanup to finish before IPC timeout.
   const timeout = 60000 + Math.ceil(duration * 1000);
   if (!Number.isFinite(timeout) || timeout > 2147480000) {
     throw new Error('Crazyflie：流程时长超过进程计时器支持范围');
@@ -169,9 +171,9 @@ export function parseMotionCall(line: string): MotionCommand | null {
   return validateMotionCommand(JSON.parse(match[1]), JSON.parse(match[2]));
 }
 
-export function validateMotionSequence(commands: Array<{ type: string; value?: unknown }>): void {
+export function validateMotionSequence(commands: Array<{ type: string; value?: unknown }>, initiallyFlying = false): void {
   if (!commands.some(command => command.type === 'motion')) return;
-  let flying = false;
+  let flying = initiallyFlying;
   for (const command of commands) {
     const motion = command.type === 'motion' ? command.value as MotionCommand : null;
     const kind = motion?.kind || command.type;

@@ -41,6 +41,9 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'child', 'boards', 'board-cra
 radio.registerCrazyradioBlocks(crazyflieGenerator, true);
 const cameraBlocks = require(path.join(source, 'ai-deck-blocks.ts'));
 cameraBlocks.registerAiDeckCameraBlocks(crazyflieGenerator, true);
+const gestureProtocol = require(path.join(root, 'src', 'app', 'services', 'camera-gesture.ts'));
+const deckBlocks = require(path.join(source, 'deck-blocks.ts'));
+deckBlocks.registerCrazyflieDeckBlocks(crazyflieGenerator, true);
 
 const workspaces = [];
 function workspace(blocks, variables = []) {
@@ -57,6 +60,58 @@ const flight = type => ({ type });
 const chain = (...blocks) => blocks.reduceRight((next, block) =>
   next ? { ...block, next: { block: next } } : block, null);
 const compile = ws => compileCrazyflieFlow(ws, crazyflieGenerator);
+
+test('camera block captions omit the deck brand without changing saved block types', () => {
+  for (const type of ['cf_ai_deck_config', 'cf_ai_deck_open', 'cf_ai_deck_close']) {
+    const block = workspace([{ type }]).getTopBlocks(false)[0];
+    assert.ok(block.toString().startsWith('摄像头 '), block.toString());
+    assert.doesNotMatch(block.toString(), /AI\s*Deck/i);
+    assert.equal(block.type, type);
+  }
+});
+
+test('gesture events compile action snapshots and precise block IDs without executing their bodies', () => {
+  const ws = workspace([
+    chain({ type: 'cf_ai_deck_config', inputs: { ADDRESS: string('192.168.4.1') } },
+      { type: 'cf_ai_deck_open' }, { type: 'cf_camera_gesture_start' }),
+    { type: 'cf_camera_gesture_on', fields: { GESTURE: 'Victory', HOLD: 0.8 },
+      inputs: { DO: { block: print(string('arbitrary action')) } } },
+  ]);
+  const plan = [];
+  const code = compileCrazyflieFlow(ws, crazyflieGenerator, block => plan.push(block));
+  const lines = code.split(/\r?\n/).filter(Boolean);
+  const event = lines.map(gestureProtocol.parseCameraGestureCall).find(command => command?.type === 'on');
+  assert.equal(event.binding.gesture, 'Victory');
+  assert.equal(event.binding.holdSeconds, 0.8);
+  assert.equal(event.binding.code, 'cf_print("arbitrary action")');
+  assert.deepEqual(event.binding.blockIds, [ws.getAllBlocks(false).find(block => block.type === 'text_print').id]);
+  assert.equal(lines.some(line => line.startsWith('cf_print(')), false);
+  assert.deepEqual(plan.map(block => block.type), [
+    'cf_ai_deck_config', 'cf_ai_deck_open', 'cf_camera_gesture_start', 'cf_camera_gesture_on',
+  ]);
+  const restored = workspace([]);
+  Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
+  assert.equal(compile(restored), code);
+  assert.deepEqual(cameraBlocks.createAiDeckCameraToolbox().contents.slice(3).map(block => block.type),
+    ['cf_camera_gesture_on', 'cf_camera_gesture_start', 'cf_camera_gesture_stop']);
+});
+
+test('gesture body variables stay isolated and duplicate/nested gestures are rejected', () => {
+  const assignment = text => ({ type: 'variables_set', fields: { VAR: { id: 'n' } }, inputs: { VALUE: string(text) } });
+  const event = { type: 'cf_camera_gesture_on', fields: { GESTURE: 'Thumb_Up', HOLD: 1 },
+    inputs: { DO: { block: chain(assignment('inside'), print(variable())) } } };
+  const ws = workspace([assignment('outside'), event, flight('cf_takeoff')], [{ name: 'value', id: 'n' }]);
+  assert.throws(() => compile(ws), /ACTIONS_IN_EVENT/);
+  const isolated = workspace([assignment('outside'), event,
+    { type: 'cf_ai_deck_config', inputs: { ADDRESS: variable() } }], [{ name: 'value', id: 'n' }]);
+  const code = compile(isolated);
+  assert.match(code, /cf_ai_deck_config\("outside"\)/);
+  assert.match(code, /inside/);
+  assert.throws(() => compile(workspace([event, event], [{ name: 'value', id: 'n' }])), /DUPLICATE_EVENT/);
+  assert.throws(() => compile(workspace([{
+    ...event, inputs: { DO: { block: { ...event, inputs: {} } } },
+  }], [{ name: 'value', id: 'n' }])), /previous[\r\n ]+connection/);
+});
 
 test('AI Deck generator uses Python precedence without requiring legacy constants on CodeGenerator', () => {
   const { Order } = require('blockly/python');
@@ -92,10 +147,41 @@ test('AI Deck blocks resolve variable addresses and bounded loops, persist and r
   const restored = workspace([]);
   Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
   assert.equal(compile(restored), code);
-  assert.deepEqual(cameraBlocks.createAiDeckCameraToolbox().contents.map(block => block.type),
+  assert.deepEqual(cameraBlocks.createAiDeckCameraToolbox().contents.slice(0, 3).map(block => block.type),
     ['cf_ai_deck_config', 'cf_ai_deck_open', 'cf_ai_deck_close']);
   assert.throws(() => compile(workspace([flight('cf_ai_deck_open')])), /configure/);
   assert.throws(() => compile(workspace([config(string('ftp://camera/stream'))])), /INVALID_ADDRESS/);
+});
+
+test('camera preview width persists in JSON and XML without changing flow code or old saved blocks', () => {
+  const { FieldCameraPreview } = require(path.join(source, '..', '..', 'custom-field', 'field-camera-preview.ts'));
+  const ws = workspace([chain(
+    { type: 'cf_ai_deck_config', inputs: { ADDRESS: string('192.168.4.1') } },
+    { type: 'cf_ai_deck_open' },
+    { type: 'cf_ai_deck_close' },
+  )]);
+  const open = ws.getAllBlocks(false).find(block => block.type === 'cf_ai_deck_open');
+  const field = open.getField('PREVIEW_WIDTH');
+  assert.ok(field instanceof FieldCameraPreview);
+  assert.equal(field.getValue(), 320);
+  const original = compile(ws);
+  field.setValue(560);
+  assert.equal(compile(ws), original);
+  for (const format of ['json', 'xml']) {
+    const restored = workspace([]);
+    if (format === 'json') {
+      Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
+    } else {
+      Blockly.Xml.domToWorkspace(Blockly.Xml.workspaceToDom(ws), restored);
+    }
+    assert.equal(restored.getAllBlocks(false).find(block => block.type === 'cf_ai_deck_open')
+      .getFieldValue('PREVIEW_WIDTH'), 560);
+    assert.equal(compile(restored), original);
+  }
+  field.setValue(2000);
+  assert.equal(field.getValue(), 640);
+  field.setValue(0);
+  assert.equal(field.getValue(), 240);
 });
 
 test('camera-only simulation runs configuration, opening, waiting and closing in order without moving the model or touching radio', async () => {
@@ -144,7 +230,8 @@ test('legacy straight-line flight still generates valid Python', () => {
 
 test('basic example list compiles exact self-test, flight and ground deck plans with deliberate waits', () => {
   assert.deepEqual(CRAZYFLIE_EXAMPLES.map(example => example.id),
-    ['self-test', 'hover', 'back-and-forth', 'square', 'led-colors', 'led-blink', 'buzzer-rhythm', 'range-monitor']);
+    ['self-test', 'hover', 'back-and-forth', 'square', 'led-colors', 'led-blink', 'buzzer-rhythm', 'range-monitor',
+      'camera-preview', 'camera-gestures', 'camera-flight']);
   const expected = {
     'self-test': ['cf_test_link()', 'cf_delay(2)', 'cf_crazyflie_link()', 'cf_delay(2)',
       'cf_test_crazyflie_link()', 'cf_delay(3)'],
@@ -164,7 +251,7 @@ test('basic example list compiles exact self-test, flight and ground deck plans 
       ...Array.from({ length: 3 }, () => ['cf_led_ring_set_color(0, 0, 64)', 'cf_delay(0.5)',
         'cf_led_ring_off()', 'cf_delay(0.5)']).flat()],
     'buzzer-rhythm': ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_detect_buzzer()', 'cf_delay(1)',
-      'cf_buzzer_beep(120, 3)', 'cf_delay(1)', 'cf_buzzer_beep(300, 1)', 'cf_delay(1)'],
+      'cf_buzzer_play_sound(6, 1500)', 'cf_delay(0.5)', 'cf_buzzer_play_sound(4, 800)', 'cf_delay(1)'],
     'range-monitor': ['cf_crazyflie_link()', 'cf_delay(2)', 'cf_detect_multiranger()', 'cf_delay(1)',
       ...Array.from({ length: 5 }, () => ['cf_mr_log_all_distances()', 'cf_delay(1)']).flat()],
   };
@@ -172,13 +259,37 @@ test('basic example list compiles exact self-test, flight and ground deck plans 
   for (const example of CRAZYFLIE_EXAMPLES) {
     const state = createCrazyflieExample(example.id);
     const original = JSON.stringify(state);
-    const ws = workspace([state]);
+    const ws = workspace(state);
     if (example.noticeKey === 'CRAZYFLIE_EXAMPLES.DECK_NOTICE') {
       assert.doesNotMatch(compile(ws), /cf_(?:motion|takeoff|land|move|motor|test_crazyflie_link)\s*\(/,
         'ground examples must not contain flight or motor commands');
     }
-    assert.deepEqual(JSON.parse(JSON.stringify(sim.parseCommands(compile(ws)))),
-      JSON.parse(JSON.stringify(sim.parseCommands(expected[example.id].join('\n')))), example.id);
+    if (example.id === 'camera-preview') {
+      assert.deepEqual(compile(ws).split(/\r?\n/).filter(line => line.trim()),
+        ['cf_ai_deck_config("192.168.4.1")', 'cf_ai_deck_open()']);
+      assert.equal(ws.getTopBlocks(false).length, 1);
+    } else if (example.id === 'camera-gestures' || example.id === 'camera-flight') {
+      const lines = compile(ws).split(/\r?\n/).filter(Boolean);
+      const events = lines.map(gestureProtocol.parseCameraGestureCall).filter(command => command?.type === 'on');
+      assert.deepEqual(lines.filter(line => !line.startsWith('cf_camera_gesture_on')),
+        ['cf_ai_deck_config("192.168.4.1")', 'cf_ai_deck_open()', 'cf_camera_gesture_start()']);
+      assert.deepEqual(events.map(event => event.binding.gesture), ['Open_Palm', 'Closed_Fist']);
+      if (example.id === 'camera-flight') {
+        const expectedActions = ['cf_motion("takeoff", [0.3, 0.2])\ncf_delay(10)\ncf_motion("land", [0.2])', 'cf_motion("land", [0.2])'];
+        for (const [index, event] of events.entries()) {
+          assert.deepEqual(JSON.parse(JSON.stringify(sim.parseCommands(event.binding.code))),
+            JSON.parse(JSON.stringify(sim.parseCommands(expectedActions[index]))));
+        }
+      } else assert.deepEqual(events.map(event => event.binding.code), ['cf_print("Open palm detected")', 'cf_print("Closed fist detected")']);
+      for (const [index, event] of events.entries()) {
+        assert.equal(event.binding.holdSeconds, 1.2);
+        assert.equal(event.binding.blockIds.length, example.id === 'camera-flight' && index === 0 ? 3 : 1);
+      }
+      assert.equal(ws.getTopBlocks(false).length, 3);
+    } else {
+      assert.deepEqual(JSON.parse(JSON.stringify(sim.parseCommands(compile(ws)))),
+        JSON.parse(JSON.stringify(sim.parseCommands(expected[example.id].join('\n')))), example.id);
+    }
     assert.equal(JSON.stringify(state), original, 'loading cannot mutate reusable example data');
     const restored = workspace([]);
     Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
@@ -188,18 +299,48 @@ test('basic example list compiles exact self-test, flight and ground deck plans 
   assert.throws(() => createCrazyflieExample('unknown'), /Unknown Crazyflie example/);
 });
 
+test('all twelve gesture blocks update their illustration and timing caption without changing generated event data', () => {
+  assert.equal(gestureProtocol.CAMERA_GESTURES.length, 12);
+  const ws = workspace([{ type: 'cf_camera_gesture_on' }]);
+  const block = ws.getTopBlocks(false)[0];
+  const images = new Set();
+  for (const gesture of gestureProtocol.CAMERA_GESTURES) {
+    block.setFieldValue(gesture, 'GESTURE');
+    const image = block.getFieldValue('ILLUSTRATION');
+    assert.match(image, /^data:image\/svg\+xml/);
+    images.add(image);
+    assert.match(block.getFieldValue('PREPARATION'), gestureProtocol.isCameraSwipe(gesture) ? /先张手静止/ : /保持/);
+    const state = Blockly.serialization.blocks.save(block);
+    assert.equal(state.fields.GESTURE, gesture);
+    assert.ok(!('ILLUSTRATION' in state.fields));
+    const restored = workspace([state]).getTopBlocks(false)[0];
+    assert.equal(restored.getFieldValue('ILLUSTRATION'), image);
+    assert.equal(gestureProtocol.parseCameraGestureCall(compile(workspace([state]))).binding.gesture, gesture);
+  }
+  assert.equal(images.size, 12);
+});
+
+test('every supported language has all three camera example titles, instructions and notices', () => {
+  for (const language of ['ar', 'de', 'en', 'es', 'fr', 'ja', 'ko', 'pt', 'ru', 'zh_cn', 'zh_hk']) {
+    const labels = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', language, `${language}.json`))).CRAZYFLIE_EXAMPLES;
+    for (const prefix of ['CAMERA_PREVIEW', 'CAMERA_GESTURES', 'CAMERA_FLIGHT']) {
+      for (const suffix of ['', '_DESCRIPTION', '_NOTICE']) assert.ok(labels[prefix + suffix]?.trim(), `${language}: ${prefix}${suffix}`);
+    }
+  }
+});
+
 test('ground deck examples execute offline with bounded actions, visible logs and no pose changes', async () => {
   for (const example of CRAZYFLIE_EXAMPLES.filter(example => example.noticeKey === 'CRAZYFLIE_EXAMPLES.DECK_NOTICE')) {
     const sim = simulator();
     const pose = { ...sim.pose$.value };
     const waits = [];
     sim.waitWithControl = async ms => { waits.push(ms); };
-    const result = await sim.runCode(compile(workspace([createCrazyflieExample(example.id)])));
+    const result = await sim.runCode(compile(workspace(createCrazyflieExample(example.id))));
     assert.equal(result.success, true, `${example.id}: ${result.message}`);
     assert.deepEqual({ ...sim.pose$.value }, pose, example.id);
     assert.ok(waits.every(ms => Number.isFinite(ms) && ms >= 0));
     assert.doesNotMatch(result.executed.join('\n'), /^(?:motion|takeoff|land|move|motor|test_crazyflie_link)(?::|$)/m);
-    const actions = result.executed.filter(command => /^(?:led_ring_|buzzer_beep|mr_log_)/.test(command));
+    const actions = result.executed.filter(command => /^(?:led_ring_|buzzer_|mr_log_)/.test(command));
     switch (example.id) {
       case 'led-colors':
         assert.deepEqual(Array.from(actions), [
@@ -211,7 +352,7 @@ test('ground deck examples execute offline with bounded actions, visible logs an
           Array.from({ length: 3 }, () => ['led_ring_set_color:0:0:64', 'led_ring_off']).flat());
         break;
       case 'buzzer-rhythm':
-        assert.deepEqual(Array.from(actions), ['buzzer_beep:120:3:1', 'buzzer_beep:300:1:1']);
+        assert.deepEqual(Array.from(actions), ['buzzer_play_sound:6:1500:1', 'buzzer_play_sound:4:800:1']);
         break;
       case 'range-monitor':
         assert.equal(actions.length, 5);
@@ -223,6 +364,43 @@ test('ground deck examples execute offline with bounded actions, visible logs an
         assert.fail(`Missing execution assertion for ${example.id}`);
     }
   }
+});
+
+test('named LED colors generate existing RGB commands, localize and survive project reloads', () => {
+  for (const color of deckBlocks.LED_RING_COLORS) {
+    const ws = workspace([{ type: 'cf_led_ring_color', fields: { COLOR: color.value } }]);
+    const code = compile(ws);
+    assert.equal(code.trim(), `cf_led_ring_set_color(${color.rgb.join(', ')})`);
+    assert.ok(ws.getTopBlocks(false)[0].toString().includes(color.zh));
+    const restored = workspace([]);
+    Blockly.serialization.workspaces.load(Blockly.serialization.workspaces.save(ws), restored);
+    assert.equal(compile(restored), code);
+  }
+  deckBlocks.registerCrazyflieDeckBlocks(crazyflieGenerator, false);
+  try {
+    assert.match(workspace([{ type: 'cf_led_ring_color', fields: { COLOR: 'purple' } }]).getTopBlocks(false)[0].toString(),
+      /Purple/);
+  } finally { deckBlocks.registerCrazyflieDeckBlocks(crazyflieGenerator, true); }
+});
+
+test('refreshing an old deck toolbox adds presets exactly once without removing or mutating old blocks', () => {
+  const old = { kind: 'category', name: 'Crazyflie', contents: [
+    { kind: 'category', name: 'LED Ring', contents: [
+      { kind: 'block', type: 'cf_led_ring_set_color' }, { kind: 'block', type: 'cf_led_ring_off' },
+    ] },
+    { kind: 'category', name: 'Buzzer', contents: [{ kind: 'block', type: 'cf_buzzer_beep' }] },
+  ] };
+  const original = JSON.stringify(old);
+  const updated = deckBlocks.mergeCrazyflieDeckToolbox(old);
+  assert.equal(JSON.stringify(old), original);
+  assert.deepEqual(updated.contents[0].contents.map(block => block.type),
+    ['cf_led_ring_set_color', 'cf_led_ring_color', 'cf_led_ring_off']);
+  assert.deepEqual(updated.contents[1].contents.map(block => block.type), ['cf_buzzer_beep', 'cf_buzzer_play_sound']);
+  assert.deepEqual(deckBlocks.mergeCrazyflieDeckToolbox(updated), updated);
+});
+
+test('firmware sound waits add their full duration to the real flow timeout', () => {
+  assert.equal(motionFlowTimeoutMs(Array(20).fill('cf_buzzer_play_sound(6, 5000)').join('\n')), 160000);
 });
 
 test('all Settings languages include example names, instructions and explicit motor warnings', () => {

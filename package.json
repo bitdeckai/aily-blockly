@@ -34,6 +34,7 @@
     "files": [
       "!**/*",
       "package.json",
+      "LICENSE",
       {
         "from": "electron",
         "to": "electron",
@@ -55,7 +56,13 @@
     "extraResources": [
       {
         "from": "child/scripts",
-        "to": "child/scripts"
+        "to": "child/scripts",
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
+      },
+      {
+        "from": "child/boards/board-crazyflie",
+        "to": "child/boards/board-crazyflie",
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
       },
       {
         "from": "public/robotstem.ico",
@@ -69,7 +76,7 @@
     "win": {
       "executableName": "RobotSTEM",
       "target": "nsis",
-      "sign": false,
+      "sign": null,
       "signAndEditExecutable": true,
       "artifactName": "RobotSTEM-${version}.${ext}",
       "icon": "public/robotstem.ico",
@@ -90,7 +97,9 @@
       ]
     },
     "mac": {
-      "icon": "public/robotstem.ico",
+      "icon": "public/robotstem.png",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "artifactName": "RobotSTEM-macos-${version}-${arch}.${ext}",
       "fileAssociations": [
         {
@@ -138,12 +147,13 @@
     "start": "ng serve",
     "watch": "ng build --watch --configuration development",
     "electron": "concurrently \"npm start\" \"wait-on tcp:4200 && electron ./electron/main.js --serve\"",
-    "build": "ng build --base-href ./ && electron-builder build",
-    "build:cn": "node ./scripts/build-electron.js --flavor cn",
-    "build:global": "node ./scripts/build-electron.js --flavor global",
+    "build": "node ./scripts/build-electron.js --legacy-output",
+    "build:cn": "node ./scripts/build-electron.js --flavor cn --legacy-output",
+    "build:global": "node ./scripts/build-electron.js --flavor global --legacy-output",
+    "build:desktop": "node ./scripts/build-electron.js",
+    "package:all": "node ./scripts/build-electron.js --all",
     "sdf:to-glb": "node ./scripts/sdf-to-glb.js",
-    "build:mac": "ng build --base-href ./ && electron-builder --mac --arm64 --x64",
-    "build:mac:universal": "ng build --base-href ./ && electron-builder --mac --universal"
+    "build:mac": "node ./scripts/build-electron.js --platform macos --legacy-output"
   },
   "private": true,
   "dependencies": {
@@ -161,6 +171,7 @@
     "@blockly/workspace-minimap": "^0.2.16",
     "@ctrl/tinycolor": "^4.1.0",
     "@lydell/node-pty": "^1.1.0",
+    "@mediapipe/tasks-vision": "1.2.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@ngx-translate/core": "^16.0.3",
     "@orama/orama": "^3.1.18",
@@ -210,6 +221,7 @@
     "zone.js": "~0.15.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "3.6.1",
     "@angular-devkit/build-angular": "^19.0.0",
     "@angular/cli": "^19.0.0",
     "@angular/compiler-cli": "^19.0.0",

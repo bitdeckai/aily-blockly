@@ -250,8 +250,8 @@ test('mapping controls and limitations are localized for every Settings language
   assert.match(html, /\(click\)="resetDronePose\(\)">复位<\/button>\s*<button[^>]*\(click\)="mappingExpanded = !mappingExpanded"/);
   const mainHtml = fs.readFileSync(path.join(root, 'src', 'app', 'editors', 'blockly-editor',
     'components', 'blockly', 'blockly.component.html'), 'utf8');
-  assert.match(mainHtml, /@if \(showSimPanel \|\| showCameraPanel\)/);
-  assert.match(mainHtml, /@if \(showCameraPanel\)[\s\S]*<app-ai-deck-camera/);
+  assert.match(mainHtml, /@if \(showSimPanel\)/);
+  assert.doesNotMatch(mainHtml, /showCameraPanel|app-ai-deck-camera/);
   assert.match(html, /<app-crazyflie-occupancy-map[^>]*\*ngIf="mapping2dShown"/);
   assert.match(html, /\[class\.sim-view-hidden\]="mapping2dShown"/);
   assert.match(html, /mappingView = '2d'/);

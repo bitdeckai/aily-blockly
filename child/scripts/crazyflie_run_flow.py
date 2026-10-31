@@ -269,6 +269,13 @@ def parse_commands(code: str):
         if m:
             return ("buzzer_beep", {"duration": int(m.group(1)), "times": int(m.group(2))})
 
+        m = re.match(r"^cf_buzzer_play_sound\s*\(\s*([0-9]+)\s*,\s*([0-9]+)\s*\)\s*;?$", line)
+        if m:
+            effect, duration = int(m.group(1)), int(m.group(2))
+            if effect not in (2, 3, 4, 6, 7) or not 100 <= duration <= 5000:
+                raise ValueError("Invalid buzzer sound or duration")
+            return ("buzzer_play_sound", {"effect": effect, "duration": duration})
+
         if re.match(r"^cf_takeoff\s*\(\s*\)\s*;?$", line):
             return ("takeoff", None)
         if re.match(r"^cf_land\s*\(\s*\)\s*;?$", line):
@@ -435,6 +442,7 @@ def parse_commands(code: str):
         r"cf_led_ring_set_effect\s*\(\s*[0-9]+\s*\)",
         r"cf_led_ring_set_color\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*\)",
         r"cf_buzzer_beep\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*\)",
+        r"cf_buzzer_play_sound\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*\)",
         r"cf_motor_ramp_test\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]*\.?[0-9]+\s*\)",
         r"cf_spin_motors\s*\(\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]+\s*,\s*[0-9]*\.?[0-9]+\s*\)",
         r"cf_move\s*\(\s*['\"](?:forward|back|left|right|up|down)['\"]\s*(?:,\s*[0-9]*\.?[0-9]+\s*)?\)",
@@ -899,6 +907,15 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             time.sleep(0.05)
         return success
 
+    def buzzer_play_sound(scf, effect: int, duration_ms: int, ensure_link_ok) -> None:
+        if effect not in (2, 3, 4, 6, 7) or not 100 <= duration_ms <= 5000:
+            raise ValueError("Invalid buzzer sound or duration")
+        try:
+            scf.cf.param.set_value("sound.effect", str(effect))
+            interruptible_sleep(duration_ms / 1000.0, ensure_link_ok)
+        finally:
+            scf.cf.param.set_value("sound.effect", "0")
+
     def spin_motors(scf, m1: int, m2: int, m3: int, m4: int, secs: float):
         # Use official ramp-test style setpoint control instead of direct per-motor params.
         start_thrust = max(1000, min(60000, int(m1)))
@@ -949,7 +966,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
     has_flow_detect_cmd = contains_command(commands, {"detect_flow_v2"})
     has_mr_cmd = contains_command(commands, {"detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle"})
     has_led_cmd = contains_command(commands, {"detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off"})
-    has_buzzer_cmd = contains_command(commands, {"detect_buzzer", "buzzer_beep"})
+    has_buzzer_cmd = contains_command(commands, {"detect_buzzer", "buzzer_beep", "buzzer_play_sound"})
     has_motor_cmd = contains_command(commands, {"spin_motors"})
     has_test_link_cmd = contains_command(commands, {"test_link"})
     has_test_cf_link_cmd = contains_command(commands, {"test_crazyflie_link"})
@@ -961,7 +978,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
         "detect_flow_v2",
         "detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle",
         "detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off",
-        "detect_buzzer", "buzzer_beep",
+        "detect_buzzer", "buzzer_beep", "buzzer_play_sound",
         "spin_motors",
     })
 
@@ -1133,7 +1150,7 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
             "detect_flow_v2",
             "detect_multiranger", "mr_log_distance", "mr_log_all_distances", "if_mr_obstacle",
             "detect_led_ring", "led_ring_set_color", "led_ring_set_effect", "led_ring_off",
-            "detect_buzzer", "buzzer_beep",
+            "detect_buzzer", "buzzer_beep", "buzzer_play_sound",
             "spin_motors",
         } and not link_gate_open:
             raise RuntimeError(f"CRAZYFLIE_LINK_REQUIRED: Run 'Crazyflie link' block before {cmd_name}")
@@ -1412,6 +1429,12 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
                     ok = buzzer_beep(scf, duration, times)
                     executed.append(f"buzzer_beep:{duration}:{times}:{'1' if ok else '0'}")
                     print(f"buzzer_beep_ok={ok}", flush=True)
+                elif cmd == "buzzer_play_sound":
+                    require_link_gate("buzzer_play_sound")
+                    step_index += 1
+                    _emit_step(step_index, total_steps, "buzzer_play_sound")
+                    buzzer_play_sound(scf, arg["effect"], arg["duration"], ensure_running)
+                    executed.append(f"buzzer_play_sound:{arg['effect']}:{arg['duration']}:1")
                 elif cmd == "spin_motors":
                     require_link_gate("spin_motors")
                     step_index += 1
@@ -1490,6 +1513,11 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
                             ok = buzzer_beep(scf, duration, times)
                             executed.append(f"buzzer_beep:{duration}:{times}:{'1' if ok else '0'}")
                             print(f"buzzer_beep_ok={ok}", flush=True)
+                        elif child_cmd == "buzzer_play_sound":
+                            step_index += 1
+                            _emit_step(step_index, total_steps, "buzzer_play_sound")
+                            buzzer_play_sound(scf, child_arg["effect"], child_arg["duration"], ensure_running)
+                            executed.append(f"buzzer_play_sound:{child_arg['effect']}:{child_arg['duration']}:1")
                         elif child_cmd == "spin_motors":
                             step_index += 1
                             _emit_step(step_index, total_steps, _step_label(child_cmd, child_arg))
@@ -1936,6 +1964,11 @@ def run_flow(uri: str, commands, address_hex: str | None, attitude=False, follow
                         times = int((arg or {}).get("times", 1))
                         ok = buzzer_beep(scf, duration, times)
                         executed.append(f"buzzer_beep:{duration}:{times}:{'1' if ok else '0'}")
+                        ensure_link_ok()
+                    elif cmd == "buzzer_play_sound":
+                        require_link_gate("buzzer_play_sound")
+                        buzzer_play_sound(scf, arg["effect"], arg["duration"], ensure_link_ok)
+                        executed.append(f"buzzer_play_sound:{arg['effect']}:{arg['duration']}:1")
                         ensure_link_ok()
             ensure_link_ok()
     except Exception as exc:

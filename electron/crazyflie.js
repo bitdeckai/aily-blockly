@@ -33,7 +33,7 @@ function fileExists(filePath) {
 function getPythonCandidates() {
   const localAppData = process.env.LOCALAPPDATA || "";
   const userProfile = process.env.USERPROFILE || "";
-  const candidates = [
+  const candidates = process.platform === "win32" ? [
     process.env.PYTHON,
     path.join(process.env.SystemRoot || "C:\\Windows", "py.exe"),
     path.join(localAppData, "Programs", "Python", "Python310", "python.exe"),
@@ -43,13 +43,13 @@ function getPythonCandidates() {
     path.join(userProfile, "AppData", "Local", "Programs", "Python", "Python311", "python.exe"),
     "py",
     "python",
-  ];
+  ] : [process.env.PYTHON, "python3", "python"];
 
   const deduped = [];
   const seen = new Set();
   for (const item of candidates) {
     if (!item) continue;
-    const key = String(item).toLowerCase();
+    const key = process.platform === "win32" ? String(item).toLowerCase() : String(item);
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(item);
@@ -57,7 +57,7 @@ function getPythonCandidates() {
 
   return deduped.filter((item) => {
     const text = String(item);
-    if (text === "py" || text === "python") {
+    if (text === "py" || text === "python" || text === "python3") {
       return true;
     }
     return fileExists(text);

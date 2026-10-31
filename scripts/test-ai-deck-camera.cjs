@@ -11,7 +11,7 @@ const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'com
 const loadData = require('./helpers/load-crazyflie-data.cjs');
 const cameraProtocol = loadData(path.join(root, 'src', 'app', 'services', 'ai-deck-camera.ts'));
 function harness() {
-  const timers = new Map(), warnings = [], addresses = [];
+  const timers = new Map(), warnings = [];
   let next = 0;
   const exports = {};
   const schedule = callback => { timers.set(++next, callback); return next; };
@@ -23,10 +23,15 @@ function harness() {
     clearInterval: id => timers.delete(id), clearTimeout: id => timers.delete(id),
     require: name => name === '@angular/core' ? {
       Component: () => value => value, Input: () => () => {}, Output: () => () => {},
-      ViewChild: () => () => {}, EventEmitter: class { emit(value) { addresses.push(value); } },
+      inject: () => ({ markForCheck() {} }),
+      ViewChild: () => () => {}, EventEmitter: class {
+        values = [];
+        emit(value) { this.values.push(value); }
+      },
     } : name.endsWith('/ai-deck-camera') ? cameraProtocol : {},
   });
-  return { ...exports, timers, warnings, addresses, camera: new exports.AiDeckCameraComponent() };
+  const camera = new exports.AiDeckCameraComponent();
+  return { ...exports, timers, warnings, addresses: camera.addressChange.values, camera };
 }
 
 test('AI Deck accepts IPs, ports and explicit HTTP streams without navigation, unsafe protocols or embedded credentials', () => {
@@ -97,6 +102,9 @@ test('AI Deck messages exist in every supported language and embedding does not 
   for (const { code } of languages) {
     const labels = JSON.parse(fs.readFileSync(path.join(root, 'public', 'i18n', code, `${code}.json`), 'utf8')).AI_DECK_CAMERA;
     for (const key of Object.keys(reference)) assert.ok(labels?.[key]?.trim(), `${code}: ${key}`);
+    assert.doesNotMatch(labels.TITLE, /AI\s*Deck/i);
+    if (code === 'zh_cn') assert.equal(labels.TITLE, '摄像头');
+    if (code === 'en') assert.equal(labels.TITLE, 'Camera');
   }
   const source = fs.readFileSync(filename, 'utf8');
   assert.doesNotMatch(source, /iframe|bypassSecurity|setMapping|runCode|commander/);

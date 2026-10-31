@@ -1,4 +1,4 @@
-import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, ViewChild, effect } from '@angular/core';
+import { AfterViewInit, ApplicationRef, ChangeDetectorRef, Component, ElementRef, EnvironmentInjector, EventEmitter, Injector, Input, OnChanges, OnDestroy, OnInit, Output, ViewChild, createComponent, effect } from '@angular/core';
 import * as Blockly from 'blockly';
 import { Subject, combineLatest } from 'rxjs';
 
@@ -99,7 +99,9 @@ import { CodeViewerIpcService } from '../../services/code-viewer-ipc.service';
 import { CrazyflieSimService } from '../../../../services/crazyflie-sim.service';
 import { CrazyflieSimPanelComponent } from './components/crazyflie-sim-panel/crazyflie-sim-panel.component';
 import { AiDeckCameraComponent } from './components/ai-deck-camera/ai-deck-camera.component';
+import { AiDeckCameraWorkspace } from './components/ai-deck-camera/ai-deck-camera-workspace';
 import { AiDeckCameraService } from '../../../../services/ai-deck-camera.service';
+import { CameraGestureService } from '../../../../services/camera-gesture.service';
 import { crazyflieGenerator } from './generators/crazyflie/basic-blocks';
 
 // 全局关闭 Blockly 文本输入字段的拼写检查，避免 block 内 input 出现红色波浪线
@@ -232,7 +234,6 @@ class ExternalToolboxDeleteArea extends Blockly.DeleteArea {
     BlocklyToolboxPaneComponent,
     BlocklyWorkspacePagesComponent,
     CrazyflieSimPanelComponent,
-    AiDeckCameraComponent,
   ],
   templateUrl: './blockly.component.html',
   styleUrl: './blockly.component.scss',
@@ -252,7 +253,7 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   private workspaceResizeAnimationFrame: number | null = null;
   private isToolboxResizing = false;
   showSimPanel = false;
-  showCameraPanel = false;
+  private cameraWorkspace: AiDeckCameraWorkspace | null = null;
 
   @Input() devmode;
   @Input() isCrazyflieProject = false;
@@ -373,7 +374,7 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   get layoutColumns(): string {
-    return this.showSimPanel || this.showCameraPanel
+    return this.showSimPanel
       ? `${this.toolboxWidth}px minmax(240px, 1fr) minmax(320px, 42%)`
       : `${this.toolboxWidth}px minmax(240px, 1fr)`;
   }
@@ -396,6 +397,10 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     private crazyflieSimService: CrazyflieSimService,
     private uiService: UiService,
     readonly aiDeckCamera: AiDeckCameraService,
+    private applicationRef: ApplicationRef,
+    private environmentInjector: EnvironmentInjector,
+    private injector: Injector,
+    private cameraGesture: CameraGestureService,
   ) {
     // Initialize GlobalServiceManager with BitmapUploadService
     const globalServiceManager = GlobalServiceManager.getInstance();
@@ -431,13 +436,6 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
         if (this.workspace) {
           setTimeout(() => this.workspace?.resize(), 0);
         }
-        this.cdr.markForCheck();
-      });
-    this.aiDeckCamera.visible$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(visible => {
-        this.showCameraPanel = visible;
-        if (this.workspace) setTimeout(() => this.workspace?.resize(), 0);
         this.cdr.markForCheck();
       });
   }
@@ -485,7 +483,9 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   ngOnDestroy(): void {
+    this.cameraGesture.clearProgram();
     this.aiDeckCamera.hidePanel();
+    this.cameraWorkspace?.dispose();
     this.removeFlyoutPinControl();
     this.unregisterExternalToolboxDeleteArea();
     this.cancelToolboxResizeAnimationFrame();
@@ -597,7 +597,7 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
 
   private clampToolboxWidth(width: number): number {
     const available = this.layoutElementRef?.nativeElement.clientWidth;
-    const simulator = (this.showSimPanel || this.showCameraPanel) && available ? Math.max(320, available * 0.42) : 0;
+    const simulator = this.showSimPanel && available ? Math.max(320, available * 0.42) : 0;
     const maximum = available
       ? Math.max(this.toolboxMinWidth, Math.min(this.toolboxMaxWidth, Math.floor(available - simulator - 240)))
       : this.toolboxMaxWidth;
@@ -757,6 +757,17 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
 
       applyWindowsBlocklyScrollbarThickness(this.platformService.isWindows());
       this.workspace = Blockly.inject(this.workspacePaneComponent.blocklyHostElement, this.options);
+      this.cameraWorkspace = new AiDeckCameraWorkspace(this.workspace, this.aiDeckCamera, element => {
+        const view = createComponent(AiDeckCameraComponent, {
+          hostElement: element, environmentInjector: this.environmentInjector, elementInjector: this.injector,
+        });
+        this.applicationRef.attachView(view.hostView);
+        view.onDestroy(() => this.applicationRef.detachView(view.hostView));
+        return view;
+      }, key => this.noticeService.update({
+        title: this.translateService.instant('AI_DECK_CAMERA.TITLE'),
+        text: this.translateService.instant(key), state: 'error',
+      }));
       this.workspacePaneComponent.blocklyHostElement.addEventListener('pointerdown', this.onWorkspacePointerDownBound, true);
       this.workspace.updateToolbox(this.toolbox);
       this.registerExternalToolboxDeleteArea();

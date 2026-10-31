@@ -1,4 +1,5 @@
 name: CI & CD Pipeline
+run-name: ${{ inputs.installers_only && format('RobotSTEM installers {0}', inputs.request_id) || github.event.head_commit.message || 'CI & CD Pipeline' }}
 
 on:
   push:
@@ -6,10 +7,31 @@ on:
       - deploy
       - beta
   workflow_dispatch:
+    inputs:
+      installers_only:
+        description: Build native installers only, without signing, release or deployment
+        type: boolean
+        default: false
+      flavor:
+        description: Installer flavor
+        type: choice
+        options: [cn, global]
+        default: cn
+      request_id:
+        description: Unique installer build request
+        type: string
+        default: manual
 
 jobs:
+  desktop-installers:
+    if: github.event_name == 'workflow_dispatch' && inputs.installers_only
+    uses: ./.github/workflows/desktop-installers.yml
+    with:
+      flavor: ${{ inputs.flavor }}
+      request_id: ${{ inputs.request_id }}
   # 任务 1：Windows 国际版客户端构建
   build-windows:
+    if: github.event_name != 'workflow_dispatch' || !inputs.installers_only
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,6 +164,7 @@ jobs:
 
   # 任务 1b：Windows 国内版客户端构建
   build-windows-cn:
+    if: github.event_name != 'workflow_dispatch' || !inputs.installers_only
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -259,6 +282,7 @@ jobs:
   
   # 任务 2：macOS 客户端构建
   build-macos:
+    if: github.event_name != 'workflow_dispatch' || !inputs.installers_only
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -274,6 +298,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          brew install sevenzip ripgrep ninja
           npm install -g @angular/cli
           npm ci --include=dev
           cd electron && npm ci --include=dev --force
@@ -360,6 +385,7 @@ jobs:
 
   # 任务 2b：macOS 国内版客户端构建
   build-macos-cn:
+    if: github.event_name != 'workflow_dispatch' || !inputs.installers_only
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -375,6 +401,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          brew install sevenzip ripgrep ninja
           npm install -g @angular/cli
           npm ci --include=dev
           cd electron && npm ci --include=dev --force

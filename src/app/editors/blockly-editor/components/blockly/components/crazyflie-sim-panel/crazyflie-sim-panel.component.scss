@@ -282,7 +282,11 @@
 .sim-example-menu {
   box-sizing: border-box;
   width: min(360px, calc(100vw - 24px));
-  max-height: calc(100vh - 100px);
+  max-height: min(560px, calc(100dvh - 160px));
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #78828f var(--aily-bg-secondary);
+  overscroll-behavior: contain;
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--aily-border-primary);

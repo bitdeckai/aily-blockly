@@ -101,6 +101,8 @@ Connect Crazyradio, configure a compatible USB driver, and check the aircraft UR
 | `npm run start` | Start the Angular frontend only. |
 | `npm run ng -- build --configuration development` | Build the frontend without starting Electron or making an installer. |
 | `npm run build` | Build the production frontend and package the desktop application. |
+| `npm run build:desktop` | Build and smoke-test the current OS/CPU installer in `dist/installers/`. |
+| `npm run package:all` | Build Windows, Linux and Intel/Apple Silicon macOS on native GitHub runners, wait and download installers; requires committed, pushed source and authenticated `gh`. No release or deployment. |
 
 For the full regression suite, Python 3 must also be available. In PowerShell:
 

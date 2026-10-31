@@ -21,11 +21,14 @@ import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
 import { CrazyflieTelemetryService } from '../../../services/crazyflie-telemetry.service';
 import { CrazyflieConnectionService } from '../../../services/crazyflie-connection.service';
 import { compileCrazyflieFlow } from '../components/blockly/generators/crazyflie/compile-flow';
-import type { Block } from 'blockly';
+import type { Block, BlockSvg } from 'blockly';
 import { motionBlocks, motionFlowTimeoutMs } from '../components/blockly/generators/crazyflie/motion-blocks';
 import { getAttitudeApi } from '../../../services/crazyflie-attitude';
 import { isAiDeckCameraOnlyFlow, parseAiDeckCameraEvent, validateAiDeckCameraSequence } from '../../../services/ai-deck-camera';
 import { AiDeckCameraService } from '../../../services/ai-deck-camera.service';
+import { CameraGestureService } from '../../../services/camera-gesture.service';
+import { CameraGestureBinding, isCameraGestureProgram } from '../../../services/camera-gesture';
+import { CrazyflieRuntimePolicy } from '../../../services/crazyflie-runtime.service';
 
 @Injectable()
 export class _UploaderService {
@@ -34,6 +37,9 @@ export class _UploaderService {
   private crazyflieFlowActive = false;
   private crazyflieCancelRequested = false;
   private crazyflieCancelError: string | null = null;
+  private gestureActionPolicy: CrazyflieRuntimePolicy | null = null;
+  private gestureActionCancelled = false;
+  private gestureActionLocal = false;
 
   constructor(
     private projectService: ProjectService,
@@ -55,7 +61,90 @@ export class _UploaderService {
     private crazyflieTelemetryService: CrazyflieTelemetryService,
     private crazyflieConnectionService: CrazyflieConnectionService,
     private aiDeckCamera: AiDeckCameraService,
-  ) { }
+    private cameraGesture: CameraGestureService,
+  ) {
+    cameraGesture.setExecutor({
+      run: (binding, policy) => this.runGestureAction(binding, policy),
+      cancel: policy => this.cancelGestureAction(policy),
+      interrupt: async (binding, policy) => {
+        const lines = binding.code.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (!lines.length || !lines.every(line => /^(?:cf_land\s*\(\s*\)|cf_motion\(\s*"land"\s*,\s*\[\s*\]\s*\))\s*;?$/.test(line))) return false;
+        await this.cancelGestureAction(policy);
+        return true;
+      },
+    });
+  }
+
+  private async runGestureAction(binding: CameraGestureBinding, policy: CrazyflieRuntimePolicy): Promise<void> {
+    if (!binding.code.trim()) return;
+    if (this.gestureActionPolicy || this.crazyflieFlowActive || this.crazyflieSimService.running$.value) {
+      throw new Error('CAMERA_GESTURE.BUSY');
+    }
+    const selected = binding.blockIds.map(id => this.blocklyService.workspace.getBlockById(id));
+    if (selected.some(block => !block)) throw new Error('CAMERA_GESTURE.RUN_PROGRAM');
+    const blocks = selected.filter((block): block is BlockSvg => !!block);
+    this.gestureActionPolicy = policy;
+    this.gestureActionCancelled = false;
+    this.gestureActionLocal = policy === 'sim-only' || isAiDeckCameraOnlyFlow(binding.code);
+    try {
+      if (this.gestureActionLocal) {
+        const subscription = this.crazyflieSimService.step$.subscribe(step => {
+          if (step) this.highlightCrazyflieBlock(blocks[step.current - 1]);
+        });
+        try {
+          const result = await this.crazyflieSimService.runCode(binding.code, true);
+          if (this.gestureActionCancelled) {
+            if (this.crazyflieSimService.relativeAltitudeCm > 1) {
+              const landing = await this.crazyflieSimService.runCode('cf_land()', true);
+              if (!landing.success) throw new Error(landing.message);
+            }
+          } else if (!result.success) throw new Error(result.message);
+        } finally { subscription.unsubscribe(); this.clearBlocklySelection(); }
+      } else {
+        if (!this.cameraGesture.realAllowed(policy)) throw new Error('CAMERA_GESTURE.AUTHORIZATION_REQUIRED');
+        const result = await this.uploadCrazyflieFlow(binding.code, blocks, policy === 'sim-real', true);
+        if (!this.gestureActionCancelled && result.state === 'error') throw new Error(result.text || 'CAMERA_GESTURE.ACTION_FAILED');
+      }
+    } finally { this.gestureActionPolicy = null; this.gestureActionCancelled = false; }
+  }
+
+  private async cancelGestureAction(policy: CrazyflieRuntimePolicy): Promise<void> {
+    if (this.gestureActionPolicy !== policy) return;
+    if (this.gestureActionCancelled) return;
+    this.gestureActionCancelled = true;
+    if (this.gestureActionLocal) { this.crazyflieSimService.cancelRun(); return; }
+    if (!this.crazyflieFlowActive) return;
+    try {
+      const api = window['crazyflie'];
+      if (typeof api?.cancelFlow !== 'function') throw new Error('CAMERA_GESTURE.RESTART_DESKTOP');
+      const result = await api.cancelFlow();
+      if (!result.success) throw new Error(result.message || 'CAMERA_GESTURE.ACTION_FAILED');
+    } catch (error) {
+      this.gestureActionCancelled = false;
+      throw error;
+    }
+  }
+
+  private async runGestureProgram(code: string, blocks: Block[] = []): Promise<ActionState> {
+    const title = this.translate.instant('CAMERA_GESTURE.TITLE');
+    try {
+      this.noticeService.update({ title, text: this.translate.instant('CAMERA_GESTURE.LOADING'), state: 'doing',
+        stop: () => {
+          this.cameraGesture.cancelProgram();
+          void this.cameraGesture.stop().catch(error => this.noticeService.update({
+            title, text: this.translate.instant(error instanceof Error ? error.message : String(error)), state: 'error',
+          }));
+        } });
+      await this.cameraGesture.runProgram(code, index => this.highlightCrazyflieBlock(blocks[index]));
+      this.noticeService.update({ title, text: this.translate.instant('CAMERA_GESTURE.PROGRAM_READY'), state: 'done' });
+      return { state: 'done', text: this.translate.instant('CAMERA_GESTURE.PROGRAM_READY') };
+    } catch (error) {
+      const text = this.translate.instant(error instanceof Error ? error.message : String(error));
+      this.noticeService.update({ title, text, state: 'error' });
+      this.cameraGesture.clearProgram();
+      return { state: 'error', text };
+    } finally { this.clearBlocklySelection(); }
+  }
 
   uploadInProgress = false;
   private streamId: string | null = null;
@@ -204,10 +293,11 @@ export class _UploaderService {
     this._builderService.isUploading = false;
   }
 
-  private async uploadCrazyflieFlow(crazyflieCode: string, plannedBlocks?: Block[], followPosition = false): Promise<ActionState> {
+  private async uploadCrazyflieFlow(crazyflieCode: string, plannedBlocks?: Block[], followPosition = false, gestureEvent = false): Promise<ActionState> {
+    if (isCameraGestureProgram(crazyflieCode)) return this.runGestureProgram(crazyflieCode, plannedBlocks);
     validateAiDeckCameraSequence(crazyflieCode);
     const cameraOnly = isAiDeckCameraOnlyFlow(crazyflieCode);
-    const title = cameraOnly ? 'AI Deck 摄像头' : followPosition ? 'Crazyflie 模拟+真机' : 'Crazyflie 真机流程';
+    const title = cameraOnly ? '摄像头' : followPosition ? 'Crazyflie 模拟+真机' : 'Crazyflie 真机流程';
     const poseApi = followPosition && !cameraOnly ? getAttitudeApi() : undefined;
     const validationError = this.crazyflieFlowActive || this.crazyflieSimService.running$.value
       ? '已有运行中的流程，请先结束当前流程'
@@ -259,11 +349,11 @@ export class _UploaderService {
     }
 
     if (/cf_ai_deck_/.test(crazyflieCode) && typeof api.onFlowLog !== 'function') {
-      const text = '未找到 AI Deck 程序事件接口，请重启应用';
+      const text = '未找到摄像头程序事件接口，请重启应用';
       this.noticeService.update({ title, text, state: 'error' });
       return { state: 'error', text };
     }
-    const hasRunFlowCmd = /cf_ai_deck_/.test(crazyflieCode) || /cf_set_link\s*\(|cf_test_link\s*\(|cf_scan_links\s*\(|cf_motion\s*\(|cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_beep\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
+    const hasRunFlowCmd = /cf_ai_deck_/.test(crazyflieCode) || /cf_set_link\s*\(|cf_test_link\s*\(|cf_scan_links\s*\(|cf_motion\s*\(|cf_takeoff\s*\(|cf_land\s*\(|cf_motor_ramp_test\s*\(|cf_move\s*\(|cf_delay\s*\(|cf_print\s*\(|cf_detect_flow_v2\s*\(|cf_detect_multiranger\s*\(|cf_mr_log_distance\s*\(|cf_mr_log_all_distances\s*\(|cf_detect_led_ring\s*\(|cf_led_ring_set_color\s*\(|cf_led_ring_set_effect\s*\(|cf_led_ring_off\s*\(|cf_detect_buzzer\s*\(|cf_buzzer_(?:beep|play_sound)\s*\(|cf_crazyflie_link\s*\(|cf_test_crazyflie_link\s*\(/.test(crazyflieCode || '');
     const connectionOptions = this.resolveCrazyflieConnectionOptions(crazyflieCode);
     const executionBlocks = hasRunFlowCmd ? (plannedBlocks || this.getCrazyflieExecutionBlocksInOrder()) : [];
     let currentTelemetry: any = null;
@@ -381,6 +471,9 @@ export class _UploaderService {
             this.cancel();
           }
         }));
+      }
+      if (gestureEvent && (this.gestureActionCancelled || !this.gestureActionPolicy || !this.cameraGesture.realAllowed(this.gestureActionPolicy))) {
+        throw new Error('CAMERA_GESTURE.AUTHORIZATION_REQUIRED');
       }
       result = hasRunFlowCmd
         ? await api.runFlow({ code: crazyflieCode, timeoutMs, ...connectionOptions, followPosition })
@@ -513,10 +606,12 @@ export class _UploaderService {
       'cf_mr_log_all_distances',
       'cf_detect_led_ring',
       'cf_led_ring_set_color',
+      'cf_led_ring_color',
       'cf_led_ring_set_effect',
       'cf_led_ring_off',
       'cf_detect_buzzer',
       'cf_buzzer_beep',
+      'cf_buzzer_play_sound',
       'cf_move_forward',
       'cf_move_back',
       'cf_move_left',
@@ -541,6 +636,7 @@ export class _UploaderService {
   }
 
   private clearBlocklySelection(): void {
+    this.aiDeckCamera.previewBlockId = null;
     const workspace: any = this.blocklyService.workspace;
     if (this.crazyflieHighlightedSvgGroup && this.crazyflieHighlightedSvgGroup.classList) {
       this.crazyflieHighlightedSvgGroup.classList.remove('cf-step-outline-highlight');
@@ -555,6 +651,7 @@ export class _UploaderService {
   }
 
   private highlightCrazyflieBlock(block: any): void {
+    this.aiDeckCamera.previewBlockId = block?.type === 'cf_ai_deck_open' ? block.id : null;
     const workspace: any = this.blocklyService.workspace;
     if (!workspace || !block) {
       return;
@@ -640,6 +737,7 @@ export class _UploaderService {
     if (!('code' in preparedFlow)) return preparedFlow;
     const crazyflieCode = preparedFlow.code;
     const executionBlocks = preparedFlow.executionBlocks;
+    if (isCameraGestureProgram(crazyflieCode)) return this.runGestureProgram(crazyflieCode, executionBlocks);
 
     this.noticeService.update({
       title,
@@ -1597,6 +1695,16 @@ export class _UploaderService {
 * 取消当前上传过程
 */
   cancel() {
+    const phase = this.aiDeckCamera?.gestureState$.value.phase;
+    if (this.gestureActionPolicy || this.cameraGesture?.programRunning || phase === 'loading' || phase === 'running') {
+      const gestureOwned = !!this.gestureActionPolicy || this.cameraGesture.programRunning;
+      this.cameraGesture.cancelProgram();
+      void this.cameraGesture.stop().catch(error => this.noticeService.update({
+        title: this.translate.instant('CAMERA_GESTURE.TITLE'),
+        text: this.translate.instant(error instanceof Error ? error.message : String(error)), state: 'error',
+      }));
+      if (gestureOwned) return;
+    }
     if (this.crazyflieFlowActive) {
       if (this.crazyflieCancelRequested) return;
       this.crazyflieCancelRequested = true;

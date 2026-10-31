@@ -909,7 +909,7 @@ function loadEnv() {
   const childPath = serve
     ? path.join(__dirname, "..", "child")
     : path.join(process.resourcesPath, "child");
-  const nodePath = path.join(childPath, isDarwin ? "node/bin" : "node");
+  const nodePath = path.join(childPath, "node", ...(isWin32 ? [] : ["bin"]));
 
   // 只保留PowerShell路径，移除其他系统PATH
   let customPath = nodePath + path.delimiter + childPath;
@@ -934,18 +934,18 @@ function loadEnv() {
       }
     });
   }
-  if (isDarwin) {
+  if (!isWin32) {
     const systemPaths = [
       '/bin',
-      '/usr/bin'
+      '/usr/bin',
+      '/usr/local/bin',
+      ...(isDarwin ? ['/opt/homebrew/bin'] : [])
     ];
     systemPaths.forEach(sysPath => {
       if (fs.existsSync(sysPath)) {
         customPath += path.delimiter + sysPath;
       }
     });
-  } else if (isLinux) {
-    customPath += path.delimiter + '/bin';
   }
 
   // 完全替换PATH
@@ -966,7 +966,7 @@ function loadEnv() {
     process.env.AILY_BUILDER_BUILD_PATH = path.join(os.homedir(), "Library", "aily-builder", "project");
   } else {
     // 设置Linux的环境变量
-    process.env.AILY_APPDATA_PATH = conf["appdata_path"]["linux"];
+    process.env.AILY_APPDATA_PATH = conf["appdata_path"]["linux"].replace(/^~(?=\/|$)/, os.homedir());
     process.env.AILY_BUILDER_BUILD_PATH = path.join(os.homedir(), ".cache", "aily-builder", "project");
   }
 
@@ -1484,6 +1484,7 @@ function createWindow() {
   registerNotificationHandlers(mainWindow);
   registerProbeRsHandlers(mainWindow);
   registerCrazyflieHandlers();
+  require("./camera-preview").registerCameraPreviewHandlers(ipcMain);
   registerBleHandlers();
 
   // 检查是否有待处理的OAuth回调

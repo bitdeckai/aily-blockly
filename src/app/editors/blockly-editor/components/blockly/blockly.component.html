@@ -29,17 +29,9 @@
                (pageReopened)="onPageReopened($event)"></app-blockly-workspace-pages>
      </div>
 
-     @if (showSimPanel || showCameraPanel) {
+     @if (showSimPanel) {
      <div class="simulator-pane">
-          @if (showCameraPanel) {
-          <app-ai-deck-camera [address]="aiDeckCamera.address$.value"
-               [command]="aiDeckCamera.command$ | async"
-               (addressChange)="aiDeckCamera.address$.next($event)"
-               (closed)="aiDeckCamera.hidePanel()"></app-ai-deck-camera>
-          }
-          @if (showSimPanel) {
           <app-crazyflie-sim-panel></app-crazyflie-sim-panel>
-          }
      </div>
      }
 </div>

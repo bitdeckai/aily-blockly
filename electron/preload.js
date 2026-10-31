@@ -10,6 +10,11 @@ const { tmpdir } = require("os");
 const pt = process.platform === "win32" ? "\\" : "/"
 
 contextBridge.exposeInMainWorld("electronAPI", {
+  cameraPreview: {
+    start: address => ipcRenderer.invoke("camera-preview-start", address),
+    stop: url => ipcRenderer.invoke("camera-preview-stop", url),
+    status: url => ipcRenderer.invoke("camera-preview-status", url),
+  },
   ipcRenderer: {
     send: (channel, data) => ipcRenderer.send(channel, data),
     on: (channel, callback) => ipcRenderer.on(channel, callback),

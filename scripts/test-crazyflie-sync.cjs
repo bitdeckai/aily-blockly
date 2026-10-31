@@ -25,6 +25,7 @@ function load(filename) {
     require: name => {
       if (name === '@angular/core') return {
         Injectable: () => type => type, Component: () => type => type,
+        inject: () => ({ instant: key => key }),
         HostListener: () => () => {}, ViewChild: () => () => {},
         HostBinding: () => () => {}, Output: () => () => {}, EventEmitter: class { emit() {} },
         ChangeDetectionStrategy: { OnPush: 0 },
@@ -35,8 +36,11 @@ function load(filename) {
       if (name.endsWith('/crazyflie-exploration')) return load(path.join(services, 'crazyflie-exploration.ts'));
       if (name.endsWith('/crazyflie-geography')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'crazyflie-geography.ts'));
       if (name.endsWith('/motion-blocks')) return load(path.join(generators, 'motion-blocks.ts'));
+      if (name.endsWith('/deck-blocks')) return load(path.join(generators, 'deck-blocks.ts'));
       if (name.endsWith('/radio-blocks')) return load(path.join(generators, 'radio-blocks.ts'));
       if (name.endsWith('/ai-deck-camera')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'ai-deck-camera.ts'));
+      if (name.endsWith('/camera-gesture')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'camera-gesture.ts'));
+      if (name.endsWith('/gesture-illustrations')) return load(path.join(generators, 'gesture-illustrations.ts'));
       if (name.endsWith('/ai-deck-blocks')) return load(path.join(generators, 'ai-deck-blocks.ts'));
       if (name.endsWith('/basic-blocks')) return load(path.join(generators, 'basic-blocks.ts'));
       return {};
@@ -58,6 +62,135 @@ const sample = (timestampMs, extra = {}) => ({
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
 const plain = value => JSON.parse(JSON.stringify(value));
 const simulator = () => new CrazyflieSimService({ setDeckDetected() {} }, new AiDeckCameraService());
+
+function gestureUploader() {
+  const h = { runs: [], selected: [], authorized: false, interrupted: 0, stops: 0, programCancels: 0 };
+  const common = {
+    instant: key => key, setExecutor: executor => { h.executor = executor; },
+    workspace: { getBlockById: id => id === 'missing' ? null : { id } },
+    running$: { value: false }, step$: new (require('rxjs').Subject)(),
+    gestureState$: { value: { phase: 'idle' } }, relativeAltitudeCm: 0,
+    realAllowed: () => h.authorized,
+    cancelProgram: () => h.programCancels++,
+    stop: async () => { h.stops++; },
+    runCode: async (code, preservePose) => { h.runs.push({ code, preservePose }); return { success: true }; },
+  };
+  h.uploader = new _UploaderService(...Array(_UploaderService.length).fill(common));
+  h.uploader.highlightCrazyflieBlock = block => h.selected.push(block?.id);
+  h.uploader.clearBlocklySelection = () => {};
+  return h;
+}
+
+test('gesture action routing preserves block indices, skips empty events and never sends unauthorized real actions', async () => {
+  const h = gestureUploader();
+  await h.executor.run({ code: '', blockIds: [] }, 'sim-only');
+  assert.equal(h.runs.length, 0);
+  await assert.rejects(h.executor.run({ code: 'cf_print("safe")', blockIds: ['missing', 'exists'] }, 'sim-only'), /RUN_PROGRAM/);
+  assert.equal(h.runs.length, 0);
+  await h.executor.run({ code: 'cf_print("safe")', blockIds: ['exists'] }, 'sim-only');
+  assert.equal(h.runs[0].preservePose, true);
+  let realSent = 0;
+  h.uploader.uploadCrazyflieFlow = async () => { realSent++; return { state: 'done', text: '' }; };
+  await assert.rejects(h.executor.run({ code: 'cf_buzzer_beep(300,1)', blockIds: ['exists'] }, 'real-only'), /AUTHORIZATION_REQUIRED/);
+  assert.equal(realSent, 0);
+  h.authorized = true;
+  await h.executor.run({ code: 'cf_buzzer_beep(300,1)', blockIds: ['exists'] }, 'real-only');
+  assert.equal(realSent, 1);
+});
+
+test('only complete landing commands interrupt a gesture action, never trailing or invalid commands', async () => {
+  const h = gestureUploader();
+  h.uploader.cancelGestureAction = async () => { h.interrupted++; };
+  for (const code of ['cf_land(); cf_takeoff(0.3)', 'cf_motion("land", [1])', 'cf_land();\ncf_print("other")']) {
+    assert.equal(await h.executor.interrupt({ code }, 'sim-only'), false);
+  }
+  assert.equal(h.interrupted, 0);
+  assert.equal(await h.executor.interrupt({ code: 'cf_land()\ncf_motion("land", [])' }, 'sim-only'), true);
+  assert.equal(h.interrupted, 1);
+});
+
+test('the existing cancel entry point stops a gesture-owned action through the gesture executor', () => {
+  const h = gestureUploader();
+  h.uploader.gestureActionPolicy = 'sim-only';
+  h.uploader.cancel();
+  assert.equal(h.stops, 1);
+  assert.equal(h.programCancels, 1);
+});
+
+test('gesture cancellation failure is explicit and retryable without cancelling an unrelated flow', async () => {
+  const h = gestureUploader(), previous = bridgeWindow.crazyflie;
+  let requests = 0;
+  bridgeWindow.crazyflie = { cancelFlow: async () => ({ success: ++requests > 1, message: 'cancel rejected' }) };
+  try {
+    h.uploader.crazyflieFlowActive = true;
+    await h.executor.cancel('real-only');
+    assert.equal(requests, 0);
+    h.uploader.gestureActionPolicy = 'real-only';
+    h.uploader.gestureActionLocal = false;
+    await assert.rejects(h.executor.cancel('real-only'), /cancel rejected/);
+    assert.equal(h.uploader.gestureActionCancelled, false);
+    await h.executor.cancel('real-only');
+    assert.equal(requests, 2);
+    assert.equal(h.uploader.gestureActionCancelled, true);
+  } finally { bridgeWindow.crazyflie = previous; }
+});
+
+test('simulator gesture actions preserve pose while ordinary runs still reset pose', async () => {
+  const sim = simulator();
+  sim.pose$.next({ ...sim.pose$.value, x: 2, y: 1, z: 0.3, yaw: 45 });
+  const pose = plain(sim.pose$.value);
+  assert.equal((await sim.runCode('cf_print("keep pose")', true)).success, true);
+  assert.deepEqual(plain(sim.pose$.value), pose);
+  assert.equal((await sim.runCode('cf_print("normal run")')).success, true);
+  assert.notDeepEqual(plain(sim.pose$.value), pose);
+  assert.doesNotThrow(() => motion.validateMotionSequence([{ type: 'motion', value: { kind: 'land', values: [] } }], true));
+});
+
+test('detected decks without an optional shell asset never access an undefined loaded root', () => {
+  const { CrazyflieSimPanelComponent } = load(path.join(root, 'src', 'app', 'editors', 'blockly-editor',
+    'components', 'blockly', 'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.ts'));
+  const THREE = require('three');
+  const panel = Object.create(CrazyflieSimPanelComponent.prototype);
+  const loads = [], disposed = [];
+  Object.assign(panel, {
+    deckShellAssets: {}, deckShellRoots: new Map(), deckLoadTokens: new Map(),
+    deckMountGroup: new THREE.Group(), droneGroup: null,
+    deckLabels: { buzzer: '蜂鸣器', 'flow-v2': '光流定位', multiranger: '测距避障', 'led-ring': 'LED 灯环' },
+    loadDetectedDeckShell: (...args) => loads.push(args),
+    disposeObject3D: object => disposed.push(object),
+  });
+  panel.updateDetectedDeckShells(['buzzer']);
+  assert.deepEqual(Array.from(panel.detectedDeckLabels), ['蜂鸣器']);
+  assert.equal(loads.length, 0, 'a missing optional model does not start a fake load');
+  panel.updateDetectedDeckShells(['buzzer', 'flow-v2', 'multiranger', 'led-ring']);
+  assert.equal(loads.length, 0);
+  const shell = new THREE.Group();
+  panel.deckShellAssets.buzzer = 'buzzer.glb';
+  panel.deckShellRoots.set('buzzer', { root: shell, url: 'buzzer.glb' });
+  panel.updateDetectedDeckShells(['buzzer']);
+  assert.equal(shell.parent, panel.deckMountGroup);
+  assert.equal(loads.length, 0, 'an existing matching shell is reattached, not reloaded');
+  panel.deckShellAssets.buzzer = 'replacement.glb';
+  panel.updateDetectedDeckShells(['buzzer']);
+  assert.deepEqual(loads, [['buzzer', 'replacement.glb']]);
+  panel.updateDetectedDeckShells([]);
+  assert.equal(shell.parent, null);
+  assert.deepEqual(disposed, [shell]);
+});
+
+test('execution highlighting explicitly routes camera previews without changing Blockly selection', () => {
+  const camera = new AiDeckCameraService();
+  const uploader = Object.create(_UploaderService.prototype);
+  uploader.aiDeckCamera = camera;
+  uploader.blocklyService = { workspace: {} };
+  uploader.highlightCrazyflieBlock({ type: 'cf_ai_deck_open', id: 'open-two' });
+  assert.equal(camera.previewBlockId, 'open-two');
+  uploader.highlightCrazyflieBlock({ type: 'cf_delay', id: 'wait' });
+  assert.equal(camera.previewBlockId, null);
+  uploader.highlightCrazyflieBlock({ type: 'cf_ai_deck_open', id: 'open-one' });
+  uploader.clearBlocklySelection();
+  assert.equal(camera.previewBlockId, null);
+});
 
 test('exactly three modes cycle without a sequential simulation gate', () => {
   const runtime = new CrazyflieRuntimeService();

@@ -1,0 +1,77 @@
+name: RobotSTEM Desktop Installers
+run-name: RobotSTEM installers ${{ inputs.request_id }}
+
+on:
+  workflow_call:
+    inputs:
+      flavor:
+        type: string
+        default: cn
+      request_id:
+        type: string
+        default: manual
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: Build flavor
+        type: choice
+        options: [cn, global]
+        default: cn
+      request_id:
+        description: Unique build request (filled by package:all)
+        type: string
+        default: manual
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, platform: windows, arch: x64 }
+          - { os: ubuntu-24.04, platform: linux, arch: x64 }
+          - { os: macos-15, platform: macos, arch: arm64 }
+          - { os: macos-15-intel, platform: macos, arch: x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      NPM_CONFIG_ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+      NPM_CONFIG_ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            electron/package-lock.json
+      - name: Install application dependencies
+        run: |
+          npm ci --include=dev --electron_mirror=${{ env.NPM_CONFIG_ELECTRON_MIRROR }}
+          npm ci --prefix electron --include=dev --electron_mirror=${{ env.NPM_CONFIG_ELECTRON_MIRROR }}
+      - name: Install Linux runtime tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y 7zip ripgrep ninja-build libgtk-3-0 libnss3 libgbm1 libasound2t64
+      - name: Install macOS runtime tools
+        if: runner.os == 'macOS'
+        run: brew install sevenzip ripgrep ninja
+      - name: Build and smoke-test native installer
+        run: npm --electron_builder_binaries_mirror=${{ env.NPM_CONFIG_ELECTRON_BUILDER_BINARIES_MIRROR }} run build:desktop -- --flavor ${{ inputs.flavor }} --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RobotSTEM-${{ matrix.platform }}-${{ matrix.arch }}-${{ inputs.flavor }}
+          path: |
+            dist/installers/${{ matrix.platform }}-${{ matrix.arch }}/${{ inputs.flavor }}/*.exe
+            dist/installers/${{ matrix.platform }}-${{ matrix.arch }}/${{ inputs.flavor }}/*.AppImage
+            dist/installers/${{ matrix.platform }}-${{ matrix.arch }}/${{ inputs.flavor }}/*.deb
+            dist/installers/${{ matrix.platform }}-${{ matrix.arch }}/${{ inputs.flavor }}/*.dmg
+            dist/installers/${{ matrix.platform }}-${{ matrix.arch }}/${{ inputs.flavor }}/*.zip
+          if-no-files-found: error

@@ -30,7 +30,9 @@ function loadGenerator(name) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(generatorDir, name), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText, { exports, require });
+  }).outputText, { exports, require: module => module.startsWith('.')
+    ? require('./helpers/load-crazyflie-data.cjs')(path.resolve(generatorDir, `${module}.ts`))
+    : require(module) });
   return exports;
 }
 const examples = loadGenerator('examples.ts');
@@ -1253,6 +1255,8 @@ function registerExampleBlocks() {
   Blockly.defineBlocksWithJsonArray(JSON.parse(fs.readFileSync(path.join(root, 'child', 'boards',
     'board-crazyflie', 'template', 'node_modules', '@aily-project', 'lib-crazyflie-motion', 'block.json'), 'utf8')));
   loadGenerator('motion-blocks.ts').registerCrazyflieMotionBlocks(basic.crazyflieGenerator, true);
+  loadGenerator('deck-blocks.ts').registerCrazyflieDeckBlocks(basic.crazyflieGenerator, true);
+  loadGenerator('ai-deck-blocks.ts').registerAiDeckCameraBlocks(basic.crazyflieGenerator, true);
 }
 
 test('example selection preserves the old page, adds rendered-ready blocks and never runs or connects', () => {
@@ -1262,6 +1266,9 @@ test('example selection preserves the old page, adds rendered-ready blocks and n
   const { panel, messages, sim, connection } = panelHarness();
   const savedPages = [];
   workspace.centerOnBlock = id => assert.ok(workspace.getBlockById(id));
+  let fitted = 0;
+  let expectedFits = 0;
+  workspace.zoomToFit = () => { fitted++; };
   sim.runCode = () => assert.fail('selecting an example must not run it');
   connection.connect = () => assert.fail('selecting an example must not connect to hardware');
   Blockly.serialization.blocks.append({ type: 'math_number', id: 'existing', fields: { NUM: 42 } }, workspace);
@@ -1279,8 +1286,12 @@ test('example selection preserves the old page, adds rendered-ready blocks and n
       assert.equal(Blockly.Events.getGroup(), 'outer-example-group');
       assert.equal(savedPages.length, examples.CRAZYFLIE_EXAMPLES.indexOf(example) + 1, JSON.stringify(messages));
       assert.equal(savedPages.at(-1).title, example.titleKey);
-      assert.equal(workspace.getTopBlocks(false).length, 1);
-      assert.ok(workspace.getAllBlocks(false).some(block => block.type === 'cf_core_delay'));
+      assert.equal(workspace.getTopBlocks(false).length, ['camera-gestures', 'camera-flight'].includes(example.id) ? 3 : 1);
+      if (['camera-gestures', 'camera-flight'].includes(example.id)) {
+        assert.ok(workspace.getAllBlocks(false).some(block => block.type === 'cf_camera_gesture_start'));
+        assert.equal(fitted, ++expectedFits);
+      } else if (example.id === 'camera-preview') assert.ok(workspace.getAllBlocks(false).some(block => block.type === 'cf_ai_deck_open'));
+      else assert.ok(workspace.getAllBlocks(false).some(block => block.type === 'cf_core_delay'));
     }
     assert.equal(savedPages.length, examples.CRAZYFLIE_EXAMPLES.length);
     assert.equal(savedPages[0].state.blocks.blocks[0].id, 'existing');

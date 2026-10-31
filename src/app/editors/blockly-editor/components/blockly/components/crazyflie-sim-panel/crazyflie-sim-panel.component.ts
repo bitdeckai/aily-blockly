@@ -646,10 +646,10 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       if (!example) throw new Error(`Unknown Crazyflie example: ${id}`);
       const workspace = this.blocklyService.workspace;
       if (!workspace) throw new Error('Blockly workspace is not available');
-      const state = createCrazyflieExample(id);
+      const states = createCrazyflieExample(id, !!this.translate.currentLang?.toLowerCase().startsWith('zh'));
       const validationWorkspace = new Blockly.Workspace();
       try {
-        Blockly.serialization.blocks.append(state, validationWorkspace);
+        states.forEach(state => Blockly.serialization.blocks.append(state, validationWorkspace));
       } finally {
         validationWorkspace.dispose();
       }
@@ -657,8 +657,9 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
       const previousGroup = Blockly.Events.getGroup();
       Blockly.Events.setGroup(true);
       try {
-        const block = Blockly.serialization.blocks.append(state, workspace, { recordUndo: true });
-        workspace.centerOnBlock(block.id);
+        const blocks = states.map(state => Blockly.serialization.blocks.append(state, workspace, { recordUndo: true }));
+        if (blocks.length > 1) workspace.zoomToFit();
+        else workspace.centerOnBlock(blocks[0].id);
       } finally {
         Blockly.Events.setGroup(previousGroup);
       }
@@ -1098,7 +1099,7 @@ export class CrazyflieSimPanelComponent implements OnInit, AfterViewInit, OnDest
     decks.forEach((deck) => {
       const url = this.deckShellAssets[deck];
       const loaded = this.deckShellRoots.get(deck);
-      if (loaded?.url === url) {
+      if (loaded && loaded.url === url) {
         if (loaded.root.parent !== this.deckMountGroup) {
           this.deckMountGroup.add(loaded.root);
         }

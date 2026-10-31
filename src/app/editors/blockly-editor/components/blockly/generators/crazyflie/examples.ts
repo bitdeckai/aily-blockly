@@ -9,16 +9,20 @@ export const CRAZYFLIE_EXAMPLES = [
   { id: 'led-blink', titleKey: 'CRAZYFLIE_EXAMPLES.LED_BLINK', descriptionKey: 'CRAZYFLIE_EXAMPLES.LED_BLINK_DESCRIPTION', noticeKey: 'CRAZYFLIE_EXAMPLES.DECK_NOTICE' },
   { id: 'buzzer-rhythm', titleKey: 'CRAZYFLIE_EXAMPLES.BUZZER_RHYTHM', descriptionKey: 'CRAZYFLIE_EXAMPLES.BUZZER_RHYTHM_DESCRIPTION', noticeKey: 'CRAZYFLIE_EXAMPLES.DECK_NOTICE' },
   { id: 'range-monitor', titleKey: 'CRAZYFLIE_EXAMPLES.RANGE_MONITOR', descriptionKey: 'CRAZYFLIE_EXAMPLES.RANGE_MONITOR_DESCRIPTION', noticeKey: 'CRAZYFLIE_EXAMPLES.DECK_NOTICE' },
+  { id: 'camera-preview', titleKey: 'CRAZYFLIE_EXAMPLES.CAMERA_PREVIEW', descriptionKey: 'CRAZYFLIE_EXAMPLES.CAMERA_PREVIEW_DESCRIPTION', noticeKey: 'CRAZYFLIE_EXAMPLES.CAMERA_PREVIEW_NOTICE' },
+  { id: 'camera-gestures', titleKey: 'CRAZYFLIE_EXAMPLES.CAMERA_GESTURES', descriptionKey: 'CRAZYFLIE_EXAMPLES.CAMERA_GESTURES_DESCRIPTION', noticeKey: 'CRAZYFLIE_EXAMPLES.CAMERA_GESTURES_NOTICE' },
+  { id: 'camera-flight', titleKey: 'CRAZYFLIE_EXAMPLES.CAMERA_FLIGHT', descriptionKey: 'CRAZYFLIE_EXAMPLES.CAMERA_FLIGHT_DESCRIPTION', noticeKey: 'CRAZYFLIE_EXAMPLES.CAMERA_FLIGHT_NOTICE' },
 ] as const;
 
 export type CrazyflieExampleId = typeof CRAZYFLIE_EXAMPLES[number]['id'];
 
-export function createCrazyflieExample(id: CrazyflieExampleId): Blockly.serialization.blocks.State {
+export function createCrazyflieExample(id: CrazyflieExampleId, chinese = false): Blockly.serialization.blocks.State[] {
   type State = Blockly.serialization.blocks.State;
   const number = (value: number) => ({ shadow: { type: 'math_number', fields: { NUM: value } } });
   const sequence = ([first, ...rest]: [State, ...State[]]): State => {
     let tail = first;
     for (const block of rest) {
+      while (tail.next?.block) tail = tail.next.block;
       tail.next = { block };
       tail = block;
     }
@@ -38,6 +42,10 @@ export function createCrazyflieExample(id: CrazyflieExampleId): Blockly.serializ
     type: 'cf_move_at_speed', fields: { DIRECTION: direction },
     inputs: { DISTANCE: number(0.3), SPEED: number(0.2) },
   });
+  const camera: State = sequence([
+    { type: 'cf_ai_deck_config', inputs: { ADDRESS: { shadow: { type: 'text', fields: { TEXT: '192.168.4.1' } } } } },
+    { type: 'cf_ai_deck_open', fields: { PREVIEW_WIDTH: 320 } },
+  ]);
   let blocks: [State, ...State[]];
   switch (id) {
     case 'self-test':
@@ -64,18 +72,38 @@ export function createCrazyflieExample(id: CrazyflieExampleId): Blockly.serializ
       break;
     case 'buzzer-rhythm':
       blocks = [link, wait(2), { type: 'cf_detect_buzzer' }, wait(1),
-        { type: 'cf_buzzer_beep', fields: { DURATION: 120, TIMES: 3 } }, wait(1),
-        { type: 'cf_buzzer_beep', fields: { DURATION: 300, TIMES: 1 } }, wait(1)];
+        { type: 'cf_buzzer_play_sound', fields: { SOUND: '6', DURATION: 1500 } }, wait(0.5),
+        { type: 'cf_buzzer_play_sound', fields: { SOUND: '4', DURATION: 800 } }, wait(1)];
       break;
     case 'range-monitor':
       blocks = [link, wait(2), { type: 'cf_detect_multiranger' }, wait(1),
         repeat(5, [{ type: 'cf_mr_log_all_distances' }, wait(1)])];
       break;
+    case 'camera-preview':
+      camera.x = 80;
+      camera.y = 80;
+      return [camera];
+    case 'camera-gestures':
+    case 'camera-flight':
+      return [{
+        ...sequence([camera, { type: 'cf_camera_gesture_start' }]), x: 80, y: 80,
+      }, ...(['Open_Palm', 'Closed_Fist'] as const).map((gesture, index): State => ({
+        type: 'cf_camera_gesture_on', x: 500, y: 80 + index * 200,
+        fields: { GESTURE: gesture, HOLD: 1.2 },
+        inputs: { DO: { block: id === 'camera-flight' ? (index === 0 ? sequence([takeoff, wait(10), land]) : {
+          type: 'cf_land_at_speed', inputs: { SPEED: number(0.2) },
+        }) : {
+          type: 'text_print', inputs: { TEXT: { shadow: { type: 'text', fields: {
+            TEXT: chinese ? (index === 0 ? '识别到张开手掌' : '识别到握拳')
+              : (index === 0 ? 'Open palm detected' : 'Closed fist detected'),
+          } } } },
+        } } },
+      }))];
     default:
       throw new Error(`Unknown Crazyflie example: ${id}`);
   }
   const first = sequence(blocks);
   first.x = 80;
   first.y = 80;
-  return first;
+  return [first];
 }

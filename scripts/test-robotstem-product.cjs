@@ -380,24 +380,32 @@ test('Electron rejects update checks, downloads and installation before configur
   assert.ok(statuses.every(status => status.status === 'error'));
 });
 
-test('both packaging flavors keep regional metadata but never inject an upstream publish URL', () => {
+test('both packaging flavors keep regional metadata but never inject an upstream publish URL', async () => {
   for (const flavor of ['cn', 'global']) {
     const invocations = [];
-    vm.runInNewContext(read('scripts/build-electron.js'), {
-      __dirname, console: quiet,
-      process: { argv: ['node', 'build-electron.js', '--flavor', flavor], env: {}, execPath: 'node',
-        exit(code) { throw new Error(`Build exited: ${code}`); } },
-      require: name => name === 'path' ? path : {
-        spawnSync: (_command, args, options) => { invocations.push({ args, options }); return { status: 0 }; },
+    let packaged;
+    await vm.runInNewContext(`${read('scripts/build-electron.js')}\nmain(['--flavor', ${JSON.stringify(flavor)}]);`, {
+      __dirname: path.join(root, 'scripts'), console: quiet, module: { exports: {} },
+      process: { platform: 'win32', arch: 'x64', env: {}, execPath: 'node' },
+      require: name => {
+        if (name === 'node:child_process') return {
+          spawnSync: (_command, args, options) => { invocations.push({ args, options }); return { status: 0 }; },
+        };
+        if (name === '@electron/rebuild') return { rebuild: async () => {} };
+        if (name === 'electron-builder') return {
+          Arch: { x64: 0 }, Platform: { WINDOWS: { createTarget: () => new Map() } },
+          build: async options => { packaged = options; return ['RobotSTEM.exe']; },
+        };
+        return require(name);
       },
     });
-    assert.equal(invocations.length, 2);
-    const { args, options } = invocations[1];
-    assert.ok(args.includes('never'));
-    assert.ok(args.includes(`-c.extraMetadata.ailyBuildFlavor=${flavor}`));
-    assert.ok(args.some(arg => arg.startsWith('-c.win.artifactName=RobotSTEM')));
-    assert.ok(!args.some(arg => /publish.url|aily-blockly-CN|provider=generic/.test(arg)));
-    assert.equal(options.env.AILY_BUILD_FLAVOR, flavor);
+    assert.equal(invocations.length, 1);
+    assert.equal(invocations[0].options.env.AILY_BUILD_FLAVOR, flavor);
+    assert.equal(packaged.publish, 'never');
+    assert.equal(packaged.config.extraMetadata.ailyBuildFlavor, flavor);
+    assert.ok(packaged.config.win.artifactName.startsWith('RobotSTEM'));
+    assert.equal(packaged.config.publish, undefined);
+    assert.equal(require(path.join(root, 'package.json')).build.publish, null);
   }
 });
 

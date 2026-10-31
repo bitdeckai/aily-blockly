@@ -101,6 +101,8 @@ py -3 -c "import cflib; print(cflib.__file__)"
 | `npm run start` | 仅启动 Angular 前端。 |
 | `npm run ng -- build --configuration development` | 构建前端，不启动 Electron，也不生成安装包。 |
 | `npm run build` | 构建生产版前端并制作桌面安装包。 |
+| `npm run build:desktop` | 构建并检查当前系统及 CPU 的安装包，输出到 `dist/installers/`。 |
+| `npm run package:all` | 通过原生 GitHub runner 一键构建 Windows、Linux、Mac Intel/Apple Silicon，等待并下载安装包；需先提交、推送并登录 `gh`，不发布或部署。 |
 
 完整回归另需可用的 Python 3。在 PowerShell 中执行：
 

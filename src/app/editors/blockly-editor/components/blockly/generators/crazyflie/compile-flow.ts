@@ -4,6 +4,7 @@ import { emitMotionCommand, motionBlockCommand, motionBlocks, parseMotionCall, v
 import { validateRadioScanCode } from './radio-blocks';
 import { emitAiDeckCameraConfig } from './ai-deck-blocks';
 import { validateAiDeckCameraSequence } from '../../../../../../services/ai-deck-camera';
+import { validateCameraGestureProgram } from '../../../../../../services/camera-gesture';
 
 type Value = number | string | boolean | null;
 type Flow = 'break' | 'continue' | undefined;
@@ -18,15 +19,22 @@ export function compileCrazyflieFlow(
   if (!workspace.getAllBlocks(false).some(block =>
     crazyflieBasicBlockTypes.includes(block.type) || block.type === 'cf_core_delay'
       || block.type.startsWith('cf_ai_deck_')
+      || block.type.startsWith('cf_camera_gesture_')
       || motionBlocks.some(spec => spec.type === block.type))) {
     const code = generator.workspaceToCode(workspace);
     validateRadioScanCode(code);
     validateAiDeckCameraSequence(code);
+    validateCameraGestureProgram(code);
     return code;
   }
 
   const variables = new Map<string, Value>();
   const output: string[] = [];
+  let eventBlockIds: string[] | null = null;
+  const recordCommand = (block: Blockly.Block) => {
+    if (eventBlockIds) eventBlockIds.push(block.id);
+    else onCommand?.(block);
+  };
   let remaining = 10000;
   const tick = () => {
     if (--remaining < 0) {
@@ -164,7 +172,23 @@ export function compileCrazyflieFlow(
           const address = input(block, 'ADDRESS', '');
           if (typeof address !== 'string') return fail(block);
           output.push(emitAiDeckCameraConfig(address));
-          onCommand?.(block);
+          recordCommand(block);
+          break;
+        }
+        case 'cf_camera_gesture_on': {
+          if (eventBlockIds || inLoop) throw new Error('CAMERA_GESTURE.INVALID_PROGRAM');
+          const start = output.length;
+          const savedVariables = new Map(variables);
+          eventBlockIds = [];
+          run(block.getInputTargetBlock('DO'));
+          const code = output.splice(start).join('\n');
+          const blockIds = eventBlockIds;
+          eventBlockIds = null;
+          variables.clear();
+          savedVariables.forEach((value, key) => variables.set(key, value));
+          const binding = { gesture: block.getFieldValue('GESTURE'), holdSeconds: Number(block.getFieldValue('HOLD')), code, blockIds };
+          output.push(`cf_camera_gesture_on(${JSON.stringify(binding)})`);
+          recordCommand(block);
           break;
         }
         case 'variables_set':
@@ -223,28 +247,28 @@ export function compileCrazyflieFlow(
           const seconds = numeric(input(block, 'SECONDS'));
           if (seconds < 0) throw new Error('Crazyflie：等待秒数不能小于 0');
           output.push(`cf_delay(${seconds.toFixed(6)})`);
-          onCommand?.(block);
+          recordCommand(block);
           break;
         }
         case 'text_print':
           output.push(`cf_print(${JSON.stringify(text(input(block, 'TEXT', '')))})`);
-          onCommand?.(block);
+          recordCommand(block);
           break;
         case 'cf_print':
           output.push(`cf_print(${JSON.stringify(text(input(block, 'VALUE', '')))})`);
-          onCommand?.(block);
+          recordCommand(block);
           break;
         default:
           if (motionBlocks.some(spec => spec.type === block.type)) {
             output.push(emitMotionCommand(motionBlockCommand(block, (name, fallback) => numeric(input(block, name, fallback)))));
-            onCommand?.(block);
+            recordCommand(block);
           } else if (block.outputConnection) {
             evaluate(block);
           } else if (block.type.startsWith('cf_')) {
             const code = generator.blockToCode(block, true);
             if (typeof code !== 'string') return fail(block);
             output.push(code);
-            onCommand?.(block);
+            recordCommand(block);
           } else {
             fail(block);
           }
@@ -261,6 +285,7 @@ export function compileCrazyflieFlow(
     const code = output.join('\n');
     validateRadioScanCode(code);
     validateAiDeckCameraSequence(code);
+    validateCameraGestureProgram(code);
     validateMotionSequence(code.split(/\r?\n/).map(line => {
       const motion = parseMotionCall(line);
       if (motion) return { type: 'motion', value: motion };

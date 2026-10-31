@@ -1,12 +1,20 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { AiDeckCameraCommand, aiDeckStreamUrl } from './ai-deck-camera';
+import type { CameraFrameSource, CameraGesture, CameraGestureState } from './camera-gesture';
 
 @Injectable({ providedIn: 'root' })
 export class AiDeckCameraService {
   readonly visible$ = new BehaviorSubject(false);
   readonly address$ = new BehaviorSubject('');
   readonly command$ = new BehaviorSubject<AiDeckCameraCommand | null>(null);
+  previewBlockId: string | null = null;
+  frameSource: CameraFrameSource | null = null;
+  readonly gesture$ = new Subject<{ gesture: CameraGesture; heldSeconds: number; timestamp: number }>();
+  readonly gestureState$ = new BehaviorSubject<CameraGestureState>({
+    phase: 'idle', gesture: null, authorized: false, realMode: false, error: '',
+  });
+  gestures: { start(): Promise<void>; stop(): Promise<void>; authorize(enabled: boolean): void } | null = null;
 
   showPanel(): void {
     if (this.visible$.value) return;

@@ -1,0 +1,13 @@
+MediaPipe Tasks Vision
+Copyright Google LLC.
+Runtime: @mediapipe/tasks-vision 1.2.0 (Apache-2.0).
+The accompanying LICENSE applies to the vendored runtime files.
+
+Gesture Recognizer model (float16, version 1):
+https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task
+Documentation and model card:
+https://ai.google.dev/edge/mediapipe/solutions/vision/gesture_recognizer
+https://storage.googleapis.com/mediapipe-assets/gesture_recognizer/model_card_hand_gesture_classification_with_faireness_2022.pdf
+
+All recognition runs locally. Model outputs are probabilistic and are not a
+flight-safety guarantee. This integration does not upload images or telemetry.

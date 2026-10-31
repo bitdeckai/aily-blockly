@@ -11,6 +11,7 @@ import { BlockSearcher } from '../components/blockly/plugins/toolbox-search/src/
 import { createCrazyflieBasicToolbox, registerCrazyflieBasicBlocks, crazyflieGenerator } from '../components/blockly/generators/crazyflie/basic-blocks';
 import { createAiDeckCameraToolbox, registerAiDeckCameraBlocks } from '../components/blockly/generators/crazyflie/ai-deck-blocks';
 import { CRAZYFLIE_BASIC_FLIGHT_TYPES, CRAZYFLIE_FLIGHT_COLOUR, createCrazyflieMotionToolbox, registerCrazyflieMotionBlocks, isCrazyflieFlightToolbox, mergeCrazyflieFlightToolbox } from '../components/blockly/generators/crazyflie/motion-blocks';
+import { mergeCrazyflieDeckToolbox, registerCrazyflieDeckBlocks } from '../components/blockly/generators/crazyflie/deck-blocks';
 import { createCrazyradioToolbox, crazyradioBlockTypes, registerCrazyradioBlocks } from '../components/blockly/generators/crazyflie/radio-blocks';
 
 export interface BlocklyWorkspaceViewState {
@@ -1058,6 +1059,7 @@ export class BlocklyService {
     registerCrazyflieBasicBlocks();
     const chinese = this.crazyflieBlockLanguage === 'zh';
     registerCrazyflieMotionBlocks(crazyflieGenerator, chinese);
+    registerCrazyflieDeckBlocks(crazyflieGenerator, chinese);
     registerCrazyradioBlocks(crazyflieGenerator, chinese);
     registerAiDeckCameraBlocks(crazyflieGenerator, chinese);
     categories.forEach(category => this.loadLibToolbox(category));
@@ -1082,11 +1084,13 @@ export class BlocklyService {
     if (isCrazyflieFlightToolbox(toolboxItem)) {
       registerCrazyflieBasicBlocks();
       registerCrazyflieMotionBlocks(crazyflieGenerator, this.crazyflieBlockLanguage === 'zh');
+      registerCrazyflieDeckBlocks(crazyflieGenerator, this.crazyflieBlockLanguage === 'zh');
       registerCrazyradioBlocks(crazyflieGenerator, this.crazyflieBlockLanguage === 'zh');
       const index = this.toolbox.contents.findIndex(item => isCrazyflieFlightToolbox(item));
       toolboxItem = mergeCrazyflieFlightToolbox(toolboxItem, index < 0 ? undefined : this.toolbox.contents[index]);
       if (index >= 0) this.toolbox.contents.splice(index, 1);
     }
+    toolboxItem = mergeCrazyflieDeckToolbox(toolboxItem);
     // 检查是否已存在相同的toolboxItem
     const existingIndex = this.findToolboxItemIndex(toolboxItem);
     if (existingIndex !== -1) {
