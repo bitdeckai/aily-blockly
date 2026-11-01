@@ -11,7 +11,7 @@ const filename = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'com
 const loadData = require('./helpers/load-crazyflie-data.cjs');
 const cameraProtocol = loadData(path.join(root, 'src', 'app', 'services', 'ai-deck-camera.ts'));
 function harness() {
-  const timers = new Map(), warnings = [];
+  const timers = new Map(), warnings = [], draws = [];
   let next = 0;
   const exports = {};
   const schedule = callback => { timers.set(++next, callback); return next; };
@@ -19,6 +19,13 @@ function harness() {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true },
   }).outputText, {
     exports, URL, console: { warn: (...args) => warnings.push(args) },
+    document: { createElement: name => {
+      assert.equal(name, 'canvas');
+      return { width: 0, height: 0, getContext: () => ({
+        setTransform: (...args) => draws.push(['transform', ...args]),
+        drawImage: (...args) => draws.push(['draw', ...args]),
+      }) };
+    } },
     setInterval: schedule, setTimeout: schedule,
     clearInterval: id => timers.delete(id), clearTimeout: id => timers.delete(id),
     require: name => name === '@angular/core' ? {
@@ -31,7 +38,7 @@ function harness() {
     } : name.endsWith('/ai-deck-camera') ? cameraProtocol : {},
   });
   const camera = new exports.AiDeckCameraComponent();
-  return { ...exports, timers, warnings, addresses: camera.addressChange.values, camera };
+  return { ...exports, timers, warnings, draws, addresses: camera.addressChange.values, camera };
 }
 
 test('AI Deck accepts IPs, ports and explicit HTTP streams without navigation, unsafe protocols or embedded credentials', () => {
@@ -94,6 +101,61 @@ test('AI Deck surfaces invalid addresses, failed streams and initial-frame timeo
   assert.equal(camera.streamUrl, '');
   assert.equal(timers.size, 0);
   assert.equal(warnings.length, 3);
+});
+
+test('180 degree rotation changes display and recognition together and stops recognition before changing orientation', () => {
+  const { camera, draws } = harness();
+  assert.equal(camera.rotation, 180, 'the current camera mounting is corrected by default');
+  camera.rotation = 0;
+  const image = { naturalWidth: 320, naturalHeight: 240, removeAttribute() {} };
+  camera.image = { nativeElement: image };
+  camera.state = 'connected';
+  camera.streamUrl = 'http://127.0.0.1/stream/test';
+  assert.equal(camera.recognitionFrame(), image);
+  camera.gestureState = { ...camera.gestureState, phase: 'running', authorized: true };
+  camera.rotateVideo();
+  assert.equal(camera.rotation, 180);
+  assert.deepEqual(camera.gestureControl.values, ['stop']);
+  const frame = camera.recognitionFrame();
+  assert.equal(frame.width, 320);
+  assert.equal(frame.height, 240);
+  assert.deepEqual(draws, [['transform', -1, 0, 0, -1, 320, 240], ['draw', image, 0, 0]]);
+  camera.recognitionFrame();
+  assert.equal(draws.length, 4, 'each inference receives a fresh oriented frame');
+  camera.rotateVideo();
+  assert.equal(camera.rotation, 0);
+  assert.equal(camera.recognitionFrame(), image);
+  camera.disconnect();
+  assert.throws(() => camera.recognitionFrame(), /STALE_VIDEO/);
+  const source = fs.readFileSync(filename, 'utf8');
+  assert.match(source, /\[style.transform\]="[^"]*rotation/);
+});
+
+test('a desktop missing camera IPC produces a localized restart hint, while other failures are preserved', async () => {
+  const loadApi = (bridge, warnings) => {
+    const exports = {};
+    vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'src', 'app', 'services',
+      'camera-frame-proxy.ts'), 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText, { exports, window: { electronAPI: bridge },
+      console: { warn: (...args) => warnings.push(args) } });
+    return exports.cameraFrameProxyApi;
+  };
+  const warnings = [], failure = new Error('Camera connection timed out');
+  const bridge = { cameraPreview: {} };
+  for (const [method, channel] of [['start', 'start'], ['stop', 'stop'], ['status', 'status']]) {
+    bridge.cameraPreview[method] = async () => {
+      throw new Error(`Error invoking remote method 'camera-preview-${channel}': Error: No handler registered for 'camera-preview-${channel}'`);
+    };
+  }
+  const api = loadApi(bridge, warnings)();
+  for (const method of ['start', 'stop', 'status']) {
+    await assert.rejects(api[method]('local-test'), /CAMERA_GESTURE.RESTART_DESKTOP/);
+  }
+  assert.equal(warnings.length, 3);
+  bridge.cameraPreview.start = async () => { throw failure; };
+  await assert.rejects(api.start('local-test'), error => error === failure);
+  assert.throws(() => loadApi(null, warnings)(), /CAMERA_GESTURE.RESTART_DESKTOP/);
 });
 
 test('AI Deck messages exist in every supported language and embedding does not use iframes or bypass sanitization', () => {

@@ -23,7 +23,9 @@ export class AiDeckCameraWorkspace {
       const view = createView(element);
       const listeners = new Subscription();
       this.previews.set(field, view);
-      view.setInput('address', camera.address$.value);
+      const syncAddress = () => this.updateAddress(view,
+        this.literalAddress(field)?.getFieldValue('TEXT') ?? camera.address$.value);
+      syncAddress();
       view.setInput('previewWidth', field.getValue());
       view.setInput('gestureState', camera.gestureState$.value);
       listeners.add(view.instance.gestureControl.subscribe(action => {
@@ -32,16 +34,7 @@ export class AiDeckCameraWorkspace {
         else void camera.gestures[action]().catch(error => this.reportError(error instanceof Error ? error.message : String(error)));
       }));
       listeners.add(view.instance.connectRequested.subscribe(() => {
-        if (view.instance.address.trim()) return;
-        let previous = field.getSourceBlock()?.getPreviousBlock();
-        while (previous) {
-          if (previous.type === 'cf_ai_deck_config') {
-            const address = previous.getInputTargetBlock('ADDRESS');
-            if (address?.type === 'text') view.instance.address = String(address.getFieldValue('TEXT'));
-            break;
-          }
-          previous = previous.getPreviousBlock();
-        }
+        if (this.literalAddress(field) || !view.instance.address.trim()) syncAddress();
       }));
       listeners.add(view.instance.opening.subscribe(() => {
         this.disconnectOthers(field);
@@ -49,7 +42,11 @@ export class AiDeckCameraWorkspace {
         camera.frameSource = view.instance;
         camera.showPanel();
       }));
-      listeners.add(view.instance.addressChange.subscribe(address => camera.address$.next(address)));
+      listeners.add(view.instance.addressChange.subscribe(address => {
+        const literal = this.literalAddress(field);
+        if (literal && literal.getFieldValue('TEXT') !== address) literal.setFieldValue(address, 'TEXT');
+        camera.address$.next(address);
+      }));
       listeners.add(view.instance.closed.subscribe(() => camera.hidePanel()));
       listeners.add(view.instance.resized.subscribe(delta => {
         field.setValue(field.getValue()! + delta);
@@ -57,8 +54,9 @@ export class AiDeckCameraWorkspace {
       }));
       listeners.add(view.instance.heightChange.subscribe(height => field.setPreviewHeight(height)));
       const onChange = (event: Blockly.Events.Abstract) => {
-        if (event.type !== Blockly.Events.BLOCK_CHANGE) return;
+        if (event.type !== Blockly.Events.BLOCK_CHANGE && event.type !== Blockly.Events.BLOCK_MOVE) return;
         view.setInput('previewWidth', field.getValue());
+        syncAddress();
       };
       workspace.addChangeListener(onChange);
       view.changeDetectorRef.detectChanges();
@@ -79,7 +77,9 @@ export class AiDeckCameraWorkspace {
       return unmount;
     });
     this.subscriptions.add(camera.address$.subscribe(address => {
-      for (const view of this.previews.values()) view.setInput('address', address);
+      for (const [field, view] of this.previews) {
+        if (!this.literalAddress(field)) this.updateAddress(view, address);
+      }
     }));
     this.subscriptions.add(camera.gestureState$.subscribe(state => {
       for (const view of this.previews.values()) view.setInput('gestureState', state);
@@ -103,6 +103,24 @@ export class AiDeckCameraWorkspace {
       this.active = field;
       this.send(this.previews.get(field)!, command);
     }));
+  }
+
+  private literalAddress(field: FieldCameraPreview): Blockly.Block | null {
+    let previous = field.getSourceBlock()?.getPreviousBlock();
+    while (previous) {
+      if (previous.type === 'cf_ai_deck_config') {
+        const address = previous.getInputTargetBlock('ADDRESS');
+        return address?.type === 'text' ? address : null;
+      }
+      previous = previous.getPreviousBlock();
+    }
+    return null;
+  }
+
+  private updateAddress(view: ComponentRef<AiDeckCameraComponent>, address: string): void {
+    if (view.instance.address === address) return;
+    if (view.instance.streamUrl) view.instance.closePreview();
+    view.setInput('address', address);
   }
 
   private send(view: ComponentRef<AiDeckCameraComponent>, command: AiDeckCameraCommand): void {

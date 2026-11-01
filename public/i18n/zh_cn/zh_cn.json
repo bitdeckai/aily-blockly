@@ -64,6 +64,8 @@
         }
     },
     "CAMERA_GESTURE": {
+        "MODEL_CANDIDATE": "模型候选",
+        "PALM_HINT": "请将手掌朝向镜头、五指伸直，并保持积木要求的时间。",
         "TITLE": "手势事件",
         "START": "开启识别",
         "STOP": "停止识别",
@@ -97,6 +99,7 @@
         "ACTION_FAILED": "手势动作执行或取消失败，请确认设备状态。"
     },
     "AI_DECK_CAMERA": {
+        "ROTATE_VIDEO": "旋转画面 180°（识别方向同步旋转，旋转后请重新开启识别）",
         "ZOOM_IN": "放大画面",
         "ZOOM_OUT": "缩小画面",
         "OPEN_VIDEO": "打开",

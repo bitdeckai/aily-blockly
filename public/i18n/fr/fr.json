@@ -53,6 +53,8 @@
         }
     },
     "CAMERA_GESTURE": {
+        "MODEL_CANDIDATE": "Candidat du modèle",
+        "PALM_HINT": "Tournez la paume vers la caméra, tendez les cinq doigts et maintenez la pose pendant la durée configurée.",
         "TITLE": "Événements gestuels", "START": "Démarrer la reconnaissance", "STOP": "Arrêter la reconnaissance",
         "IDLE": "Gestes désactivés", "LOADING": "Chargement du modèle local…", "RUNNING": "Reconnaissance en cours", "ERROR": "Erreur de reconnaissance",
         "AUTHORIZE": "Autoriser manuellement les actions réelles par gestes",
@@ -75,6 +77,7 @@
         "ACTION_FAILED": "Échec de l’action ou de l’annulation. Vérifiez l’appareil."
     },
     "AI_DECK_CAMERA": {
+        "ROTATE_VIDEO": "Tourner la vidéo de 180° (avec la reconnaissance ; redémarrez-la ensuite)",
         "ZOOM_IN": "Agrandir la vidéo",
         "ZOOM_OUT": "Réduire la vidéo",
         "OPEN_VIDEO": "Ouvrir",

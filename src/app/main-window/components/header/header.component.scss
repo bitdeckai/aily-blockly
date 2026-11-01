@@ -184,6 +184,7 @@ $header-inner-height: 38px;
   }
 
   .cf-run-button,
+  .cf-emergency-stop,
   .cf-link-check {
     display: inline-flex;
     align-items: center;
@@ -211,6 +212,25 @@ $header-inner-height: 38px;
 
   .cf-run-button {
     background: color-mix(in srgb, #3f9b75 30%, var(--aily-bg-secondary));
+  }
+
+  .cf-emergency-stop {
+    flex: 0 0 auto;
+    margin-left: 6px;
+    border-color: #b42318;
+    background: #b42318;
+    color: #fff;
+    -webkit-app-region: no-drag;
+
+    &:hover:not(:disabled) {
+      border-color: #912018;
+      background: #912018;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--aily-text-primary);
+      outline-offset: 2px;
+    }
   }
 
   .cf-link-check {

@@ -41,6 +41,7 @@ function load(filename) {
       if (name.endsWith('/ai-deck-camera')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'ai-deck-camera.ts'));
       if (name.endsWith('/camera-gesture')) return require('./helpers/load-crazyflie-data.cjs')(path.join(services, 'camera-gesture.ts'));
       if (name.endsWith('/gesture-illustrations')) return load(path.join(generators, 'gesture-illustrations.ts'));
+      if (name.endsWith('/gesture-photos.json')) return require(path.join(generators, 'gesture-photos.json'));
       if (name.endsWith('/ai-deck-blocks')) return load(path.join(generators, 'ai-deck-blocks.ts'));
       if (name.endsWith('/basic-blocks')) return load(path.join(generators, 'basic-blocks.ts'));
       return {};

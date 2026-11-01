@@ -53,6 +53,8 @@
         }
     },
     "CAMERA_GESTURE": {
+        "MODEL_CANDIDATE": "Candidato del modelo",
+        "PALM_HINT": "Orienta la palma hacia la cámara, extiende los cinco dedos y mantén la postura durante el tiempo configurado.",
         "TITLE": "Eventos de gestos", "START": "Iniciar reconocimiento", "STOP": "Detener reconocimiento",
         "IDLE": "Gestos desactivados", "LOADING": "Cargando modelo local…", "RUNNING": "Reconociendo gestos", "ERROR": "Error de reconocimiento",
         "AUTHORIZE": "Permitir manualmente acciones reales mediante gestos",
@@ -75,6 +77,7 @@
         "ACTION_FAILED": "Falló la acción o cancelación. Comprueba el dispositivo."
     },
     "AI_DECK_CAMERA": {
+        "ROTATE_VIDEO": "Girar vídeo 180° (también el reconocimiento; reinícialo después)",
         "ZOOM_IN": "Ampliar vídeo",
         "ZOOM_OUT": "Reducir vídeo",
         "OPEN_VIDEO": "Abrir",

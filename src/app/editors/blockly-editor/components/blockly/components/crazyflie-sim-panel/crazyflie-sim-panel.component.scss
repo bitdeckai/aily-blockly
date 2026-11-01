@@ -544,6 +544,50 @@ app-crazyflie-occupancy-map {
   gap: 6px;
 }
 
+.sim-mission {
+  color: var(--aily-text-primary, #ffffff);
+
+  summary { cursor: pointer; }
+  &__intro { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+  &__points {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+    gap: 6px;
+    margin: 6px 0;
+  }
+  &__point {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--aily-border-input, #536479);
+    border-radius: 6px;
+    background: var(--aily-bg-tertiary, #3a3c3f);
+    color: var(--aily-text-primary, #ffffff);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+
+    &:hover,
+    &.selected {
+      background: var(--aily-bg-hover, #405e8d);
+      border-color: var(--aily-color-accent, #61afef);
+    }
+    &.visited { border-color: var(--aily-color-success, #87b828); }
+    &.dwelling { border-color: var(--aily-color-accent, #61afef); }
+    &:focus-visible { outline: 2px solid var(--aily-color-accent, #61afef); outline-offset: 2px; }
+  }
+  &__number { flex: 0 0 20px; text-align: center; font-weight: 700; }
+  &__coordinates {
+    display: block;
+    color: var(--aily-text-primary, #ffffff);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  &__dwell { margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+}
+
 .sim-flight-readiness {
   margin-bottom: 6px;
   color: var(--aily-text-secondary);

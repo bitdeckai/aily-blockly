@@ -14,6 +14,48 @@ const binding = (extra = {}) => ({
 });
 const on = value => `cf_camera_gesture_on(${JSON.stringify(value)})`;
 
+function consoleHarness() {
+  const filename = path.join(services, '..', 'editors', 'blockly-editor', 'components', 'blockly', 'blockly.component.ts');
+  const source = fs.readFileSync(filename, 'utf8');
+  const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
+  let wrapper;
+  function visit(node) {
+    if (ts.isBinaryExpression(node) && node.left.getText(ast) === 'console.error'
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) wrapper = node.right.getText(ast);
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  assert.ok(wrapper, 'the actual editor console error wrapper must be exercised');
+  const notices = [], originalErrors = [], info = [];
+  const console = { log() {}, info: (...args) => info.push(args), error: (...args) => originalErrors.push(args) };
+  vm.runInNewContext(`let isHandlingError = false; console.error = ${wrapper};`, {
+    console, arguments: [], HttpErrorResponse: class {}, noticeService: { update: notice => notices.push(notice) },
+  });
+  return { console, notices, originalErrors, info };
+}
+
+test('the real Blockly console wrapper logs the native XNNPACK INFO without creating an error notification', () => {
+  const h = consoleHarness();
+  h.console.error('INFO: Created TensorFlow Lite XNNPACK delegate for CPU.\n');
+  assert.equal(h.notices.length, 0);
+  assert.equal(h.originalErrors.length, 0);
+  assert.equal(h.info.length, 1);
+});
+
+test('the console wrapper preserves real errors, additional arguments and multi-line messages containing INFO', () => {
+  const h = consoleHarness(), error = new Error('Inference failed');
+  h.console.error('Gesture startup failed', error);
+  assert.equal(h.originalErrors[0][0], 'Gesture startup failed');
+  assert.equal(h.originalErrors[0][1], error);
+  assert.equal(h.notices.length, 1);
+  h.console.error('INFO: Created TensorFlow Lite XNNPACK delegate for CPU.\nERROR: graph failure');
+  assert.equal(h.notices.length, 2, 'an INFO prefix must not hide a genuine error');
+  h.console.error(new Error('INFO: Created TensorFlow Lite XNNPACK delegate for CPU.'));
+  assert.equal(h.notices.length, 3, 'an exception object is not a harmless log line');
+  h.console.error('INFO: Created TensorFlow Lite XNNPACK delegate for CPU.', 'real failure context');
+  assert.equal(h.notices.length, 4);
+});
+
 function openHand() {
   return [
     [.5, .85], [.37, .75], [.31, .69], [.26, .6], [.22, .5],
@@ -73,6 +115,61 @@ test('the original seven model gestures remain available; missing, clipped, corr
   }
 });
 
+test('a moderate-confidence open palm needs all five extended fingers and remains rotation independent', () => {
+  const palm = openHand();
+  for (const angle of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) {
+    const rotated = palm.map(point => ({ ...point,
+      x: .5 + (point.x - .5) * Math.cos(angle) - (point.y - .5) * Math.sin(angle),
+      y: .5 + (point.x - .5) * Math.sin(angle) + (point.y - .5) * Math.cos(angle),
+    }));
+    assert.equal(protocol.recognizeCameraStaticGesture(handFrame(rotated, 'Open_Palm', .7)), 'Open_Palm');
+  }
+  for (const score of [.6999, NaN, Infinity, 1.1]) {
+    assert.equal(protocol.recognizeCameraStaticGesture(handFrame(palm, 'Open_Palm', score)), null);
+  }
+  for (const mcp of [5, 9, 13, 17]) {
+    const incomplete = palm.map(point => ({ ...point }));
+    foldedFinger(incomplete, mcp);
+    assert.notEqual(protocol.recognizeCameraStaticGesture(handFrame(incomplete, 'Open_Palm', .7)), 'Open_Palm');
+  }
+  const foldedThumb = palm.map(point => ({ ...point }));
+  foldedThumb[4] = { ...foldedThumb[5] };
+  assert.notEqual(protocol.recognizeCameraStaticGesture(handFrame(foldedThumb, 'Open_Palm', .7)), 'Open_Palm');
+  assert.equal(protocol.recognizeCameraStaticGesture(handFrame(palm, 'Closed_Fist', .849)), null,
+    'other model gestures retain the existing threshold');
+  assert.equal(protocol.recognizeCameraStaticGesture(handFrame(palm, 'None', 1)), null);
+});
+
+test('model candidate diagnostics reveal rejected scores and clear when recognition stops', async () => {
+  const h = harness();
+  h.hand('Open_Palm', .699);
+  await h.service.start();
+  await h.advance(250);
+  assert.equal(h.camera.gestureState$.value.gesture, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.camera.gestureState$.value.modelCandidate)),
+    { gesture: 'Open_Palm', confidence: .699 });
+  await h.service.stop();
+  assert.equal(h.camera.gestureState$.value.modelCandidate, null);
+});
+
+test('open palm tolerates reconstructed depth errors without combining partial fingers across coordinate sets', () => {
+  const image = openHand(), world = openHand();
+  foldedFinger(world, 5);
+  foldedFinger(world, 9);
+  assert.equal(protocol.recognizeCameraStaticGesture({
+    ...handFrame(image, 'Open_Palm', .7018), worldLandmarks: [world],
+  }), 'Open_Palm', 'all five image fingers can confirm a noisy world reconstruction');
+  const partialImage = openHand(), partialWorld = openHand();
+  foldedFinger(partialImage, 5);
+  foldedFinger(partialWorld, 9);
+  assert.notEqual(protocol.recognizeCameraStaticGesture({
+    ...handFrame(partialImage, 'Open_Palm', .7018), worldLandmarks: [partialWorld],
+  }), 'Open_Palm', 'one coordinate set must independently confirm every finger');
+  assert.equal(protocol.recognizeCameraStaticGesture({
+    ...handFrame(image, 'Open_Palm', .699), worldLandmarks: [world],
+  }), null, 'depth fallback cannot bypass the confidence threshold');
+});
+
 test('all four palm swipes require preparation, full displacement and two consistent frames, then latch until release', () => {
   for (const [gesture, dx, dy] of [
     ['Swipe_Left', -.18, 0], ['Swipe_Right', .18, 0], ['Swipe_Up', 0, -.18], ['Swipe_Down', 0, .18],
@@ -119,15 +216,16 @@ test('every supported UI language contains complete, non-empty gesture labels an
 
 const fixtures = [];
 function harness(policy = 'sim-only') {
-  const h = { now: 0, timers: new Map(), events: [], runs: [], notices: [], closes: 0,
+  const h = { now: 0, timers: new Map(), events: [], runs: [], notices: [], closes: 0, frames: [],
     fresh: true, result: { gestures: [] }, modelFactory: null };
   const exports = {};
-  const model = { recognizeForVideo: () => h.result, close: () => h.closes++ };
+  const model = { recognizeForVideo: image => { h.frames.push(image); return h.result; }, close: () => h.closes++ };
   const camera = {
     gestureState$: new BehaviorSubject({ phase: 'idle', authorized: false, realMode: false, gesture: null, error: '' }),
     gesture$: new Subject(), command$: new BehaviorSubject(null),
     execute: command => { camera.command$.next(command); },
     frameSource: { prepareForRecognition: async () => ({}), frameIsFresh: async () => h.fresh,
+      recognitionFrame: () => h.frame,
       recognitionAssetRoot: () => 'http://127.0.0.1/vision/local-test' },
   };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(services, 'camera-gesture.service.ts'), 'utf8'), {
@@ -204,6 +302,18 @@ test('a recognized swipe emits only its configured event; an empty event never r
   assert.equal(h.camera.gestureState$.value.gesture, null);
 });
 
+test('each inference asks the source for its current oriented frame instead of keeping the raw startup image', async () => {
+  const h = harness();
+  h.frame = { oriented: 1 };
+  await h.service.start();
+  await h.advance(250);
+  assert.ok(h.frames.length >= 1);
+  assert.ok(h.frames.every(frame => frame === h.frame));
+  h.frame = { oriented: 2 };
+  await h.advance(250);
+  assert.equal(h.frames.at(-1), h.frame);
+});
+
 test('stable gestures meet the exact hold threshold and require 500ms release before retriggering', () => {
   const tracker = new protocol.StableCameraGesture();
   for (const time of [0, 250, 500, 750, 1000, 1199]) assert.equal(tracker.update('Open_Palm', time, 1200), null);
@@ -249,7 +359,7 @@ test('recognition filters unknown, low-confidence and multi-hand frames and disp
   const h = harness();
   await h.service.runProgram(on(binding()), () => {});
   await h.service.start();
-  for (const [name, score, count] of [['Open_Palm', 0.849, 1], ['Open_Palm', 1, 2], ['None', 1, 1]]) {
+  for (const [name, score, count] of [['Open_Palm', 0.699, 1], ['Closed_Fist', .849, 1], ['Open_Palm', 1, 2], ['None', 1, 1]]) {
     h.hand(name, score, count);
     for (let i = 0; i < 4; i++) await h.advance(250);
   }

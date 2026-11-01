@@ -3,7 +3,7 @@ import { Subscription } from 'rxjs';
 import type { GestureRecognizer } from '@mediapipe/tasks-vision';
 import { AiDeckCameraService } from './ai-deck-camera.service';
 import { parseAiDeckCameraCall, validateAiDeckCameraSequence } from './ai-deck-camera';
-import { CameraGestureBinding, CameraPalmSwipe, parseCameraGestureCall, recognizeCameraStaticGesture, StableCameraGesture, validateCameraGestureProgram } from './camera-gesture';
+import { CameraGestureBinding, CameraPalmSwipe, cameraGestureModelCandidate, parseCameraGestureCall, recognizeCameraStaticGesture, StableCameraGesture, validateCameraGestureProgram } from './camera-gesture';
 import { CrazyflieRuntimePolicy, CrazyflieRuntimeService } from './crazyflie-runtime.service';
 import { CrazyflieConnectionService } from './crazyflie-connection.service';
 import { NoticeService } from './notice.service';
@@ -92,10 +92,10 @@ export class CameraGestureService implements OnDestroy {
     const source = this.camera.frameSource;
     if (!source) throw new Error('CAMERA_GESTURE.OPEN_FIRST');
     const epoch = ++this.generation;
-    this.camera.gestureState$.next({ ...this.camera.gestureState$.value, phase: 'loading', error: '', gesture: null });
+    this.camera.gestureState$.next({ ...this.camera.gestureState$.value, phase: 'loading', error: '', gesture: null, modelCandidate: null });
     let recognizer: GestureRecognizer | null = null;
     try {
-      const image = await source.prepareForRecognition();
+      await source.prepareForRecognition();
       const { FilesetResolver, GestureRecognizer } = await import('@mediapipe/tasks-vision');
       const root = source.recognitionAssetRoot();
       const files = await FilesetResolver.forVisionTasks(root, false);
@@ -113,13 +113,14 @@ export class CameraGestureService implements OnDestroy {
         try {
           if (this.camera.frameSource !== source || !await source.frameIsFresh()) throw new Error('CAMERA_GESTURE.STALE_VIDEO');
           if (epoch !== this.generation) return;
-          const result = recognizer!.recognizeForVideo(image, performance.now());
+          const result = recognizer!.recognizeForVideo(source.recognitionFrame(), performance.now());
           const gesture = recognizeCameraStaticGesture(result);
           const now = performance.now();
           const holdFor = (name: string) => Math.max(this.bindings.get(name)?.holdSeconds || 1.2,
             this.runtime.policy$.value === 'sim-only' ? 0.5 : 1.2) * 1000;
           const swipe = this.swipeTracker.update(gesture, result.landmarks?.[0], now, holdFor);
-          this.camera.gestureState$.next({ ...this.camera.gestureState$.value, gesture: swipe?.gesture || gesture });
+          this.camera.gestureState$.next({ ...this.camera.gestureState$.value, gesture: swipe?.gesture || gesture,
+            modelCandidate: cameraGestureModelCandidate(result) });
           const binding = gesture ? this.bindings.get(gesture) : undefined;
           const hold = Math.max(binding?.holdSeconds || 1.2, this.runtime.policy$.value === 'sim-only' ? 0.5 : 1.2);
           const event = this.tracker.update(gesture, now, hold * 1000);
@@ -185,7 +186,7 @@ export class CameraGestureService implements OnDestroy {
     this.tracker.reset();
     this.swipeTracker.reset();
     this.authorizationTarget = '';
-    this.camera.gestureState$.next({ ...this.camera.gestureState$.value, phase: 'idle', gesture: null, authorized: false, error: '' });
+    this.camera.gestureState$.next({ ...this.camera.gestureState$.value, phase: 'idle', gesture: null, authorized: false, error: '', modelCandidate: null });
     try { recognizer?.close(); }
     finally { await this.cancelAction(); }
   }

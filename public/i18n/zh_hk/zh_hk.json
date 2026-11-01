@@ -53,6 +53,8 @@
         }
     },
     "CAMERA_GESTURE": {
+        "MODEL_CANDIDATE": "模型候選",
+        "PALM_HINT": "請將手掌朝向鏡頭、五指伸直，並保持積木要求的時間。",
         "TITLE": "手勢事件", "START": "啟用識別", "STOP": "停止識別",
         "IDLE": "手勢未啟用", "LOADING": "正在載入本地識別模型…", "RUNNING": "正在識別手勢", "ERROR": "識別出錯",
         "AUTHORIZE": "手動允許手勢事件執行真機動作",
@@ -76,6 +78,7 @@
         "ACTION_FAILED": "手勢動作執行或取消失敗，請確認設備狀態。"
     },
     "AI_DECK_CAMERA": {
+        "ROTATE_VIDEO": "旋轉畫面 180°（識別方向同步旋轉，旋轉後請重新開啟識別）",
         "ZOOM_IN": "放大畫面",
         "ZOOM_OUT": "縮小畫面",
         "OPEN_VIDEO": "開啟",

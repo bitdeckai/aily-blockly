@@ -114,11 +114,13 @@ function startCrazyflieSession({ pythonCmd, scriptPath, libPathHint, connectionA
             catch (error) { fail(error.message); void stop(); }
             onEvent({ type: "log", line: "Flow timeout: waiting for current action and landing." });
           }, Math.max(1000, Number(options.timeoutMs || 60000)));
-        } else if (action === "mapping") {
+        } else if (action === "mapping" || action === "emergency-stop") {
           entry.timer = setTimeout(() => {
             pending.delete(id);
-            resolve({ success: false, message: "Mapping control timed out; flight was not cancelled", executed: [] });
-          }, 8000);
+            resolve({ success: false, message: action === "emergency-stop"
+              ? "Emergency stop timed out; motor stop is not verified"
+              : "Mapping control timed out; flight was not cancelled", executed: [] });
+          }, action === "emergency-stop" ? 3000 : 8000);
         }
         pending.set(id, entry);
         try { send({ ...options, id, action }); }

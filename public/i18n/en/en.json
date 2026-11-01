@@ -64,6 +64,8 @@
         }
     },
     "CAMERA_GESTURE": {
+        "MODEL_CANDIDATE": "Model candidate",
+        "PALM_HINT": "Face your palm toward the camera, extend all five fingers and hold for the configured time.",
         "TITLE": "Gesture events", "START": "Start recognition", "STOP": "Stop recognition",
         "IDLE": "Gestures disabled", "LOADING": "Loading local recognition model…", "RUNNING": "Recognizing gestures", "ERROR": "Recognition error",
         "AUTHORIZE": "Manually allow gesture events to operate real hardware",
@@ -87,6 +89,7 @@
         "ACTION_FAILED": "Gesture action or cancellation failed. Check the device state."
     },
     "AI_DECK_CAMERA": {
+        "ROTATE_VIDEO": "Rotate video 180° (also rotates recognition; restart recognition afterwards)",
         "ZOOM_IN": "Enlarge video",
         "ZOOM_OUT": "Shrink video",
         "OPEN_VIDEO": "Open",

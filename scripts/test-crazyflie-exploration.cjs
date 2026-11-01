@@ -665,6 +665,17 @@ test('mission layout constrains grid width and lets the footer scroll rather tha
   assert.match(css, /\.sim-panel__footer\s*\{[^}]*max-height: 280px/);
 });
 
+test('checkpoint buttons have explicit theme colors, readable coordinates and keyboard focus styles', () => {
+  const stylesheet = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
+    'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');
+  const css = require('sass').compile(stylesheet).css;
+  assert.match(css, /\.sim-mission__point\s*\{[^}]*background: var\(--aily-bg-tertiary[^;]*;[^}]*color: var\(--aily-text-primary/);
+  assert.match(css, /\.sim-mission__coordinates\s*\{[^}]*color: var\(--aily-text-primary/);
+  assert.match(css, /\.sim-mission__point:focus-visible\s*\{[^}]*outline:/);
+  assert.match(css, /\.sim-mission__point\.selected\s*\{/);
+  assert.match(css, /\.sim-mission__point\.visited\s*\{/);
+});
+
 test('scene selector and view controls use themed native options in one scrollable toolbar', () => {
   const stylesheet = path.join(root, 'src', 'app', 'editors', 'blockly-editor', 'components', 'blockly',
     'components', 'crazyflie-sim-panel', 'crazyflie-sim-panel.component.scss');

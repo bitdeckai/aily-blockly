@@ -701,13 +701,19 @@ export class BlocklyComponent implements OnInit, OnChanges, AfterViewInit, OnDes
 
           isHandlingError = true;
           try {
+            // MediaPipe writes this successful initialization INFO through stderr.
+            if (args.length === 0 && typeof message === 'string'
+              && message.trim() === 'INFO: Created TensorFlow Lite XNNPACK delegate for CPU.') {
+              console.info(message);
+              return;
+            }
             console.log(message, ...args);
             if (!message) {
               return
             }
 
             // 保留原始错误输出功能
-            originalError.apply(console, arguments);
+            originalError.apply(console, [message, ...args]);
             // 处理特定错误
             if (args[0] instanceof HttpErrorResponse) {
               // console.log('HTTP错误:', args[0]);

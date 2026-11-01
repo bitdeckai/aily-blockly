@@ -308,6 +308,11 @@ test('all twelve gesture blocks update their illustration and timing caption wit
     block.setFieldValue(gesture, 'GESTURE');
     const image = block.getFieldValue('ILLUSTRATION');
     assert.match(image, /^data:image\/svg\+xml/);
+    const svg = decodeURIComponent(image.slice(image.indexOf(',') + 1));
+    assert.match(svg, /width="96" height="128"/);
+    assert.match(svg, /<image[^>]*href="data:image\/jpeg;base64,/);
+    assert.doesNotMatch(svg, /https?:\/\/(?!www\.w3\.org)/);
+    if (gestureProtocol.isCameraSwipe(gesture)) assert.match(svg, /stroke="#58d2ff"/);
     images.add(image);
     assert.match(block.getFieldValue('PREPARATION'), gestureProtocol.isCameraSwipe(gesture) ? /先张手静止/ : /保持/);
     const state = Blockly.serialization.blocks.save(block);
@@ -318,6 +323,21 @@ test('all twelve gesture blocks update their illustration and timing caption wit
     assert.equal(gestureProtocol.parseCameraGestureCall(compile(workspace([state]))).binding.gesture, gesture);
   }
   assert.equal(images.size, 12);
+});
+
+test('gesture illustrations embed eight distinct original high-resolution hand images and reject unsupported poses', () => {
+  const photos = require(path.join(source, 'gesture-photos.json'));
+  assert.equal(Object.keys(photos).length, 8);
+  assert.equal(new Set(Object.values(photos)).size, 8);
+  for (const [gesture, photo] of Object.entries(photos)) {
+    assert.ok(gestureProtocol.isCameraGesture(gesture));
+    assert.match(photo, /^data:image\/jpeg;base64,/);
+    const bytes = Buffer.from(photo.slice(photo.indexOf(',') + 1), 'base64');
+    assert.deepEqual([...bytes.subarray(0, 3)], [255, 216, 255]);
+    assert.ok(bytes.length > 3000, gesture);
+  }
+  const { cameraGestureIllustration } = require(path.join(source, 'gesture-illustrations.ts'));
+  assert.throws(() => cameraGestureIllustration('unsupported'), /INVALID_PROGRAM/);
 });
 
 test('every supported language has all three camera example titles, instructions and notices', () => {

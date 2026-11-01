@@ -60,7 +60,7 @@ export function registerAiDeckCameraBlocks(generator: Blockly.CodeGenerator, chi
     type: 'cf_camera_gesture_on', colour,
     message0: chinese ? '当识别到 %1 %2 %3 %4 秒' : 'When gesture %1 %2 %3 %4 seconds',
     args0: [
-      { type: 'field_image', name: 'ILLUSTRATION', src: cameraGestureIllustration('Open_Palm'), width: 48, height: 54, alt: names[0] },
+      { type: 'field_image', name: 'ILLUSTRATION', src: cameraGestureIllustration('Open_Palm'), width: 72, height: 96, alt: names[0] },
       { type: 'field_dropdown', name: 'GESTURE', options: CAMERA_GESTURES.map((gesture, index) => [names[index], gesture]) },
       { type: 'field_label', name: 'PREPARATION', text: chinese ? '保持' : 'hold for' },
       { type: 'field_number', name: 'HOLD', value: 1.2, min: 0.5, max: 5, precision: 0.1 },

@@ -32,6 +32,7 @@ import { BleOtaDeviceItem, UploaderBleService } from '../../../services/uploader
 import { CrazyflieSimService } from '../../../services/crazyflie-sim.service';
 import { CrazyflieRuntimePolicy, CrazyflieRuntimeService } from '../../../services/crazyflie-runtime.service';
 import { CrazyflieConnectionService, CrazyflieConnectionState } from '../../../services/crazyflie-connection.service';
+import { CameraGestureService } from '../../../services/camera-gesture.service';
 
 @Component({
   selector: 'app-header',
@@ -106,6 +107,7 @@ export class HeaderComponent implements OnDestroy {
 
   runtimePolicy: CrazyflieRuntimePolicy = 'sim-only';
   crazyflieRunInProgress = false;
+  emergencyStopInProgress = false;
   connectionState: CrazyflieConnectionState = {
     status: 'unknown',
     message: '尚未检测',
@@ -145,6 +147,7 @@ export class HeaderComponent implements OnDestroy {
     private crazyflieSimService: CrazyflieSimService,
     private crazyflieRuntimeService: CrazyflieRuntimeService,
     private crazyflieConnectionService: CrazyflieConnectionService,
+    private cameraGestureService: CameraGestureService,
     // private appStoreService: AppStoreService
   ) { }
 
@@ -169,6 +172,36 @@ export class HeaderComponent implements OnDestroy {
 
   toggleSimulatorPanel(): void {
     this.crazyflieSimService.togglePanel();
+  }
+
+  get emergencyStopDisabled(): boolean {
+    return this.emergencyStopInProgress
+      || (this.runtimePolicy !== 'sim-only' && this.connectionState.status !== 'ready');
+  }
+
+  async emergencyStopCrazyflie(): Promise<void> {
+    if (!this.canShowSimulatorControls() || this.emergencyStopDisabled) {
+      this.message.warning('请先连接飞行器；急停不会自动连接');
+      return;
+    }
+    this.emergencyStopInProgress = true;
+    const simulationOnly = this.runtimePolicy === 'sim-only';
+    try {
+      const request = simulationOnly
+        ? Promise.resolve(this.crazyflieSimService.cancelRun())
+        : this.crazyflieConnectionService.emergencyStop();
+      this.cameraGestureService.cancelProgram();
+      void this.cameraGestureService.stop().catch(error =>
+        this.message.error(error instanceof Error ? error.message : String(error)));
+      await request;
+      this.message.warning(simulationOnly ? '模拟已请求停止，未向真机发送指令'
+        : '已发送官方急停指令：立即停电机，不是降落。请确认电机停止，安全断电重启后重新连接');
+    } catch (error) {
+      this.message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.emergencyStopInProgress = false;
+      this.cd.markForCheck();
+    }
   }
 
   async runCrazyflieSimulation(): Promise<void> {
@@ -224,7 +257,9 @@ export class HeaderComponent implements OnDestroy {
   }
 
   async runSelectedCrazyflieMode(): Promise<void> {
-    if (this.crazyflieRunInProgress) {
+    if (this.crazyflieRunInProgress || this.emergencyStopInProgress
+      || (this.runtimePolicy !== 'sim-only' && this.connectionState.emergencyStopped)) {
+      if (this.connectionState.emergencyStopped) this.message.warning('已急停，请安全断电重启并重新连接后再飞行');
       return;
     }
 

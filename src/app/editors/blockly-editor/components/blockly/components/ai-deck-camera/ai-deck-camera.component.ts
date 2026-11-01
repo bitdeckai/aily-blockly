@@ -16,6 +16,9 @@ export { aiDeckStreamUrl } from '../../../../../../services/ai-deck-camera';
       <header>
         <strong>{{ 'AI_DECK_CAMERA.TITLE' | translate }}</strong>
         <div class="ai-camera__sizes">
+          <button type="button" (click)="rotateVideo()" [attr.aria-pressed]="rotation === 180"
+            [attr.aria-label]="'AI_DECK_CAMERA.ROTATE_VIDEO' | translate"
+            [attr.title]="'AI_DECK_CAMERA.ROTATE_VIDEO' | translate">↻ {{ rotation }}°</button>
           <button type="button" (click)="resized.emit(-80)" [disabled]="previewWidth <= 240"
             [attr.aria-label]="'AI_DECK_CAMERA.ZOOM_OUT' | translate">−</button>
           <button type="button" (click)="resized.emit(80)" [disabled]="previewWidth >= 640"
@@ -40,6 +43,7 @@ export { aiDeckStreamUrl } from '../../../../../../services/ai-deck-camera';
       <div class="ai-camera__error" *ngIf="errorKey" role="alert">{{ errorKey | translate }}</div>
       <div class="ai-camera__viewport" *ngIf="streamUrl">
         <img #image [attr.crossorigin]="readable ? 'anonymous' : null" [src]="streamUrl" [alt]="'AI_DECK_CAMERA.TITLE' | translate"
+          [style.transform]="'rotate(' + rotation + 'deg)'"
           referrerpolicy="no-referrer" (load)="checkFrame()" (error)="imageError()">
       </div>
       <div class="ai-camera__gestures">
@@ -50,6 +54,13 @@ export { aiDeckStreamUrl } from '../../../../../../services/ai-deck-camera';
           {{ 'CAMERA_GESTURE.STOP' | translate }}
         </button>
         <span>{{ ('CAMERA_GESTURE.' + (gestureState.gesture || gestureState.phase.toUpperCase())) | translate }}</span>
+        <span class="ai-camera__candidate" *ngIf="gestureState.modelCandidate as candidate">
+          {{ 'CAMERA_GESTURE.MODEL_CANDIDATE' | translate }}:
+          {{ ('CAMERA_GESTURE.' + candidate.gesture) | translate }} {{ candidate.confidence * 100 | number:'1.0-0' }}%
+        </span>
+        <span class="ai-camera__candidate" *ngIf="gestureState.modelCandidate?.gesture === 'Open_Palm' && !gestureState.gesture">
+          {{ 'CAMERA_GESTURE.PALM_HINT' | translate }}
+        </span>
         <label *ngIf="gestureState.realMode">
           <input type="checkbox" [checked]="gestureState.authorized"
             (change)="requestAuthorization($event)">
@@ -68,12 +79,14 @@ export { aiDeckStreamUrl } from '../../../../../../services/ai-deck-camera';
     .ai-camera__gestures { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 6px; }
     .ai-camera__gestures label { flex-basis: 100%; }
     .ai-camera__gestures input { flex: none; }
+    .ai-camera__candidate { flex-basis: 100%; }
     .ai-camera { box-sizing: border-box; padding: 8px; border: 1px solid var(--aily-border-primary, #536479);
       border-radius: 6px; background: var(--aily-bg-secondary, #323437); color: var(--aily-text-primary, #fff);
       font-size: 12px; line-height: 1.5; }
     form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
     header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
     header button { padding: 0 7px; }
+    header button[aria-pressed='true'] { border-color: var(--aily-color-accent, #61afef); }
     input { flex: 1 1 130px; min-width: 0; padding: 5px 7px; border: 1px solid var(--aily-border-input, #777);
       border-radius: 4px; background: var(--aily-bg-primary, #222); color: inherit; }
     button { padding: 5px 8px; border: 1px solid var(--aily-border-input, #777); border-radius: 4px;
@@ -106,11 +119,37 @@ export class AiDeckCameraComponent implements OnChanges, AfterViewInit, OnDestro
   streamUrl = '';
   readable = false;
   errorKey = '';
+  rotation: 0 | 180 = 180;
+  private rotationCanvas: HTMLCanvasElement | null = null;
   private frameTimer: ReturnType<typeof setInterval> | null = null;
   private timeout: ReturnType<typeof setTimeout> | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private proxyUrl = '';
   private proxyEpoch = 0;
+
+  rotateVideo(): void {
+    if (this.gestureState.phase === 'loading' || this.gestureState.phase === 'running' || this.gestureState.authorized) {
+      this.gestureControl.emit('stop');
+    }
+    this.rotation = this.rotation === 0 ? 180 : 0;
+    this.cdr.markForCheck();
+  }
+
+  recognitionFrame(): HTMLImageElement | HTMLCanvasElement {
+    const image = this.image?.nativeElement;
+    if (!this.streamUrl || this.state !== 'connected' || !image?.naturalWidth || !image.naturalHeight) {
+      throw new Error('CAMERA_GESTURE.STALE_VIDEO');
+    }
+    if (this.rotation === 0) return image;
+    const canvas = this.rotationCanvas ??= document.createElement('canvas');
+    if (canvas.width !== image.naturalWidth) canvas.width = image.naturalWidth;
+    if (canvas.height !== image.naturalHeight) canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('CAMERA_GESTURE.PROXY_FAILED');
+    context.setTransform(-1, 0, 0, -1, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0);
+    return canvas;
+  }
 
   async prepareForRecognition(): Promise<HTMLImageElement> {
     if (!this.streamUrl || !this.image) throw new Error('CAMERA_GESTURE.OPEN_FIRST');
@@ -169,7 +208,7 @@ export class AiDeckCameraComponent implements OnChanges, AfterViewInit, OnDestro
       this.disconnect();
       this.address = this.command.address;
     } else if (this.command.type === 'open') {
-      this.connect();
+      this.connect(undefined, false);
     } else {
       this.disconnect();
     }
@@ -180,7 +219,10 @@ export class AiDeckCameraComponent implements OnChanges, AfterViewInit, OnDestro
   }
 
   changeAddress(event: Event): void {
-    if (event.target instanceof HTMLInputElement) this.address = event.target.value;
+    if (event.target instanceof HTMLInputElement) {
+      this.address = event.target.value;
+      this.addressChange.emit(this.address);
+    }
   }
 
   requestAuthorization(event: Event): void {
@@ -194,9 +236,9 @@ export class AiDeckCameraComponent implements OnChanges, AfterViewInit, OnDestro
     this.closed.emit();
   }
 
-  connect(event?: Event): void {
+  connect(event?: Event, readConfiguration = true): void {
     event?.preventDefault();
-    this.connectRequested.emit();
+    if (readConfiguration) this.connectRequested.emit();
     this.disconnect();
     try {
       this.streamUrl = aiDeckStreamUrl(this.address);
@@ -242,6 +284,7 @@ export class AiDeckCameraComponent implements OnChanges, AfterViewInit, OnDestro
       });
     }
     this.readable = false;
+    this.rotationCanvas = null;
     this.clearTimers();
     this.streamUrl = '';
     this.image?.nativeElement.removeAttribute('src');

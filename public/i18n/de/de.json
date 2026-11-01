@@ -53,6 +53,8 @@
         }
     },
     "CAMERA_GESTURE": {
+        "MODEL_CANDIDATE": "Modellkandidat",
+        "PALM_HINT": "Handfläche zur Kamera richten, alle fünf Finger strecken und die eingestellte Zeit halten.",
         "TITLE": "Gestenereignisse", "START": "Erkennung starten", "STOP": "Erkennung stoppen",
         "IDLE": "Gesten deaktiviert", "LOADING": "Lokales Modell wird geladen…", "RUNNING": "Gestenerkennung läuft", "ERROR": "Erkennungsfehler",
         "AUTHORIZE": "Reale Geräteaktionen durch Gesten manuell erlauben",
@@ -75,6 +77,7 @@
         "ACTION_FAILED": "Aktion oder Abbruch fehlgeschlagen. Gerätezustand prüfen."
     },
     "AI_DECK_CAMERA": {
+        "ROTATE_VIDEO": "Video um 180° drehen (auch Erkennung; danach Erkennung neu starten)",
         "ZOOM_IN": "Video vergrößern",
         "ZOOM_OUT": "Video verkleinern",
         "OPEN_VIDEO": "Öffnen",

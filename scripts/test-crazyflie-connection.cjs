@@ -80,6 +80,188 @@ function frontend(api) {
   return { connection, telemetry };
 }
 
+function emergencyHeader(policy = 'real-only') {
+  const file = path.join(root, 'src', 'app', 'main-window', 'components', 'header', 'header.component.ts');
+  const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const component = ast.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'HeaderComponent');
+  const methods = component.members.filter(node =>
+    ['emergencyStopDisabled', 'emergencyStopCrazyflie', 'runSelectedCrazyflieMode'].includes(node.name?.getText(ast)));
+  assert.equal(methods.length, 3);
+  const code = ts.transpileModule(`class Header { ${methods.map(node => node.getText(ast)).join('\n')} }
+    exports.Header = Header;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const exports = {};
+  vm.runInNewContext(code, { exports, Promise, Error });
+  const header = new exports.Header(), calls = [];
+  Object.assign(header, {
+    runtimePolicy: policy, connectionState: { status: 'ready', busy: true }, crazyflieRunInProgress: true,
+    emergencyStopInProgress: false, canShowSimulatorControls: () => true,
+    crazyflieConnectionService: { emergencyStop: async () => { calls.push('packet'); } },
+    crazyflieSimService: { cancelRun: () => { calls.push('sim-stop'); } },
+    cameraGestureService: {
+      cancelProgram: () => calls.push('program-stop'),
+      stop: async () => { calls.push('gesture-stop'); },
+    },
+    message: { warning: text => calls.push(['warning', text]), error: text => calls.push(['error', text]) },
+    cd: { markForCheck() {} },
+  });
+  return { header, calls };
+}
+
+test('actual header emergency button sends before stopping gesture actions, works during runs and never flies in simulation', async () => {
+  for (const policy of ['real-only', 'sim-real']) {
+    const h = emergencyHeader(policy);
+    h.header.cameraGestureService.stop = () => new Promise(() => {});
+    assert.equal(h.header.emergencyStopDisabled, false, 'flight busy cannot disable emergency stop');
+    await h.header.emergencyStopCrazyflie();
+    assert.equal(h.calls[0], 'packet', 'send must not wait for gesture cancellation or the current motion');
+    assert.equal(h.header.emergencyStopInProgress, false);
+  }
+  const sim = emergencyHeader('sim-only');
+  await sim.header.emergencyStopCrazyflie();
+  assert.ok(sim.calls.includes('sim-stop'));
+  assert.ok(!sim.calls.includes('packet'));
+  const idle = emergencyHeader();
+  idle.header.connectionState.status = 'disconnected';
+  assert.equal(idle.header.emergencyStopDisabled, true);
+  await idle.header.emergencyStopCrazyflie();
+  assert.ok(!idle.calls.includes('packet'));
+  const failed = emergencyHeader();
+  failed.header.crazyflieConnectionService.emergencyStop = async () => { throw new Error('Radio write failed'); };
+  await failed.header.emergencyStopCrazyflie();
+  assert.ok(failed.calls.some(call => Array.isArray(call) && call[0] === 'error' && call[1] === 'Radio write failed'));
+  assert.equal(failed.header.emergencyStopInProgress, false);
+  failed.header.crazyflieRunInProgress = false;
+  failed.header.connectionState.emergencyStopped = true;
+  failed.header.runCrazyflieRealFlight = () => assert.fail('cannot resume after emergency');
+  await failed.header.runSelectedCrazyflieMode();
+});
+
+test('emergency toolbar is a native button outside the scrolling controls and the actual preload invokes its dedicated IPC', async () => {
+  const folder = path.join(root, 'src', 'app', 'main-window', 'components', 'header');
+  const { parseTemplate } = await import('@angular/compiler');
+  const template = parseTemplate(fs.readFileSync(path.join(folder, 'header.component.html'), 'utf8'), 'header.component.html');
+  assert.equal(template.errors, null);
+  let emergency;
+  function visit(nodes, scrolling = false) {
+    for (const node of nodes) {
+      const classes = node.attributes?.find(attribute => attribute.name === 'class')?.value.split(' ') || [];
+      const inside = scrolling || classes.includes('cf-flight-controls');
+      if (classes.includes('cf-emergency-stop')) {
+        emergency = node;
+        assert.equal(node.name, 'button');
+        assert.equal(inside, false, 'emergency cannot be hidden in the horizontal scroll area');
+      }
+      if (node.children) visit(node.children, inside);
+      if (node.branches) visit(node.branches, inside);
+    }
+  }
+  visit(template.nodes);
+  assert.ok(emergency);
+  assert.equal(emergency.inputs.find(input => input.name === 'disabled').value.source, 'emergencyStopDisabled');
+  assert.equal(emergency.outputs.find(output => output.name === 'click').handler.source, 'emergencyStopCrazyflie()');
+  assert.match(emergency.attributes.find(attribute => attribute.name === 'aria-label').value, /不是降落/);
+  const preload = fs.readFileSync(path.join(root, 'electron', 'preload.js'), 'utf8');
+  const ast = ts.createSourceFile('preload.js', preload, ts.ScriptTarget.Latest, true);
+  let wrapper;
+  function find(node) {
+    if (ts.isPropertyAssignment(node) && node.name.getText(ast) === 'emergencyStop') wrapper = node.initializer.getText(ast);
+    ts.forEachChild(node, find);
+  }
+  find(ast);
+  assert.ok(wrapper);
+  const calls = [];
+  const invoke = vm.runInNewContext(`(${wrapper})`, { ipcRenderer: {
+    invoke: async (...args) => { calls.push(args); return { success: true }; },
+  } });
+  assert.equal((await invoke()).success, true);
+  assert.deepEqual(calls, [['crazyflie-emergency-stop']]);
+});
+
+test('connection emergency uses the existing busy connection, blocks readiness, preserves failures and never auto-connects', async () => {
+  let stateEvent, telemetryEvent, sent = 0, fail = false;
+  const { connection } = frontend({
+    connect: async () => assert.fail('emergency cannot connect'),
+    disconnect: async () => assert.fail('emergency cannot disconnect'),
+    listInterfaces: async () => assert.fail('emergency cannot scan'),
+    getConnectionState: async () => ({ status: 'disconnected' }),
+    onConnection: callback => { stateEvent = callback; return () => {}; },
+    onTelemetry: callback => { telemetryEvent = callback; return () => {}; },
+    onAttitude: () => () => {},
+    emergencyStop: async () => { sent++; return { success: !fail, message: 'Send failed' }; },
+  });
+  await tick();
+  await assert.rejects(connection.emergencyStop(), /请先连接/);
+  assert.equal(sent, 0);
+  stateEvent({ status: 'ready', busy: true });
+  await connection.emergencyStop();
+  assert.equal(sent, 1);
+  assert.equal(connection.state$.value.busy, true, 'sending an emergency packet does not finish the pending motion');
+  telemetryEvent({ flightReadiness: { source: 'supervisor', value: 8 } });
+  assert.equal(connection.flightReadiness$.value.status, 'blocked');
+  fail = true;
+  await assert.rejects(connection.emergencyStop(), /Send failed/);
+  stateEvent({ status: 'disconnected' });
+  stateEvent({ status: 'ready' });
+  telemetryEvent({ flightReadiness: { source: 'supervisor', value: 8 } });
+  assert.equal(connection.flightReadiness$.value.status, 'ready');
+  connection.ngOnDestroy();
+});
+
+test('Python emergency dispatch uses supervisor or legacy localization immediately and latches cancellation without landing or arming', () => {
+  const result = spawnSync('py', ['-3', '-B', '-c', `
+import io, json, sys, types
+from pathlib import Path
+from threading import Event
+sys.path.insert(0, str(Path('child') / 'scripts'))
+import crazyflie_session as session
+for name in ('supervisor', 'loc'):
+    calls, stop = [], Event()
+    control = session.EmergencyStopControl(stop)
+    cf = types.SimpleNamespace(**{name: types.SimpleNamespace(send_emergency_stop=lambda: calls.append('emergency'))})
+    with control.connected(cf):
+        control.request()
+        assert calls == ['emergency'] and control.requested.is_set() and stop.is_set()
+    try: control.request()
+    except RuntimeError as error: assert 'Connect' in str(error)
+    else: raise AssertionError('Disconnected emergency accepted')
+for api in (types.SimpleNamespace(), types.SimpleNamespace(supervisor=types.SimpleNamespace(
+        send_emergency_stop=lambda: (_ for _ in ()).throw(OSError('radio write failed'))))):
+    stop, control = Event(), None
+    control = session.EmergencyStopControl(stop)
+    with control.connected(api):
+        try: control.request()
+        except (RuntimeError, OSError): pass
+        else: raise AssertionError('Missing/broken emergency API accepted')
+        assert stop.is_set() and control.requested.is_set(), 'failure cannot resume remaining commands'
+ready, sent, done = Event(), Event(), Event()
+class Input:
+    def __iter__(self):
+        assert ready.wait(2)
+        yield '{"id":7,"action":"emergency-stop"}\\n'
+        assert done.wait(2)
+def blocked_flight(uri, address, emit, requests, stop, shutdown, mapping, emergency):
+    with emergency.connected(types.SimpleNamespace(supervisor=types.SimpleNamespace(send_emergency_stop=sent.set))):
+        ready.set()
+        try:
+            assert sent.wait(2), 'emergency reader blocked behind the flight'
+            assert requests.empty(), 'emergency was queued as a normal flight'
+            assert stop.is_set() and emergency.requested.is_set()
+        finally: done.set()
+cflib = sys.modules['cflib'] = types.ModuleType('cflib')
+cflib.crtp = sys.modules['cflib.crtp'] = types.ModuleType('cflib.crtp')
+session._append_cflib_path = lambda hint: 'mock'
+session.serve = blocked_flight
+sys.stdin = Input()
+sys.argv = ['session', '--uri', 'radio://mock', '--address-hex', 'E7E7E7E7E7']
+output = io.StringIO()
+from contextlib import redirect_stdout
+with redirect_stdout(output): assert session.main() == 0
+messages = [json.loads(line) for line in output.getvalue().splitlines()]
+assert any(m.get('id') == 7 and m['result']['success'] for m in messages), messages
+`], { cwd: root, encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test('mapping bridge requires an existing connection, validates samples, reports bad data and invalidates on disconnect', async () => {
   const callbacks = {};
   const controls = [];
@@ -411,6 +593,34 @@ test('mapping control and samples share the worker during flight without cancell
   h.close(0);
   assert.equal(h.launches, 1);
   assert.equal(h.kills, 0);
+});
+
+test('worker emergency sends a distinct command during a pending flight without cancelling by queue, spawning or completing the flight', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = workerAdapter();
+  h.emit({ type: 'state', state: 'ready' });
+  await h.worker.ready;
+  const run = h.worker.request('run', { code: 'cf_takeoff()', timeoutMs: 20000 });
+  await tick();
+  const flightRequest = JSON.parse(h.input());
+  const emergency = h.worker.request('emergency-stop');
+  await tick();
+  const request = JSON.parse(h.input());
+  assert.equal(request.action, 'emergency-stop');
+  h.emit({ type: 'result', id: request.id, result: { success: true } });
+  assert.equal((await emergency).success, true);
+  assert.equal(h.worker.running, true);
+  assert.equal(h.launches, 1);
+  const timeout = h.worker.request('emergency-stop');
+  await tick();
+  assert.equal(JSON.parse(h.input()).action, 'emergency-stop');
+  t.mock.timers.tick(3001);
+  assert.match((await timeout).message, /not verified/);
+  assert.equal(h.worker.running, true);
+  assert.equal(h.kills, 0);
+  h.emit({ type: 'result', id: flightRequest.id, result: { success: false } });
+  await run;
+  h.close(0);
 });
 
 test('a mapping timeout reports failure without cancelling, disconnecting or finishing an active flight', async t => {

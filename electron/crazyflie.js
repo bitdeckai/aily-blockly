@@ -638,6 +638,7 @@ function registerCrazyflieHandlers() {
       if (owner.sender.id !== event.sender.id || owner.connection.uri !== connection.uri) {
         throw new Error("A different aircraft or wireless transceiver is connected; disconnect it before changing");
       }
+      if (owner.emergencyStopped) throw new Error("Emergency stop is latched; safely power cycle and reconnect before flying");
       await owner.worker.ready;
       return owner;
     }
@@ -669,7 +670,7 @@ function registerCrazyflieHandlers() {
           current.status = payload.state === "flow" ? "ready" : payload.state;
           send(current.sender, "crazyflie-connection", {
             ...connection, status: payload.state === "flow" ? "ready" : payload.state,
-            busy: payload.state === "flow", message: payload.message,
+            busy: payload.state === "flow", message: payload.message, emergencyStopped: !!current.emergencyStopped,
           });
         } else if (payload.type === "telemetry") {
           send(current.sender, "crazyflie-telemetry", payload.payload);
@@ -744,8 +745,20 @@ function registerCrazyflieHandlers() {
     return { success: true };
   });
   ipcMain.handle("crazyflie-connection-state", event => owner?.sender.id === event.sender.id
-    ? { ...owner.connection, status: owner.status, busy: owner.worker.running }
+    ? { ...owner.connection, status: owner.status, busy: owner.worker.running, emergencyStopped: !!owner.emergencyStopped }
     : { status: "disconnected" });
+  ipcMain.handle("crazyflie-emergency-stop", async event => {
+    if (!owner || owner.sender.id !== event.sender.id || owner.status !== "ready") {
+      return failure(new Error("Connect this window to the aircraft before requesting emergency stop"));
+    }
+    const current = owner;
+    current.emergencyStopped = true;
+    if (operation?.senderId === event.sender.id && operation.action === "flow") operation.cancelled = true;
+    send(current.sender, "crazyflie-connection", { ...current.connection, status: current.status,
+      busy: current.worker.running, emergencyStopped: true });
+    try { return await current.worker.request("emergency-stop"); }
+    catch (error) { return failure(error); }
+  });
   ipcMain.handle("crazyflie-start-attitude", async (event, options = {}) => {
     if (owner?.sender.id === event.sender.id && operation?.action === "flow") {
       return { success: false, message: "Enable idle attitude display after the flight finishes" };

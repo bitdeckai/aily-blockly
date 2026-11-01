@@ -740,6 +740,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
      */
     runFlow: (options) => ipcRenderer.invoke("crazyflie-run-flow", options || {}),
     cancelFlow: () => ipcRenderer.invoke("crazyflie-cancel-flow"),
+    emergencyStop: () => ipcRenderer.invoke("crazyflie-emergency-stop"),
     startAttitude: (options) => ipcRenderer.invoke("crazyflie-start-attitude", options || {}),
     stopAttitude: () => ipcRenderer.invoke("crazyflie-stop-attitude"),
     setMapping: (enabled) => ipcRenderer.invoke("crazyflie-mapping-control", { enabled }),

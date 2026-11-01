@@ -391,7 +391,7 @@ test('actual Python pipe -> Electron message path sustains at least 15 Hz for a 
 test('Electron retains one real connection across button, blocks and flights with stable radio identity', async () => {
   const filename = path.join(root, 'electron', 'crazyflie.js');
   const handlers = new Map();
-  let startCount = 0, stopCount = 0, cancellations = 0;
+  let startCount = 0, stopCount = 0, cancellations = 0, emergencyStops = 0;
   let config;
   let finishFlow;
   let active = false;
@@ -416,6 +416,7 @@ test('Electron retains one real connection across button, blocks and flights wit
         return {
           ready, get running() { return active; },
           request: async (action, opts) => {
+            if (action === 'emergency-stop') { emergencyStops++; return { success: true }; }
             if (action === 'observe') return { success: true };
             assert.equal(action, 'run');
             assert.ok(opts.code.includes('cf_motion'), opts.code);
@@ -462,6 +463,7 @@ test('Electron retains one real connection across button, blocks and flights wit
   sender.send = (channel, payload) => messages.push({ channel, payload });
   const event = { sender };
   const opts = { uri: 'radio://1/80/2M', addressHex: 'E7E7E7E7E7', explicitRadio: true };
+  assert.equal((await handlers.get('crazyflie-emergency-stop')(event)).success, false, 'emergency cannot auto-connect');
   assert.equal((await handlers.get('crazyflie-connect')(event, { ...opts, uri: 'invalid' })).success, false);
   assert.equal((await handlers.get('crazyflie-connect')(event, { uri: 'radio://0/80/2M' })).success, false,
     'multiple USB devices require a deliberate selection');
@@ -549,7 +551,23 @@ test('Electron retains one real connection across button, blocks and flights wit
   assert.ok(messages.some(item => item.channel === 'crazyflie-flow-log' && item.payload.line === '__STEP__:3/4:motion:takeoff'));
   await handlers.get('crazyflie-disconnect')(event);
   assert.equal(sender.listenerCount('destroyed'), 0);
-  assert.equal(sender.listenerCount('destroyed'), 0);
+  await handlers.get('crazyflie-connect')(event, opts);
+  const emergencyFlight = handlers.get('crazyflie-run-flow')(event, { ...opts, code });
+  await tick();
+  await tick();
+  const startsBeforeEmergency = startCount;
+  assert.equal((await handlers.get('crazyflie-emergency-stop')({ sender: { id: 2 } })).success, false);
+  assert.equal(emergencyStops, 0);
+  assert.equal((await handlers.get('crazyflie-emergency-stop')(event)).success, true, 'emergency bypasses busy flight gate');
+  assert.equal(emergencyStops, 1);
+  assert.equal(active, true, 'emergency acknowledgement must not pretend the blocking worker motion finished');
+  assert.equal(startCount, startsBeforeEmergency);
+  assert.equal(handlers.get('crazyflie-connection-state')(event).emergencyStopped, true);
+  finishFlow({ success: false, executed: [] });
+  await emergencyFlight;
+  assert.equal((await handlers.get('crazyflie-run-flow')(event, { ...opts, code })).success, false);
+  assert.equal(emergencyStops, 1);
+  await handlers.get('crazyflie-disconnect')(event);
 });
 
 test('classroom uses natural wood finishes without loose books or extra cabinets', () => {

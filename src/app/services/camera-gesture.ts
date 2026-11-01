@@ -31,27 +31,48 @@ function jointAngle(a: CameraHandPoint, b: CameraHandPoint, c: CameraHandPoint):
     ((a.x - b.x) * (c.x - b.x) + (a.y - b.y) * (c.y - b.y) + (a.z - b.z) * (c.z - b.z)) / (ab * bc)))) * 180 / Math.PI;
 }
 
+function extendedFinger(hand: readonly CameraHandPoint[], mcp: number): boolean {
+  return jointAngle(hand[mcp], hand[mcp + 1], hand[mcp + 2]) >= 155
+    && jointAngle(hand[mcp + 1], hand[mcp + 2], hand[mcp + 3]) >= 150
+    && distance(hand[mcp], hand[mcp + 3]) >= distance(hand[mcp], hand[mcp + 1]) * 1.4;
+}
+
+function openPalm(hand: readonly CameraHandPoint[]): boolean {
+  const scale = distance(hand[5], hand[17]);
+  return scale > 1e-4 && [5, 9, 13, 17].every(mcp => extendedFinger(hand, mcp))
+    && jointAngle(hand[2], hand[3], hand[4]) >= 150
+    && distance(hand[2], hand[4]) >= distance(hand[2], hand[3]) * 1.4
+    && distance(hand[4], hand[5]) >= scale * 0.7 && distance(hand[4], hand[8]) >= scale * 0.6;
+}
+
+export function cameraGestureModelCandidate(frame: CameraGestureFrame): { gesture: CameraGesture; confidence: number } | null {
+  const category = frame.gestures.length === 1 && frame.landmarks?.length === 1 ? frame.gestures[0][0] : null;
+  return category && Number.isFinite(category.score) && category.score >= 0 && category.score <= 1
+    && isCameraGesture(category.categoryName) && !isCameraSwipe(category.categoryName) && category.categoryName !== 'OK'
+    ? { gesture: category.categoryName, confidence: category.score } : null;
+}
+
 export function recognizeCameraStaticGesture(frame: CameraGestureFrame): CameraGesture | null {
   if (frame.gestures.length !== 1 || frame.landmarks?.length !== 1) return null;
   const imageHand = frame.landmarks?.[0];
   if (!completeHand(imageHand) || imageHand.some(point => point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1)) return null;
+  const candidate = cameraGestureModelCandidate(frame);
   const hand = completeHand(frame.worldLandmarks?.[0]) ? frame.worldLandmarks![0] : imageHand;
+  // Reconstructed depth can bend straight fingers; one coordinate set must confirm all five.
+  if (candidate?.gesture === 'Open_Palm' && candidate.confidence >= 0.7
+    && (openPalm(hand) || (hand !== imageHand && openPalm(imageHand)))) return 'Open_Palm';
   if (completeHand(hand)) {
     const scale = distance(hand[5], hand[17]);
     if (scale > 1e-4) {
-      const extended = (mcp: number) => jointAngle(hand[mcp], hand[mcp + 1], hand[mcp + 2]) >= 155
-        && jointAngle(hand[mcp + 1], hand[mcp + 2], hand[mcp + 3]) >= 150
-        && distance(hand[mcp], hand[mcp + 3]) >= distance(hand[mcp], hand[mcp + 1]) * 1.4;
-      const index = extended(5), middle = extended(9), ring = extended(13), pinky = extended(17);
+      const index = extendedFinger(hand, 5), middle = extendedFinger(hand, 9),
+        ring = extendedFinger(hand, 13), pinky = extendedFinger(hand, 17);
       if (!index && middle && ring && pinky && distance(hand[4], hand[8]) <= scale * 0.25
         && distance(hand[8], hand[5]) > scale * 0.25) return 'OK';
       // The existing identifier also accepts the one-finger pose when the hand is rotated.
       if (index && !middle && !ring && !pinky && distance(hand[4], hand[5]) < scale * 0.8) return 'Pointing_Up';
     }
   }
-  const category = frame.gestures[0][0];
-  return category && category.score >= 0.85 && isCameraGesture(category.categoryName)
-    && !isCameraSwipe(category.categoryName) && category.categoryName !== 'OK' ? category.categoryName : null;
+  return candidate && candidate.confidence >= 0.85 ? candidate.gesture : null;
 }
 
 export class CameraPalmSwipe {
@@ -137,9 +158,11 @@ export interface CameraGestureState {
   authorized: boolean;
   realMode: boolean;
   error: string;
+  modelCandidate?: { gesture: CameraGesture; confidence: number } | null;
 }
 export interface CameraFrameSource {
   prepareForRecognition(): Promise<HTMLImageElement>;
+  recognitionFrame(): HTMLImageElement | HTMLCanvasElement;
   frameIsFresh(): Promise<boolean>;
   recognitionAssetRoot(): string;
 }

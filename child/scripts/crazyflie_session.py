@@ -11,6 +11,38 @@ from threading import Event, Lock, Thread, get_ident
 from crazyflie_run_flow import _append_cflib_path, parse_commands, run_flow
 
 
+class EmergencyStopControl:
+    def __init__(self, stop):
+        self.stop = stop
+        self.requested = Event()
+        self._lock = Lock()
+        self._cf = None
+
+    @contextmanager
+    def connected(self, cf):
+        with self._lock:
+            self._cf = cf
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._cf = None
+
+    def request(self):
+        # This runs on the control reader, not behind a blocking flight action.
+        with self._lock:
+            if self._cf is None:
+                raise RuntimeError("Connect the aircraft before requesting emergency stop")
+            self.requested.set()
+            self.stop.set()
+            send = getattr(getattr(self._cf, "supervisor", None), "send_emergency_stop", None)
+            if not callable(send):
+                send = getattr(getattr(self._cf, "loc", None), "send_emergency_stop", None)
+            if not callable(send):
+                raise RuntimeError("cflib emergency-stop API is unavailable; update the desktop application")
+            send()
+
+
 @contextmanager
 def connection_telemetry(scf, log_config_class, emit, failed):
     config = log_config_class("AilyConnection", 500)
@@ -111,7 +143,7 @@ def connection_telemetry(scf, log_config_class, emit, failed):
                 callback.remove_callback(handler)
 
 
-def serve(uri, address, emit, requests, stop, shutdown, mapping_requests=None):
+def serve(uri, address, emit, requests, stop, shutdown, mapping_requests=None, emergency=None):
     import cflib.crtp
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
     from cflib.crazyflie.log import LogConfig
@@ -119,6 +151,7 @@ def serve(uri, address, emit, requests, stop, shutdown, mapping_requests=None):
     from crazyflie_mapping import mapping_control
 
     errors = []
+    emergency = emergency or EmergencyStopControl(stop)
 
     def failed(message):
         if not errors:
@@ -134,7 +167,7 @@ def serve(uri, address, emit, requests, stop, shutdown, mapping_requests=None):
     if shutdown.is_set():
         return
     cflib.crtp.init_drivers()
-    with SyncCrazyflie(uri) as scf:
+    with SyncCrazyflie(uri) as scf, emergency.connected(scf.cf):
         if shutdown.is_set():
             return
         with connection_telemetry(scf, LogConfig, emit, failed) as telemetry_healthy, (
@@ -185,6 +218,8 @@ def serve(uri, address, emit, requests, stop, shutdown, mapping_requests=None):
                                 observer = start_observer()
                             result = {"success": True}
                         elif action == "run":
+                            if emergency.requested.is_set():
+                                raise RuntimeError("Emergency stop is latched; safely power cycle and reconnect before flying")
                             stop_observer()
                             commands = parse_commands(request.get("code", ""))
                             if not commands:
@@ -209,7 +244,8 @@ def serve(uri, address, emit, requests, stop, shutdown, mapping_requests=None):
                             resume_observer()
                     emit({"type": "result", "id": request_id, "result": result})
                     if not shutdown.is_set():
-                        stop.clear()
+                        if not emergency.requested.is_set():
+                            stop.clear()
                         emit({"type": "state", "state": "ready", "uri": uri, "addressHex": address})
             finally:
                 stop_observer()
@@ -248,6 +284,7 @@ def main():
 
     requests, mapping_requests = queue.Queue(), queue.Queue()
     stop, shutdown = Event(), Event()
+    emergency = EmergencyStopControl(stop)
 
     def read_control():
         try:
@@ -257,6 +294,13 @@ def main():
                     raise ValueError("Invalid session request")
                 if request.get("action") == "cancel":
                     stop.set()
+                elif type(request.get("id")) is int and request.get("action") == "emergency-stop":
+                    try:
+                        emergency.request()
+                        result = {"success": True, "message": "Emergency stop packet sent; motor stop is not verified"}
+                    except Exception as error:
+                        result = {"success": False, "message": str(error)}
+                    emit({"type": "result", "id": request["id"], "result": result})
                 elif request.get("action") == "shutdown":
                     shutdown.set()
                     stop.set()
@@ -291,7 +335,7 @@ def main():
         import cflib.crtp
         Thread(target=read_control, daemon=True).start()
         with redirect_stdout(Logs()):
-            serve(args.uri, args.address_hex, emit, requests, stop, shutdown, mapping_requests)
+            serve(args.uri, args.address_hex, emit, requests, stop, shutdown, mapping_requests, emergency)
         emit({"type": "state", "state": "disconnected", "message": "Connection closed"})
         return 0
     except Exception as error:

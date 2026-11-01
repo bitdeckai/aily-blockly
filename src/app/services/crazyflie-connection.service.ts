@@ -13,6 +13,7 @@ export interface CrazyflieConnectionState {
   message: string;
   updatedAt: number | null;
   busy?: boolean;
+  emergencyStopped?: boolean;
   uri?: string;
   addressHex?: string;
   radioSerial?: string;
@@ -42,6 +43,7 @@ interface ConnectionApi {
   onTelemetry(callback: (state: ConnectionTelemetry) => void): () => void;
   onAttitude(callback: (event: AttitudeEvent) => void): () => void;
   setMapping?(enabled: boolean): Promise<ConnectionResult>;
+  emergencyStop?(): Promise<ConnectionResult>;
   onMapping?(callback: (event: unknown) => void): () => void;
 }
 function connectionApi(): ConnectionApi | undefined {
@@ -128,6 +130,16 @@ export class CrazyflieConnectionService implements OnDestroy {
     if (!result.success) throw new Error(result.message || '测距建图采集切换失败');
   }
 
+  async emergencyStop(): Promise<void> {
+    const api = connectionApi();
+    if (!api?.emergencyStop) throw new Error('未找到急停接口，请重启桌面应用');
+    if (this.state$.value.status !== 'ready') throw new Error('请先连接飞行器；急停不会自动连接');
+    const request = api.emergencyStop();
+    this.receiveState({ ...this.state$.value, emergencyStopped: true });
+    const result = await request;
+    if (!result.success) throw new Error(result.message || '急停发送失败，尚未确认电机停止');
+  }
+
   private clearReadiness(message = '连接未就绪，无法确认固件是否允许起飞'): void {
     if (this.readinessTimer !== null) clearTimeout(this.readinessTimer);
     this.readinessTimer = null;
@@ -135,6 +147,12 @@ export class CrazyflieConnectionService implements OnDestroy {
   }
 
   private receiveReadiness(payload: unknown): void {
+    if (this.state$.value.emergencyStopped) {
+      this.clearReadiness();
+      this.flightReadiness$.next({ status: 'blocked', label: '已请求急停',
+        message: '已请求急停，不代表已确认电机停止。确认安全后断电重启并重新连接；不会自动解锁或重新起飞' });
+      return;
+    }
     if (typeof payload === 'object' && payload !== null && 'source' in payload) {
       if (payload.source === 'unavailable') {
         this.clearReadiness('当前固件未提供可飞状态；无线已连接不代表允许起飞');
@@ -225,10 +243,12 @@ export class CrazyflieConnectionService implements OnDestroy {
       this.clearReadiness();
     }
     const identity = state.radioSerial ? `无线收发器 ${state.radioIndex} · ${state.radioSerial}` : 'Crazyflie';
-    const message = state.status === 'ready'
+    const message = state.emergencyStopped ? '已请求急停；确认电机停止，安全断电重启后重新连接'
+      : state.status === 'ready'
       ? `${identity} → ${state.uri}（${state.busy ? '执行中' : '已连接'}）`
       : state.message || (state.status === 'checking' ? '正在连接飞行器…' : '飞行器已断开');
     this.state$.next({ ...state, message, updatedAt: Date.now() });
+    if (state.emergencyStopped) this.receiveReadiness(null);
     if (state.radioSerial) this.selectedRadioSerial = state.radioSerial;
     if (!['ready', 'checking'].includes(state.status)) {
       this.telemetry.clear();

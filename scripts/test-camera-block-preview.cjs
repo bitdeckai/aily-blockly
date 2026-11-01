@@ -13,7 +13,7 @@ function harness() {
   const timers = new Map(), warnings = [], errors = [], changes = new Set(), views = [];
   let nextTimer = 0, mount;
   class Emitter extends Subject { emit(value) { this.next(value); } }
-  class Input { constructor(checked) { this.checked = checked; } }
+  class Input { constructor(checked, value = '') { this.checked = checked; this.value = value; } }
   const core = {
     Component: () => value => value, Injectable: () => value => value,
     Input: () => () => {}, Output: () => () => {}, ViewChild: () => () => {}, EventEmitter: Emitter,
@@ -31,7 +31,7 @@ function harness() {
       require: name => {
         if (name === '@angular/core') return core;
         if (name === 'rxjs') return require(name);
-        if (name === 'blockly') return { Events: { BLOCK_CHANGE: 'change' } };
+        if (name === 'blockly') return { Events: { BLOCK_CHANGE: 'change', BLOCK_MOVE: 'move' } };
         if (name.endsWith('/ai-deck-camera')) return protocol;
         if (name.endsWith('/field-camera-preview')) return {
           bindCameraPreviewWorkspace(workspace, callback) {
@@ -67,7 +67,7 @@ function harness() {
     return view;
   }, key => errors.push(key));
   function add(id, previous = null) {
-    const block = { id, getPreviousBlock: () => previous };
+    const block = { id, previous, getPreviousBlock: () => block.previous };
     const field = {
       width: 320, height: 0,
       getSourceBlock: () => block,
@@ -76,7 +76,7 @@ function harness() {
       setPreviewHeight(height) { this.height = height; },
     };
     const unmount = mount(field, {});
-    return { field, view: views.at(-1), camera: views.at(-1).instance, unmount };
+    return { field, block, view: views.at(-1), camera: views.at(-1).instance, unmount };
   }
   return { bridge, service, add, timers, warnings, errors, views, changes, Input };
 }
@@ -147,6 +147,55 @@ test('manual opening reads a preceding literal configuration and only one block 
   second.camera.closed.emit();
   assert.equal(second.camera.streamUrl, '');
   assert.equal(h.timers.size, 0);
+  h.bridge.dispose();
+});
+
+test('preview addresses follow their own literal configuration on mount, text edits, moves and reconnect', () => {
+  const h = harness();
+  const literal = value => {
+    const text = { type: 'text', value, getFieldValue: () => text.value,
+      setFieldValue: value => { text.value = value; } };
+    return { type: 'cf_ai_deck_config', text, getInputTargetBlock: () => text };
+  };
+  h.service.address$.next('192.168.3');
+  const config = literal('192.168.3.156'), otherConfig = literal('192.168.4.2');
+  const first = h.add('one', config), second = h.add('two', otherConfig);
+  assert.equal(first.camera.address, '192.168.3.156', 'a stale session address cannot override the project');
+  assert.equal(second.camera.address, '192.168.4.2');
+  config.text.value = '192.168.3.157';
+  for (const change of h.changes) change({ type: 'change' });
+  assert.equal(first.camera.address, '192.168.3.157');
+  assert.equal(second.camera.address, '192.168.4.2');
+  first.camera.changeAddress({ target: new h.Input(false, '192.168.3.158') });
+  assert.equal(config.text.value, '192.168.3.158', 'manual editing updates the saved configuration too');
+  assert.equal(second.camera.address, '192.168.4.2', 'another configuration must not be overwritten');
+  first.camera.connect();
+  config.text.value = '192.168.3.159';
+  for (const change of h.changes) change({ type: 'change' });
+  assert.equal(first.camera.streamUrl, '', 'changing an active target closes it without reconnecting');
+  assert.equal(first.camera.address, '192.168.3.159');
+  first.block.previous = otherConfig;
+  for (const change of h.changes) change({ type: 'move' });
+  assert.equal(first.camera.address, '192.168.4.2');
+  first.camera.address = '192.168.3';
+  first.camera.connect();
+  assert.equal(first.camera.streamUrl, 'http://192.168.4.2/stream');
+  h.bridge.dispose();
+});
+
+test('a nearest variable configuration is never replaced by an older literal, and runtime values stay authoritative', () => {
+  const h = harness();
+  const older = { type: 'cf_ai_deck_config', getInputTargetBlock: () =>
+    ({ type: 'text', getFieldValue: () => '192.168.4.99' }) };
+  const variable = { type: 'cf_ai_deck_config', getInputTargetBlock: () => ({ type: 'variables_get' }),
+    getPreviousBlock: () => older };
+  const preview = h.add('dynamic', variable);
+  h.service.execute({ type: 'configure', address: '192.168.4.5' });
+  h.service.previewBlockId = 'dynamic';
+  h.service.execute({ type: 'open' });
+  assert.equal(preview.camera.address, '192.168.4.5');
+  assert.equal(preview.camera.streamUrl, 'http://192.168.4.5/stream');
+  assert.equal(h.errors.length, 0);
   h.bridge.dispose();
 });
 
